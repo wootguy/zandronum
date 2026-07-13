@@ -495,7 +495,7 @@ public:
 	void		PostEvent( BOTEVENT_e Event );
 
 	// Parse the bot's script.
-	void		ParseScript( void );
+	virtual void ParseScript( void );
 
 	// Parse a section of the bot's script.
 	void		GetStatePositions( void );
@@ -595,7 +595,7 @@ public:
 	// What's the last medal we received?
 	LONG			m_lLastMedalReceived;
 
-private:
+protected:
 	//*************************************************************************
 
 	// Points back to the reference player.
