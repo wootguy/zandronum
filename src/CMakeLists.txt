@@ -1072,6 +1072,7 @@ add_executable( zdoom WIN32
 	botpath.cpp #ST
 	bots.cpp #ST
 	wbot/wbot.h wbot/wbot.cpp
+	wbot/wnav.h wbot/wnav.cpp
 	browser.cpp #ST
 	callvote.cpp #ST
 	campaign.cpp #ST
@@ -1626,7 +1627,7 @@ source_group("Source Files" FILES ${CMAKE_CURRENT_BINARY_DIR}/sc_man_scanner.h s
 
 # [BB] Zandronum specific source groups
 source_group("Bots" FILES astar.cpp astar.h REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/bot.+")
-source_group("Bots\\woop" FILES wbot/wbot.cpp wbot/wbot.h)
+source_group("Bots\\woop" FILES wbot/wbot.cpp wbot/wbot.h wbot/wnav.h wbot/wnav.cpp)
 source_group("Network\\Client" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/cl_.+")
 source_group("Network\\Misc" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/network.+")
 source_group("Network\\Server" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/sv_.+")

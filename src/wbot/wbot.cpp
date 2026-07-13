@@ -6,44 +6,86 @@
 #include "d_event.h"
 #include "p_enemy.h"
 #include "p_local.h"
+#include "po_man.h"
+#include "wnav.h"
+#include "p_trace.h"
 
 #include <stdlib.h>
 #include <time.h>
+#include <unordered_set>
+#include <unordered_map>
+#include <string>
+
+using namespace std;
 
 #define RUN_SPEED 100 // max move speed allowed before the server kicks you
+#define MAX_NODE_LINKS 16
 
 extern FRandom g_RandomBotAimSeed;
 
-void CWootBot::draw_debug_line(FVector3 start, FVector3 end) {
-	// this sucks and the railgun effect crashes the client so can't use that
-	FVector3 dir = (end - start).Resize(10 << FRACBITS);
-	int spawns = (end - start).Length() / (10 << FRACBITS);
-	for (int i = 0; i < spawns; i++) {
-		FVector3 pos = start + (dir * i);
-		if (i == spawns - 1) {
-			pos = end;
-		}
-		SERVERCOMMANDS_SpawnBlood(pos.X, pos.Y, pos.Z, 0, 1, m_pPlayer->mo);
+char* VarArgs(const char* format, ...)
+{
+	va_list		argptr;
+	static char		string[1024];
+
+	va_start(argptr, format);
+	vsnprintf(string, 1024, format, argptr);
+	va_end(argptr);
+
+	return string;
+}
+
+void init_wootbots() {
+	static int lastInit;
+	if (lastInit != level.levelnum) {
+		lastInit = level.levelnum;
+
+		srand((unsigned int)time(NULL));
+
+		g_wbot_nav.generate_node_graph();
 	}
+}
+
+AActor* getAnyPlayer() {
+	AActor* player = NULL;
+	for (int i = 0; i < MAXPLAYERS; i++)
+	{
+		if (!playeringame[i])
+			continue;
+
+		AActor* actor = players[i].mo;
+		if (!actor || actor->player->bIsBot)
+			continue;
+		
+		return actor;
+	}
+
+	return NULL;
 }
 
 CWootBot::CWootBot(const char* pszName, const char* pszTeamName, ULONG ulPlayerNum)
 	: CSkullBot(pszName, pszTeamName, ulPlayerNum) {
-
-	static bool seedRand = false;
-	if (!seedRand) {
-		seedRand = true;
-		srand((unsigned int)time(NULL));
-	}
-
+	
 	m_fov = ANGLE_180;
-
 	m_bForwardMovePersist = true;
 	m_bSideMovePersist = true;
+	m_debug = true;
 }
 CWootBot::~CWootBot() {}
 
 void CWootBot::ParseScript() {
+	init_wootbots();
+
+	// level changed
+	if (lastInit != level.levelnum) {
+		lastInit = level.levelnum;
+		m_route.clear();
+	}
+
+	if (m_debug) {
+		ShowDebugInfo();
+	}
+
 	if (m_pPlayer->health <= 0) {
 		DeadThink();
 		return;
@@ -57,12 +99,52 @@ void CWootBot::ParseScript() {
 		CombatThink();
 	}
 	else {
-		RoamThink();
+		if (m_route.empty()) {
+			FindMoveGoal();
+		}
+
+		if (m_route.empty()) {
+			IdleThink();
+		}
+		else {
+			RouteThink();
+		}
 	}
 
 	m_lForwardMove = static_cast<LONG>(0x32 * (m_forwardMove / 100.0f));
 	m_lSideMove = static_cast<LONG>(0x32 * (m_sideMove / 100.0f));
 }
+
+void CWootBot::ShowDebugInfo() {
+	g_wbot_nav.draw_nodes(m_pPlayer->mo);
+
+	int thisSubId = g_wbot_nav.get_nav_id(m_pPlayer->mo);
+
+	string routeStr = "Route: " + to_string(thisSubId) + " -> ";
+	for (int i = 0; i < m_route.size(); i++) {
+		if (i != 0)
+			routeStr += " ";
+		routeStr += to_string(m_route[i]);
+	}
+	
+	AActor* player = getAnyPlayer();
+	string navInfo = "Your sector: ";
+
+	if (player) {
+		int plrnavid = g_wbot_nav.get_nav_id(player);
+		navInfo += to_string(plrnavid);
+		NavSector& nav = g_wbot_nav.nav_sectors[plrnavid];
+		navInfo += " (" + to_string(nav.links.size()) + " links)";
+	}
+
+	string enemyStr = "Enemy: <none>";
+	if (m_pPlayer->mo->target)
+		enemyStr = string("Enemy: ") + m_pPlayer->mo->target->GetClass()->TypeName.GetChars();
+	string debugStr = navInfo + "\n\n" + enemyStr + "\n" + routeStr;
+
+	SERVERCOMMANDS_PrintHUDMessage(debugStr.c_str(), 0, 0.3f, 0, 0, 0, CR_RED, 1.0f, 0, 0, "SmallFont", MAKE_ID('W', 'B', 'O', 'T'));
+}
+
 void CWootBot::DeadThink() {
 	// tap a button to respawn
 	m_lForwardMove = 0;
@@ -70,12 +152,82 @@ void CWootBot::DeadThink() {
 	m_lButtons ^= BT_ATTACK;
 }
 
-void CWootBot::RoamThink() {
-	m_forwardMove = 100;
+void CWootBot::IdleThink() {
+	m_forwardMove = 0;
+	m_sideMove = 0;
+	m_pPlayer->mo->pitch = 0;
+	m_lButtons |= BT_CROUCH;
 
-	if (rand() % 10 == 0) {
+	if (rand() % 20 == 0) {
 		m_pPlayer->mo->angle = (rand() % 360) * ANGLE_1;
 	}
+}
+
+void CWootBot::RouteThink() {
+	int thisSubId = g_wbot_nav.get_nav_id(m_pPlayer->mo);
+	const int routeSpeed = 100;
+
+	m_forwardMove = 0;
+	m_sideMove = 0;
+
+	if (m_route.size() > 1 && thisSubId == m_route[1]) {
+		// reached a target sector. Advance the route.
+		m_route.erase(m_route.begin());
+	}
+
+	if (m_route.size() > 1) {	
+		if (thisSubId == m_route[0]) {
+			FVector3 edgeGoal = g_wbot_nav.nav_sectors[thisSubId].getLinkPos(m_route[1]);
+
+			if (MoveTo(edgeGoal, 32, routeSpeed)) {
+				// now move towards the center until we end up inside the target sector
+				FVector3 centerGoal = g_wbot_nav.nav_sectors[m_route[1]].pos();
+				MoveTo(centerGoal, 0, 20);
+			}
+		}
+		else {
+			SERVERCOMMANDS_Print(VarArgs("Fell off the route (expected %d but got %d)\n", m_route[0], thisSubId), PRINT_CHAT);
+			m_route.clear();
+		}
+	}
+	else if (m_route.size() == 1) {
+		FVector3 centerGoal = g_wbot_nav.nav_sectors[m_route[0]].pos();
+		if (MoveTo(centerGoal, 32, routeSpeed)) {
+			m_route.clear();
+			SERVERCOMMANDS_Print("Finished route\n", PRINT_CHAT);
+		}
+	}
+}
+
+void CWootBot::AimAtPos(FVector3 pos) {
+	POS_t lookPos = { pos.X, pos.Y, pos.Z };
+	fixed_t viewZ = m_pPlayer->mo->z + m_pPlayer->viewheight;
+	fixed_t dist = P_AproxDistance(m_pPlayer->mo->x - lookPos.x, m_pPlayer->mo->y - lookPos.y);
+	m_pPlayer->mo->pitch = -(SDWORD)R_PointToAngle2(0, viewZ, dist, lookPos.z);
+	m_pPlayer->mo->angle = R_PointToAngle2(m_pPlayer->mo->x, m_pPlayer->mo->y, lookPos.x, lookPos.y);
+}
+
+bool CWootBot::MoveTo(FVector3 pos, int radius, int speed) {
+	m_forwardMove = speed;
+	m_sideMove = 0;
+	pos.Z = m_pPlayer->mo->z + m_pPlayer->viewheight;
+	AimAtPos(pos);
+
+	// check for walls to jump over
+	angle_t angle = m_pPlayer->mo->angle;
+	fixed_t dx = finecosine[angle >> ANGLETOFINESHIFT];
+	fixed_t dy = finesine[angle >> ANGLETOFINESHIFT];
+	FVector3 start(m_pPlayer->mo->x, m_pPlayer->mo->y, m_pPlayer->mo->z + STEP_HEIGHT);
+	fixed_t testDist = 32 << FRACBITS;
+	sector_t* sector = R_PointInSubsector(start.X, start.Y)->sector;
+
+	FTraceResults tr;
+	if (Trace(start.X, start.Y, start.Z, sector, dx, dy, 0, testDist, 0, ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, NULL, tr)) {
+		Printf("Hitting a wall!\n");
+		m_lButtons |= BT_JUMP;
+	}
+
+	return P_AproxDistance(m_pPlayer->mo->x - pos.X, m_pPlayer->mo->y - pos.Y) < (radius << FRACBITS);
 }
 
 void CWootBot::CombatThink() {
@@ -85,15 +237,12 @@ void CWootBot::CombatThink() {
 		return;
 
 	// aim at enemy
-	POS_t enemyPos = { targ->x, targ->y, targ->z };
-	fixed_t shootz = m_pPlayer->mo->z - m_pPlayer->mo->floorclip + (targ->height >> 1) + (8 * FRACUNIT);
-	fixed_t dist = P_AproxDistance(m_pPlayer->mo->x - enemyPos.x, m_pPlayer->mo->y - enemyPos.y);
-	m_pPlayer->mo->pitch = -(SDWORD)R_PointToAngle2(0, shootz, dist, enemyPos.z + targ->height / 2);
-	m_pPlayer->mo->angle = R_PointToAngle2(m_pPlayer->mo->x, m_pPlayer->mo->y, enemyPos.x, enemyPos.y);
+	AimAtPos(FVector3(targ->x, targ->y, targ->z + targ->height / 2));
 
 	m_forwardMove = 0;
 	m_sideMove = 0;
 
+	fixed_t dist = P_AproxDistance(m_pPlayer->mo->x - targ->x, m_pPlayer->mo->y - targ->y);
 	fixed_t minChaseDist = 200 << FRACBITS;
 	fixed_t maxChaseDist = 500 << FRACBITS;
 
@@ -190,6 +339,36 @@ void CWootBot::FindEnemy() {
 	}
 
 	m_pPlayer->mo->target = P_BlockmapSearch(m_pPlayer->mo, 10, wbot_LookForEnemiesInBlock, this);
+}
+
+bool CWootBot::FindMoveGoal() {
+	int thisSubId = g_wbot_nav.get_nav_id(m_pPlayer->mo);
+
+	AActor* player = NULL;
+	for (int i = 0; i < MAXPLAYERS; i++)
+	{
+		if (!playeringame[i])
+			continue;
+
+		AActor* actor = players[i].mo;
+		if (!actor || actor->player->bIsBot)
+			continue;
+
+		int plrSubId = g_wbot_nav.get_nav_id(actor);
+
+		m_route = g_wbot_nav.get_astar_route(thisSubId, plrSubId);
+
+		if (m_route.size() > 1) {
+			SERVERCOMMANDS_Print(VarArgs("Found a player to route to! Route from %d to %d (size %d)\n",
+				m_route[0], m_route[m_route.size() - 1], m_route.size()), PRINT_CHAT);
+			break;
+		}
+		else {
+			m_route.clear();
+		}
+	}
+
+	return m_route.size();
 }
 
 CCMD(addbotw)
