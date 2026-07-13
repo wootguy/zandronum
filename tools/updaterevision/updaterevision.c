@@ -158,13 +158,15 @@ int main(int argc, char **argv)
 			hash, vertag, hash, lastlog);
 
 		// [BB] Also save out hg info.
-		fprintf (stream, "#define HG_REVISION_NUMBER %lu\n", (unsigned long)hgdate );
+		//fprintf (stream, "#define HG_REVISION_NUMBER %lu\n", (unsigned long)hgdate );
+		fprintf (stream, "#define HG_REVISION_NUMBER 194\n" );
 		// [BB] We use the short hash.
 		hash[12] = 0;
 		fprintf (stream, "#define HG_REVISION_HASH_STRING \"%s\"\n", hash);
 		{
 			struct tm	*lt = gmtime( &hgdate );
-			fprintf (stream, "#define HG_TIME \"%d%02d%02d-%02d%02d", lt->tm_year - 100, lt->tm_mon + 1, lt->tm_mday, lt->tm_hour, lt->tm_min);
+			//fprintf (stream, "#define HG_TIME \"%d%02d%02d-%02d%02d", lt->tm_year - 100, lt->tm_mon + 1, lt->tm_mday, lt->tm_hour, lt->tm_min);
+			fprintf (stream, "250804-2140");
 			if ( localchanges )
 				fprintf (stream, "M" );
 			fprintf (stream, "\"\n" );
