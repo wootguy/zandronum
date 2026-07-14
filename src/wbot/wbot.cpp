@@ -140,7 +140,15 @@ void CWootBot::ShowDebugInfo() {
 		int plrnavid = g_wbot_nav.get_nav_id(player);
 		navInfo += to_string(plrnavid);
 		NavSector& nav = g_wbot_nav.nav_sectors[plrnavid];
-		navInfo += " (" + to_string(nav.links.size()) + " links)";
+
+		int numBlocked = 0;
+		for (int i = 0; i < nav.links.size(); i++) {
+			if (nav.links[i].blocked()) {
+				numBlocked++;
+				nav.links[i].blocked(); // place breakpoint here
+			}
+		}
+		navInfo += " (" + to_string(nav.links.size()) + " links, " + to_string(numBlocked) + " blocked)";
 	}
 
 	string stuckStr = "Stuck: " + to_string(stuckCounter);
@@ -287,7 +295,8 @@ bool CWootBot::MoveTo(FVector3 pos, int radius, int speed) {
 
 	FTraceResults tr;
 	if (Trace(start.X, start.Y, start.Z, sector, dx, dy, 0, testDist, 0, ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, NULL, tr)) {
-		m_lButtons |= BT_JUMP;
+		// jump over short walls and open doors
+		m_lButtons |= BT_JUMP | BT_USE;
 	}
 
 	fixed_t dist = P_AproxDistance(m_pPlayer->mo->x - pos.X, m_pPlayer->mo->y - pos.Y);
@@ -417,6 +426,9 @@ bool CWootBot::FindMoveGoal() {
 		AActor* actor = players[i].mo;
 		if (!actor || actor->player->bIsBot)
 			continue;
+
+		if (actor->player->cheats & (CF_NOCLIP | CF_NOCLIP2))
+			continue; // for testing
 
 		int plrSubId = g_wbot_nav.get_nav_id(actor);
 

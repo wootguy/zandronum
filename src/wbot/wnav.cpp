@@ -2,6 +2,9 @@
 #include "wbot.h"
 #include "r_state.h"
 #include "sv_commands.h"
+#include "p_local.h"
+#include "p_lnspec.h"
+
 #include <algorithm>
 #include <unordered_set>
 #include <unordered_map>
@@ -12,7 +15,21 @@ using namespace std;
 SectorNavMesh g_wbot_nav;
 
 bool NavSectorLink::blocked() {
-	return !g_wbot_nav.can_cross_seg_now(seg);
+	if (!g_wbot_nav.can_cross_seg_now(seg)) {
+		if (seg->linedef) {
+			switch (seg->linedef->special) {
+			case Door_Open:
+			case Door_Raise:
+				return false;
+			default:
+				break;
+			}
+		}
+
+		return true;
+	}
+
+	return false;
 }
 
 NavSectorLink* NavSector::getLink(int subSectorId) {
@@ -125,16 +142,39 @@ bool SectorNavMesh::can_cross_seg_now(seg_t* seg)
 		return false; // too high to step
 	}
 
-	fixed_t frontCeil = seg->frontsector->ceilingplane.ZatPoint(x, y);
 	fixed_t backCeil = seg->backsector->ceilingplane.ZatPoint(x, y);
-	fixed_t floor = std::max(frontFloor, backFloor);
-	fixed_t ceiling = std::min(frontCeil, backCeil);
 
-	if ((ceiling - floor) < (56 << FRACBITS)) {
+	if ((backCeil - backFloor) < (56 << FRACBITS)) {
 		return false; // not enough space
 	}
 
 	return true;
+}
+
+subsector_t* SectorNavMesh::get_neighbor_subsector(subsector_t* ignoreSector, seg_t* borderSeg, LinkSeg& linkseg) {
+	const fixed_t playerWidth = 32 << FRACBITS;
+	memset(&linkseg, 0, sizeof(linkseg));
+
+	for (int j = 0; j < numsubsectors; j++) {
+		subsector_t& otherSub = subsectors[j];
+		if (&otherSub == ignoreSector)
+			continue;
+
+		for (int s = 0; s < otherSub.numlines; s++) {
+			seg_t& tseg = otherSub.firstline[s];
+
+			if (!tseg.frontsector || !tseg.backsector)
+				continue; // impassable wall
+
+			// TODO: Allow thin segments for tightrope areas
+			linkseg = GetSegmentOverlap(&tseg, borderSeg);
+			if (linkseg.length() >= playerWidth) {
+				return &otherSub;
+			}
+		}
+	}
+
+	return NULL;
 }
 
 void SectorNavMesh::generate_node_graph() {
@@ -142,8 +182,6 @@ void SectorNavMesh::generate_node_graph() {
 	nav_sectors.resize(numsubsectors);
 
 	int totalLinks = 0;
-
-	const fixed_t playerWidth = 32 << FRACBITS;
 
 	// link sectors as a nav mesh
 	for (int i = 0; i < numsubsectors; i++) {
@@ -163,41 +201,21 @@ void SectorNavMesh::generate_node_graph() {
 			if (!is_seg_potentially_crossable(&seg))
 				continue;
 
-			subsector_t* neighborSector = NULL;
-			LinkSeg linkseg = { 0 };
-			for (int j = 0; j < numsubsectors && !neighborSector; j++) {
-				subsector_t& otherSub = subsectors[j];
-				if (j == i)
-					continue;
-
-				for (int s = 0; s < otherSub.numlines; s++) {
-					seg_t& tseg = otherSub.firstline[s];
-
-					if (!tseg.frontsector || !tseg.backsector)
-						continue; // impassable wall
-
-					// TODO: Allow thin segments for tightrope areas
-					linkseg = GetSegmentOverlap(&tseg, &seg);
-					if (linkseg.length() >= playerWidth) {
-						neighborSector = &otherSub;
-						break;
-					}
-				}
-			}
+			LinkSeg linkseg;
+			subsector_t* neighborSector = get_neighbor_subsector(&sub, &seg, linkseg);
 
 			if (!neighborSector)
 				continue;
-			
+
 			fixed_t cx = (linkseg.x1 + linkseg.x2) / 2;
 			fixed_t cy = (linkseg.y1 + linkseg.y2) / 2;
 			subsector_t* csector = R_PointInSubsector(cx, cy);
 			float z = csector->sector->floorplane.ZatPoint(cx, cy);
-			FVector3 linkCenter(cx, cy, z);
 
 			NavSectorLink link;
 			link.target = neighborSector - subsectors;
 			link.overlap = linkseg;
-			link.overlapCenter = linkCenter;
+			link.overlapCenter = FVector3(cx, cy, z);
 			link.seg = &seg;
 			nav.links.push_back(link);
 
@@ -237,7 +255,7 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 		for (int k = 0; k < nav.links.size(); k++) {
 			NavSectorLink& link = nav.links[k];
 			NavSector& linkNav = nav_sectors[link.target];
-			if (can_cross_seg_now(link.seg)) {
+			if (!link.blocked()) {
 				draw_debug_line(nav.pos(), link.pos(), actor);
 				draw_debug_line(link.pos(), linkNav.pos(), actor);
 			}

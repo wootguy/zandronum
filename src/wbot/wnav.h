@@ -56,6 +56,7 @@ private:
 	LinkSeg GetSegmentOverlap(seg_t* a, seg_t* b);
 	bool is_seg_potentially_crossable(seg_t* seg);
 	float path_cost(int a, int b);
+	subsector_t* get_neighbor_subsector(subsector_t* ignoreSector, seg_t* borderSeg, LinkSeg& linkSeg);
 };
 
 extern SectorNavMesh g_wbot_nav;
