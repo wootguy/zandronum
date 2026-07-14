@@ -65,6 +65,44 @@ AActor* getAnyPlayer() {
 	return NULL;
 }
 
+std::string BotGoal::desc() {
+	std::string thingName;
+	if (actor) {
+		thingName = actor->GetClass()->TypeName.GetChars();
+	}
+	else if (lineid) {
+		thingName = "Linedef " + to_string(lineid);
+	}
+
+	switch (action) {
+	case WBOT_GOAL_ACTION_MOVE_TO:
+		return "Move to " + thingName;
+	case WBOT_GOAL_ACTION_USE:
+		return "Use " + thingName;
+	}
+
+	return "??? " + thingName;
+}
+
+int BotGoal::getNavId() {
+	if (actor) {
+		return g_wbot_nav.get_nav_id(actor);
+	}
+	else if (lineid >= 0) {
+		auto subs = g_wbot_nav.line_subsectors.find(lineid);
+		if (subs != g_wbot_nav.line_subsectors.end()) {
+			return subs->second[0];
+		}
+
+		Printf("Failed to find subsector for line %d\n", lineid);
+	}
+	else {
+		Printf("Routing not implemented for this type of goal\n");
+	}
+
+	return -1;
+}
+
 CWootBot::CWootBot(const char* pszName, const char* pszTeamName, ULONG ulPlayerNum)
 	: CSkullBot(pszName, pszTeamName, ulPlayerNum) {
 	
@@ -81,6 +119,7 @@ void CWootBot::ParseScript() {
 	// level changed
 	if (lastInit != level.levelnum) {
 		lastInit = level.levelnum;
+		m_goals.clear();
 		CancelRoute();
 	}
 
@@ -102,11 +141,16 @@ void CWootBot::ParseScript() {
 	}
 	else {
 		if (m_route.empty()) {
-			FindMoveGoal();
-		}
+			if (m_goals.empty()) {
+				FindGoal();
 
-		if (m_route.empty()) {
-			IdleThink();
+				if (m_goals.empty()) {
+					IdleThink();
+				}
+			}
+			else {
+				GoalActionThink();
+			}
 		}
 		else {
 			RouteThink();
@@ -137,15 +181,16 @@ void CWootBot::ShowDebugInfo() {
 	string navInfo = "Your sector: ";
 
 	if (player) {
+		g_wbot_nav.triggerable_tags.clear();
 		int plrnavid = g_wbot_nav.get_nav_id(player);
 		navInfo += to_string(plrnavid);
 		NavSector& nav = g_wbot_nav.nav_sectors[plrnavid];
 
 		int numBlocked = 0;
 		for (int i = 0; i < nav.links.size(); i++) {
-			if (nav.links[i].blocked()) {
+			if (nav.links[i].blocked(player, NULL)) {
 				numBlocked++;
-				nav.links[i].blocked(); // place breakpoint here
+				nav.links[i].blocked(player, NULL); // place breakpoint here
 			}
 		}
 		navInfo += " (" + to_string(nav.links.size()) + " links, " + to_string(numBlocked) + " blocked)";
@@ -157,9 +202,21 @@ void CWootBot::ShowDebugInfo() {
 	if (m_pPlayer->mo->target)
 		enemyStr = string("Enemy: ") + m_pPlayer->mo->target->GetClass()->TypeName.GetChars();
 
-	string debugStr = navInfo + "\n\n" + enemyStr + "\n" + routeStr + "\n" + stuckStr;
+	string goalStr = "Goals:";
+	for (int i = 0; i < m_goals.size(); i++) {
+		goalStr += "\n   " + m_goals[i].desc();
+	}
+
+	string debugStr = navInfo + "\n\n" + enemyStr + "\n" + routeStr + "\n" + stuckStr + "\n" + goalStr;
 
 	SERVERCOMMANDS_PrintHUDMessage(debugStr.c_str(), 0, 0.3f, 0, 0, 0, CR_RED, 1.0f, 0, 0, "SmallFont", MAKE_ID('W', 'B', 'O', 'T'));
+}
+
+void CWootBot::DebugPrint(const char* msg) {
+	if (m_debug) {
+		SERVERCOMMANDS_Print(msg, PRINT_CHAT);
+		Printf(msg);
+	}
 }
 
 void CWootBot::DeadThink() {
@@ -186,9 +243,56 @@ void CWootBot::CancelRoute() {
 	stuckCounter = 0;
 }
 
+void CWootBot::GoalActionThink() {
+	BotGoal& goal = m_goals[m_goals.size() - 1];
+
+	int goalSector = goal.getNavId();
+	int thisNavId = g_wbot_nav.get_nav_id(m_pPlayer->mo);
+	if (thisNavId != goalSector && pretendRouteSector != goalSector) {
+		// route was cancelled or the target moved. Route to it again.
+		DebugPrint("Goal moved or movement failed. Rerouting...\n");
+		RouteToGoal();
+		return;
+	}
+
+	m_forwardMove = 0;
+	m_sideMove = 0;
+	
+	switch (goal.action) {
+	default:
+		DebugPrint(VarArgs("Unknown goal action type %d\n", goal.action));
+	case WBOT_GOAL_ACTION_MOVE_TO:
+		PopGoal(); // nothing to do
+		break;
+	case WBOT_GOAL_ACTION_USE:
+		if (goal.lineid) {
+			line_t& line = lines[goal.lineid];
+			fixed_t x = (line.v1->x + line.v2->x) / 2;
+			fixed_t y = (line.v1->y + line.v2->y) / 2;
+			fixed_t z = m_pPlayer->mo->z + m_pPlayer->viewheight;
+			AimAtPos(FVector3(x, y, z));
+			m_forwardMove = RUN_SPEED;
+
+			// press use when close enough to the linedef
+			FTraceResults tr;
+			if (TraceAhead(24, m_pPlayer->viewheight, &tr)) {
+				if (tr.Line == &line) {
+					m_lButtons |= BT_USE;
+					PopGoal();
+				}
+			}
+		}
+		else if (goal.actor) {
+			DebugPrint("Actor goal use action not implemented\n");
+		}
+		break;
+	}
+}
+
 void CWootBot::RouteThink() {
 	int thisSubId = g_wbot_nav.get_nav_id(m_pPlayer->mo);
 	const int routeSpeed = 100;
+	g_wbot_nav.triggerable_tags.clear();
 
 	m_forwardMove = 0;
 	m_sideMove = 0;
@@ -220,9 +324,17 @@ void CWootBot::RouteThink() {
 		if (thisSubId == m_route[0]) {
 			NavSectorLink* link = g_wbot_nav.nav_sectors[thisSubId].getLink(m_route[1]);
 
-			if (!link || link->blocked()) {
-				SERVERCOMMANDS_Print("Link got blocked!\n", PRINT_CHAT);
+			BotGoal unblockGoal;
+			if (!link || link->blocked(m_pPlayer->mo, &unblockGoal)) {
+				link->blocked(m_pPlayer->mo, NULL); // debug here
+				DebugPrint(VarArgs("Link got blocked from %d to %d!\n", thisSubId, link->target));
 				CancelRoute();
+				return;
+			}
+
+			if (link->blocked(NULL, NULL)) {
+				// link is blocked by something the actor can activate, so go do that rq
+				PushGoal(unblockGoal);
 				return;
 			}
 
@@ -233,21 +345,21 @@ void CWootBot::RouteThink() {
 			}
 		}
 		else {
-			SERVERCOMMANDS_Print(VarArgs("Fell off the route (expected %d but got %d)\n", m_route[0], thisSubId), PRINT_CHAT);
+			DebugPrint(VarArgs("Fell off the route (expected %d but got %d)\n", m_route[0], thisSubId));
 			CancelRoute();
 		}
 	}
 	else if (m_route.size() == 1) {
 		FVector3 centerGoal = g_wbot_nav.nav_sectors[m_route[0]].pos();
 		if (MoveTo(centerGoal, 32, routeSpeed)) {
-			CancelRoute();
-			SERVERCOMMANDS_Print("Finished route\n", PRINT_CHAT);
+			m_route.clear(); // don't reset pretendsector in case a goal is inside it
+			DebugPrint("Finished route\n");
 		}
 	}
 
 	if (StuckThink(500)) {
 		CancelRoute();
-		SERVERCOMMANDS_Print("I got stuck! Cancelling route\n", PRINT_CHAT);
+		DebugPrint("I got stuck! Cancelling route\n");
 	}
 }
 
@@ -279,23 +391,26 @@ void CWootBot::AimAtPos(FVector3 pos) {
 	m_pPlayer->mo->angle = R_PointToAngle2(m_pPlayer->mo->x, m_pPlayer->mo->y, lookPos.x, lookPos.y);
 }
 
+bool CWootBot::TraceAhead(int dist, fixed_t height, FTraceResults* tr) {
+	angle_t angle = m_pPlayer->mo->angle;
+	fixed_t dx = finecosine[angle >> ANGLETOFINESHIFT];
+	fixed_t dy = finesine[angle >> ANGLETOFINESHIFT];
+	FVector3 start(m_pPlayer->mo->x, m_pPlayer->mo->y, m_pPlayer->mo->z + height);
+	fixed_t testDist = dist << FRACBITS;
+	sector_t* sector = R_PointInSubsector(start.X, start.Y)->sector;
+
+	return Trace(start.X, start.Y, start.Z, sector, dx, dy, 0, testDist, 0, ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, NULL, *tr);
+}
+
 bool CWootBot::MoveTo(FVector3 pos, int radius, int speed) {
 	m_forwardMove = speed;
 	m_sideMove = 0;
 	pos.Z = m_pPlayer->mo->z + m_pPlayer->viewheight;
 	AimAtPos(pos);
 
-	// check for walls to jump over
-	angle_t angle = m_pPlayer->mo->angle;
-	fixed_t dx = finecosine[angle >> ANGLETOFINESHIFT];
-	fixed_t dy = finesine[angle >> ANGLETOFINESHIFT];
-	FVector3 start(m_pPlayer->mo->x, m_pPlayer->mo->y, m_pPlayer->mo->z + STEP_HEIGHT);
-	fixed_t testDist = 32 << FRACBITS;
-	sector_t* sector = R_PointInSubsector(start.X, start.Y)->sector;
-
+	// jump over short walls and open doors
 	FTraceResults tr;
-	if (Trace(start.X, start.Y, start.Z, sector, dx, dy, 0, testDist, 0, ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, NULL, tr)) {
-		// jump over short walls and open doors
+	if (TraceAhead(32, STEP_HEIGHT << FRACBITS, &tr)) {
 		m_lButtons |= BT_JUMP | BT_USE;
 	}
 
@@ -414,7 +529,7 @@ void CWootBot::FindEnemy() {
 	m_pPlayer->mo->target = P_BlockmapSearch(m_pPlayer->mo, 10, wbot_LookForEnemiesInBlock, this);
 }
 
-bool CWootBot::FindMoveGoal() {
+bool CWootBot::FindGoal() {
 	int thisSubId = g_wbot_nav.get_nav_id(m_pPlayer->mo);
 
 	AActor* player = NULL;
@@ -430,21 +545,58 @@ bool CWootBot::FindMoveGoal() {
 		if (actor->player->cheats & (CF_NOCLIP | CF_NOCLIP2))
 			continue; // for testing
 
-		int plrSubId = g_wbot_nav.get_nav_id(actor);
+		if (thisSubId == g_wbot_nav.get_nav_id(actor))
+			continue; // already with this player
 
-		m_route = g_wbot_nav.get_astar_route(thisSubId, plrSubId);
-
-		if (m_route.size() > 1) {
-			SERVERCOMMANDS_Print(VarArgs("Found a player to route to! Route from %d to %d (size %d)\n",
-				m_route[0], m_route[m_route.size() - 1], m_route.size()), PRINT_CHAT);
-			break;
-		}
-		else {
-			m_route.clear();
-		}
+		BotGoal goal = BotGoal();
+		goal.action = WBOT_GOAL_ACTION_MOVE_TO;
+		goal.actor = actor;
+		PushGoal(goal);
 	}
 
 	return m_route.size();
+}
+
+void CWootBot::PushGoal(BotGoal& goal) {
+	DebugPrint(VarArgs("New goal: %s\n", goal.desc().c_str()));
+	m_goals.push_back(goal);
+	RouteToGoal();
+}
+
+void CWootBot::PopGoal() {
+	if (m_goals.empty()) {
+		CancelRoute();
+		DebugPrint("No goal to pop\n");
+		return;
+	}
+
+	BotGoal& goal = m_goals[m_goals.size() - 1];
+	DebugPrint(VarArgs("Finished goal: %s\n", goal.desc().c_str()));
+	m_goals.pop_back();
+	RouteToGoal();
+}
+
+void CWootBot::RouteToGoal() {
+	CancelRoute();
+
+	if (m_goals.empty()) {
+		DebugPrint("No goal to route to\n");
+		return;
+	}
+
+	BotGoal& goal = m_goals[m_goals.size() - 1];
+
+	int goalSubId = goal.getNavId();
+	int thisSubId = g_wbot_nav.get_nav_id(m_pPlayer->mo);
+	m_route = g_wbot_nav.get_astar_route(m_pPlayer->mo, thisSubId, goalSubId);
+
+	if (m_route.size()) {
+		DebugPrint(VarArgs("Routing to goal: %s\n", goal.desc().c_str()));
+	}
+	else {
+		DebugPrint(VarArgs("Failed goal (no route): %s\n", goal.desc().c_str()));
+		m_goals.pop_back();
+	}
 }
 
 CCMD(addbotw)

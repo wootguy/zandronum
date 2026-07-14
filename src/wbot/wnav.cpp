@@ -14,7 +14,7 @@ using namespace std;
 
 SectorNavMesh g_wbot_nav;
 
-bool NavSectorLink::blocked() {
+bool NavSectorLink::blocked(AActor* actor, BotGoal* unblockGoal) {
 	if (!g_wbot_nav.can_cross_seg_now(seg)) {
 		if (seg->linedef) {
 			switch (seg->linedef->special) {
@@ -23,6 +23,14 @@ bool NavSectorLink::blocked() {
 				return false;
 			default:
 				break;
+			}
+		}
+
+		if (actor) {
+			subsector_t& targetSub = subsectors[target];
+			if (targetSub.sector->tag && g_wbot_nav.can_trigger_tag(actor, targetSub.sector->tag, unblockGoal)) {
+				// the target sector can be moved by a linedef that the actor can currently reach.
+				return false;
 			}
 		}
 
@@ -180,6 +188,7 @@ subsector_t* SectorNavMesh::get_neighbor_subsector(subsector_t* ignoreSector, se
 void SectorNavMesh::generate_node_graph() {
 	nav_sectors.clear();
 	nav_sectors.resize(numsubsectors);
+	line_subsectors.clear();
 
 	int totalLinks = 0;
 
@@ -228,6 +237,26 @@ void SectorNavMesh::generate_node_graph() {
 		nav.z = sub.sector->floorplane.ZatPoint(nav.x << FRACBITS, nav.y << FRACBITS) >> FRACBITS;
 	}
 
+	// create linedef sector mapping
+	for (int i = 0; i < numlines; i++) {
+		line_t& line = lines[i];
+		if (!line.special) {
+			continue;
+		}
+
+		for (int s = 0; s < numsubsectors; s++) {
+			subsector_t& sub = subsectors[s];
+
+			for (int k = 0; k < sub.numlines; k++) {
+				if (sub.firstline[k].linedef != &line) {
+					continue;
+				}
+
+				line_subsectors[i].push_back(s);
+			}
+		}
+	}
+
 	Printf("Nav mesh is %d sectors with %d links\n", (int)nav_sectors.size(), totalLinks);
 }
 
@@ -244,6 +273,8 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 	if (!player)
 		return;
 
+	triggerable_tags.clear();
+
 	subsector_t* sub = R_PointInSubsector(player->x, player->y);
 	int subId = sub - subsectors;
 
@@ -255,7 +286,7 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 		for (int k = 0; k < nav.links.size(); k++) {
 			NavSectorLink& link = nav.links[k];
 			NavSector& linkNav = nav_sectors[link.target];
-			if (!link.blocked()) {
+			if (!link.blocked(actor, NULL)) {
 				draw_debug_line(nav.pos(), link.pos(), actor);
 				draw_debug_line(link.pos(), linkNav.pos(), actor);
 			}
@@ -305,8 +336,10 @@ float SectorNavMesh::path_cost(int a, int b) {
 	return delta.Length();
 }
 
-vector<int> SectorNavMesh::get_astar_route(int startSubSectorId, int endSubSectorId)
+vector<int> SectorNavMesh::get_astar_route(AActor* actor, int startSubSectorId, int endSubSectorId)
 {
+	triggerable_tags.clear();
+
 	unordered_set<int> closedSet;
 	unordered_set<int> openSet;
 
@@ -394,7 +427,7 @@ vector<int> SectorNavMesh::get_astar_route(int startSubSectorId, int endSubSecto
 			if (closedSet.count(neighbor))
 				continue;
 
-			if (link.blocked()) {
+			if (link.blocked(actor, NULL)) {
 				continue;
 			}
 			//if (currentNode.blockers.size() > i and currentNode.blockers[i] & blockers != 0)
@@ -424,4 +457,57 @@ vector<int> SectorNavMesh::get_astar_route(int startSubSectorId, int endSubSecto
 	}
 
 	return emptyRoute;
+}
+
+bool SectorNavMesh::can_trigger_tag(AActor* actor, short tag, BotGoal* unblockGoal) {
+	auto alreadyChecked = g_wbot_nav.triggerable_tags.find(tag);
+	if (alreadyChecked != g_wbot_nav.triggerable_tags.end()) {
+		if (unblockGoal)
+			*unblockGoal = alreadyChecked->second.goal;
+		return alreadyChecked->second.canTrigger;
+	}
+
+	TagTriggerGoal tgoal;
+	tgoal.canTrigger = false;
+
+	int actorNavId = get_nav_id(actor);
+
+	int lineid = -1;
+	for (int i = 0; i < numlines; i++) {
+		line_t& line = lines[i];
+
+		if (line.args[0] == tag) {
+			lineid = i;
+			break;
+		}
+	}
+
+	if (lineid == -1) {
+		triggerable_tags[tag] = tgoal;
+		return false;
+	}
+
+	auto lineSectors = line_subsectors.find(lineid);
+	if (lineSectors == line_subsectors.end()) {
+		triggerable_tags[tag] = tgoal;
+		return false;
+	}
+
+	for (int subid : lineSectors->second) {
+		// not passing an actor to prevent infinite loops
+		if (subid == actorNavId || get_astar_route(NULL, actorNavId, subid).size()) {
+			// actor can route to a subsector which touches the linedef which activates the tag
+			tgoal.canTrigger = true;
+			tgoal.goal.action = WBOT_GOAL_ACTION_USE;
+			tgoal.goal.lineid = lineid;
+			triggerable_tags[tag] = tgoal;
+			if (unblockGoal)
+				*unblockGoal = tgoal.goal;
+			//Printf("Line %d targets tag %d and can be routed to\n", subid, (int)tag);
+			return true;
+		}
+	}
+
+	triggerable_tags[tag] = tgoal;
+	return false;
 }
