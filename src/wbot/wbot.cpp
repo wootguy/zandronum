@@ -37,8 +37,10 @@ char* VarArgs(const char* format, ...)
 
 void init_wootbots() {
 	static int lastInit;
-	if (lastInit != level.levelnum) {
+	static int lastInitTime;
+	if (lastInit != level.levelnum || lastInitTime == 0 || lastInitTime > level.time) {
 		lastInit = level.levelnum;
+		lastInitTime = level.time;
 
 		srand((unsigned int)time(NULL));
 
@@ -79,7 +81,7 @@ void CWootBot::ParseScript() {
 	// level changed
 	if (lastInit != level.levelnum) {
 		lastInit = level.levelnum;
-		m_route.clear();
+		CancelRoute();
 	}
 
 	if (m_debug) {
@@ -120,7 +122,11 @@ void CWootBot::ShowDebugInfo() {
 
 	int thisSubId = g_wbot_nav.get_nav_id(m_pPlayer->mo);
 
-	string routeStr = "Route: " + to_string(thisSubId) + " -> ";
+	string routeStr = "Route: " + to_string(thisSubId);
+	if (pretendRouteSector >= 0) {
+		routeStr += " (pretend " + to_string(pretendRouteSector) + " )";
+	}
+	routeStr += " -> ";
 	for (int i = 0; i < m_route.size(); i++) {
 		if (i != 0)
 			routeStr += " ";
@@ -137,10 +143,13 @@ void CWootBot::ShowDebugInfo() {
 		navInfo += " (" + to_string(nav.links.size()) + " links)";
 	}
 
+	string stuckStr = "Stuck: " + to_string(stuckCounter);
+
 	string enemyStr = "Enemy: <none>";
 	if (m_pPlayer->mo->target)
 		enemyStr = string("Enemy: ") + m_pPlayer->mo->target->GetClass()->TypeName.GetChars();
-	string debugStr = navInfo + "\n\n" + enemyStr + "\n" + routeStr;
+
+	string debugStr = navInfo + "\n\n" + enemyStr + "\n" + routeStr + "\n" + stuckStr;
 
 	SERVERCOMMANDS_PrintHUDMessage(debugStr.c_str(), 0, 0.3f, 0, 0, 0, CR_RED, 1.0f, 0, 0, "SmallFont", MAKE_ID('W', 'B', 'O', 'T'));
 }
@@ -163,6 +172,12 @@ void CWootBot::IdleThink() {
 	}
 }
 
+void CWootBot::CancelRoute() {
+	m_route.clear();
+	pretendRouteSector = -1;
+	stuckCounter = 0;
+}
+
 void CWootBot::RouteThink() {
 	int thisSubId = g_wbot_nav.get_nav_id(m_pPlayer->mo);
 	const int routeSpeed = 100;
@@ -170,33 +185,82 @@ void CWootBot::RouteThink() {
 	m_forwardMove = 0;
 	m_sideMove = 0;
 
-	if (m_route.size() > 1 && thisSubId == m_route[1]) {
-		// reached a target sector. Advance the route.
-		m_route.erase(m_route.begin());
+	if (m_route.size() > 1) {
+		if (thisSubId == m_route[1]) {
+			// inside the target sector. Advance the route.
+			m_route.erase(m_route.begin());
+			pretendRouteSector = -1;
+		}
+		else {
+			FVector3 center = g_wbot_nav.nav_sectors[m_route[1]].pos();
+			fixed_t dist = P_AproxDistance(m_pPlayer->mo->x - center.X, m_pPlayer->mo->y - center.Y);
+			if (dist < (16 << FRACBITS)) {
+				// already very close to the center, so this is probably a tiny polygon jammed
+				// up against a wall. The bot can't get close enough in this case, so advance
+				// the route now and pretend the bot is inside the target sector.
+				pretendRouteSector = m_route[1];
+				m_route.erase(m_route.begin());
+			}
+		}
+	}
+
+	if (pretendRouteSector >= 0) {
+		thisSubId = pretendRouteSector;
 	}
 
 	if (m_route.size() > 1) {	
 		if (thisSubId == m_route[0]) {
-			FVector3 edgeGoal = g_wbot_nav.nav_sectors[thisSubId].getLinkPos(m_route[1]);
+			NavSectorLink* link = g_wbot_nav.nav_sectors[thisSubId].getLink(m_route[1]);
 
-			if (MoveTo(edgeGoal, 32, routeSpeed)) {
+			if (!link || link->blocked()) {
+				SERVERCOMMANDS_Print("Link got blocked!\n", PRINT_CHAT);
+				CancelRoute();
+				return;
+			}
+
+			if (MoveTo(link->pos(), 32, routeSpeed)) {
 				// now move towards the center until we end up inside the target sector
 				FVector3 centerGoal = g_wbot_nav.nav_sectors[m_route[1]].pos();
-				MoveTo(centerGoal, 0, 20);
+				MoveTo(centerGoal, 16, routeSpeed);
 			}
 		}
 		else {
 			SERVERCOMMANDS_Print(VarArgs("Fell off the route (expected %d but got %d)\n", m_route[0], thisSubId), PRINT_CHAT);
-			m_route.clear();
+			CancelRoute();
 		}
 	}
 	else if (m_route.size() == 1) {
 		FVector3 centerGoal = g_wbot_nav.nav_sectors[m_route[0]].pos();
 		if (MoveTo(centerGoal, 32, routeSpeed)) {
-			m_route.clear();
+			CancelRoute();
 			SERVERCOMMANDS_Print("Finished route\n", PRINT_CHAT);
 		}
 	}
+
+	if (StuckThink(500)) {
+		CancelRoute();
+		SERVERCOMMANDS_Print("I got stuck! Cancelling route\n", PRINT_CHAT);
+	}
+}
+
+bool CWootBot::StuckThink(int maxStuck) {
+	FVector2 curPos = FVector2(m_pPlayer->mo->x, m_pPlayer->mo->y);
+	int movedDist = (int)(curPos - lastPos).Length() >> FRACBITS;
+	lastPos = curPos;
+
+	if ((m_forwardMove || m_sideMove) && movedDist <= 1) {
+		stuckCounter += 10;
+		if (stuckCounter > maxStuck) {
+			return true;
+		}
+	}
+	else {
+		stuckCounter--;
+		if (stuckCounter < 0)
+			stuckCounter = 0;
+	}
+
+	return false;
 }
 
 void CWootBot::AimAtPos(FVector3 pos) {
@@ -223,11 +287,11 @@ bool CWootBot::MoveTo(FVector3 pos, int radius, int speed) {
 
 	FTraceResults tr;
 	if (Trace(start.X, start.Y, start.Z, sector, dx, dy, 0, testDist, 0, ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, NULL, tr)) {
-		Printf("Hitting a wall!\n");
 		m_lButtons |= BT_JUMP;
 	}
 
-	return P_AproxDistance(m_pPlayer->mo->x - pos.X, m_pPlayer->mo->y - pos.Y) < (radius << FRACBITS);
+	fixed_t dist = P_AproxDistance(m_pPlayer->mo->x - pos.X, m_pPlayer->mo->y - pos.Y);
+	return dist < (radius << FRACBITS);
 }
 
 void CWootBot::CombatThink() {

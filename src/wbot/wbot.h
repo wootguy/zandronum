@@ -10,6 +10,9 @@ public:
 	std::vector<int> m_route; // current route
 	bool m_debug = false;
 	int lastInit = 0; // last time the bot was initialized (for level change detection)
+	int pretendRouteSector = -1; // pretend we're in this sector for now
+	int stuckCounter = 0; // increases while trying to move with nothing happening
+	FVector2 lastPos;
 
 	CWootBot(const char* pszName, const char* pszTeamName, ULONG ulPlayerNum);
 	~CWootBot();
@@ -26,6 +29,9 @@ public:
 	void IdleThink();	// nothing to do
 	void RouteThink();	// following a route somewhere
 	void CombatThink();	// attacking an enemy
+	bool StuckThink(int maxStuck=1000);	// check if stuck and return true if been stuck long enough to cancel whatever the bot is doing
+
+	void CancelRoute();
 
 	void ShowDebugInfo();
 

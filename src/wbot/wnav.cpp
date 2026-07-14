@@ -11,15 +11,19 @@ using namespace std;
 
 SectorNavMesh g_wbot_nav;
 
-FVector3 NavSector::getLinkPos(int subSectorId) {
+bool NavSectorLink::blocked() {
+	return !g_wbot_nav.can_cross_seg_now(seg);
+}
+
+NavSectorLink* NavSector::getLink(int subSectorId) {
 	for (int i = 0; i < links.size(); i++) {
 		if (links[i].target == subSectorId) {
-			return links[i].pos();
+			return &links[i];
 		}
 	}
 
 	Printf("Nav sector %d has no link to %d\n", id, subSectorId);
-	return pos();
+	return NULL;
 }
 
 LinkSeg SectorNavMesh::GetSegmentOverlap(seg_t* a, seg_t* b)
@@ -96,14 +100,18 @@ LinkSeg SectorNavMesh::GetSegmentOverlap(seg_t* a, seg_t* b)
 	return result;
 }
 
-bool SectorNavMesh::can_cross_seg(seg_t* seg)
-{
+bool SectorNavMesh::is_seg_potentially_crossable(seg_t* seg) {
 	if (!seg->frontsector || !seg->backsector)
 		return false;
 
 	if (seg->linedef && (seg->linedef->flags & ML_BLOCKING))
 		return false; // impassable
 
+	return true;
+}
+
+bool SectorNavMesh::can_cross_seg_now(seg_t* seg)
+{
 	fixed_t x = (seg->v1->x + seg->v2->x) / 2;
 	fixed_t y = (seg->v1->y + seg->v2->y) / 2;
 
@@ -152,7 +160,7 @@ void SectorNavMesh::generate_node_graph() {
 			subCenterX += seg.v1->x >> FRACBITS;
 			subCenterY += seg.v1->y >> FRACBITS;
 
-			if (!can_cross_seg(&seg))
+			if (!is_seg_potentially_crossable(&seg))
 				continue;
 
 			subsector_t* neighborSector = NULL;
@@ -190,6 +198,7 @@ void SectorNavMesh::generate_node_graph() {
 			link.target = neighborSector - subsectors;
 			link.overlap = linkseg;
 			link.overlapCenter = linkCenter;
+			link.seg = &seg;
 			nav.links.push_back(link);
 
 			totalLinks++;
@@ -228,8 +237,10 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 		for (int k = 0; k < nav.links.size(); k++) {
 			NavSectorLink& link = nav.links[k];
 			NavSector& linkNav = nav_sectors[link.target];
-			draw_debug_line(nav.pos(), link.pos(), actor);
-			draw_debug_line(link.pos(), linkNav.pos(), actor);
+			if (can_cross_seg_now(link.seg)) {
+				draw_debug_line(nav.pos(), link.pos(), actor);
+				draw_debug_line(link.pos(), linkNav.pos(), actor);
+			}
 		}
 
 		fixed_t borderZ = nav.z << FRACBITS;
@@ -364,6 +375,10 @@ vector<int> SectorNavMesh::get_astar_route(int startSubSectorId, int endSubSecto
 			}
 			if (closedSet.count(neighbor))
 				continue;
+
+			if (link.blocked()) {
+				continue;
+			}
 			//if (currentNode.blockers.size() > i and currentNode.blockers[i] & blockers != 0)
 			//	continue; // blocked by something (monsterclip, normal clip, etc.). Don't route through this path.
 
