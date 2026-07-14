@@ -74,6 +74,8 @@ std::string BotGoal::desc() {
 		thingName = "Linedef " + to_string(lineid);
 	}
 
+	thingName += " in sector " + to_string(getNavId());
+
 	switch (action) {
 	case WBOT_GOAL_ACTION_MOVE_TO:
 		return "Move to " + thingName;
@@ -91,7 +93,7 @@ int BotGoal::getNavId() {
 	else if (lineid >= 0) {
 		auto subs = g_wbot_nav.line_subsectors.find(lineid);
 		if (subs != g_wbot_nav.line_subsectors.end()) {
-			return subs->second[0];
+			return subs->second;
 		}
 
 		Printf("Failed to find subsector for line %d\n", lineid);
@@ -163,6 +165,7 @@ void CWootBot::ParseScript() {
 
 void CWootBot::ShowDebugInfo() {
 	g_wbot_nav.draw_nodes(m_pPlayer->mo);
+	g_wbot_nav.blocked_link_cache.clear();
 
 	int thisSubId = g_wbot_nav.get_nav_id(m_pPlayer->mo);
 
@@ -181,7 +184,6 @@ void CWootBot::ShowDebugInfo() {
 	string navInfo = "Your sector: ";
 
 	if (player) {
-		g_wbot_nav.triggerable_tags.clear();
 		int plrnavid = g_wbot_nav.get_nav_id(player);
 		navInfo += to_string(plrnavid);
 		NavSector& nav = g_wbot_nav.nav_sectors[plrnavid];
@@ -194,7 +196,17 @@ void CWootBot::ShowDebugInfo() {
 			}
 		}
 		navInfo += " (" + to_string(nav.links.size()) + " links, " + to_string(numBlocked) + " blocked)";
+
+		navInfo += "\nSector triggers:";
+		for (int i = 0; i < nav.triggers.size(); i++) {
+			navInfo += "\n   " + nav.triggers[i].desc() 
+				+ " (sector " + to_string(nav.triggers[i].getNavId()) + ")";
+		}
 	}
+
+	string stateStr = "State:";
+	if (stateFlags & FL_WBOT_WAITING_ELEV) { stateStr += " WAIT_ELEV"; }
+	if (stateFlags & FL_WBOT_WAITING_DOOR) { stateStr += " WAIT_DOOR"; }
 
 	string stuckStr = "Stuck: " + to_string(stuckCounter);
 
@@ -207,7 +219,8 @@ void CWootBot::ShowDebugInfo() {
 		goalStr += "\n   " + m_goals[i].desc();
 	}
 
-	string debugStr = navInfo + "\n\n" + enemyStr + "\n" + routeStr + "\n" + stuckStr + "\n" + goalStr;
+	string debugStr = navInfo + "\n\n" + enemyStr + "\n" + routeStr + "\n" + stateStr + "\n" +
+		stuckStr + "\n" + goalStr;
 
 	SERVERCOMMANDS_PrintHUDMessage(debugStr.c_str(), 0, 0.3f, 0, 0, 0, CR_RED, 1.0f, 0, 0, "SmallFont", MAKE_ID('W', 'B', 'O', 'T'));
 }
@@ -257,6 +270,14 @@ void CWootBot::GoalActionThink() {
 
 	m_forwardMove = 0;
 	m_sideMove = 0;
+
+	if (goal.lineid >= 0) {
+		if (lines[goal.lineid].special == 0) {
+			// single-use special is no longer usable
+			DebugPrint("Single-use special is no longer usable\n");
+			PopGoal();
+		}
+	}
 	
 	switch (goal.action) {
 	default:
@@ -265,7 +286,7 @@ void CWootBot::GoalActionThink() {
 		PopGoal(); // nothing to do
 		break;
 	case WBOT_GOAL_ACTION_USE:
-		if (goal.lineid) {
+		if (goal.lineid >= 0) {
 			line_t& line = lines[goal.lineid];
 			fixed_t x = (line.v1->x + line.v2->x) / 2;
 			fixed_t y = (line.v1->y + line.v2->y) / 2;
@@ -287,15 +308,19 @@ void CWootBot::GoalActionThink() {
 		}
 		break;
 	}
+
+	if (StuckThink(1000)) {
+		RouteToGoal();
+	}
 }
 
 void CWootBot::RouteThink() {
 	int thisSubId = g_wbot_nav.get_nav_id(m_pPlayer->mo);
 	const int routeSpeed = 100;
-	g_wbot_nav.triggerable_tags.clear();
 
 	m_forwardMove = 0;
 	m_sideMove = 0;
+	stateFlags = 0;
 
 	if (m_route.size() > 1) {
 		if (thisSubId == m_route[1]) {
@@ -305,12 +330,13 @@ void CWootBot::RouteThink() {
 		}
 		else {
 			FVector3 center = g_wbot_nav.nav_sectors[m_route[1]].pos();
-			fixed_t dist = P_AproxDistance(m_pPlayer->mo->x - center.X, m_pPlayer->mo->y - center.Y);
-			if (dist < (16 << FRACBITS)) {
+			fixed_t dist = P_AproxDistance(m_pPlayer->mo->x - (fixed_t)center.X, m_pPlayer->mo->y - (fixed_t)center.Y);
+			if (stuckCounter >= 200 && dist < (16 << FRACBITS)) {
 				// already very close to the center, so this is probably a tiny polygon jammed
 				// up against a wall. The bot can't get close enough in this case, so advance
 				// the route now and pretend the bot is inside the target sector.
 				pretendRouteSector = m_route[1];
+				DebugPrint(VarArgs("Pretending I'm in sector %d. I'm stuck and close enough\n", pretendRouteSector));
 				m_route.erase(m_route.begin());
 			}
 		}
@@ -333,11 +359,24 @@ void CWootBot::RouteThink() {
 			}
 
 			if (link->blocked(NULL, NULL)) {
-				// link is blocked by something the actor can activate, so go do that rq
-				PushGoal(unblockGoal);
+				// link is blocked by something the actor can activate
+				sector_t* thisSector = subsectors[thisSubId].sector;
+				sector_t* targetSector = subsectors[link->target].sector;
+				if (targetSector && (targetSector->floordata || targetSector->ceilingdata)) {
+					stateFlags |= FL_WBOT_WAITING_DOOR;
+					return; // wait until the blocker is done moving
+				}
+				else if (thisSector && (thisSector->floordata || thisSector->ceilingdata)) {
+					stateFlags |= FL_WBOT_WAITING_ELEV;
+					return; // wait until the elevator is done moving
+				}
+				else {
+					PushGoal(unblockGoal); // nothing is moving yet, so go try to activate the sector ourselves
+				}
 				return;
 			}
 
+			// move to the next link
 			if (MoveTo(link->pos(), 32, routeSpeed)) {
 				// now move towards the center until we end up inside the target sector
 				FVector3 centerGoal = g_wbot_nav.nav_sectors[m_route[1]].pos();
@@ -371,6 +410,7 @@ bool CWootBot::StuckThink(int maxStuck) {
 	if ((m_forwardMove || m_sideMove) && movedDist <= 1) {
 		stuckCounter += 10;
 		if (stuckCounter > maxStuck) {
+			stuckCounter = 0;
 			return true;
 		}
 	}
@@ -384,7 +424,7 @@ bool CWootBot::StuckThink(int maxStuck) {
 }
 
 void CWootBot::AimAtPos(FVector3 pos) {
-	POS_t lookPos = { pos.X, pos.Y, pos.Z };
+	POS_t lookPos = { (fixed_t)pos.X, (fixed_t)pos.Y, (fixed_t)pos.Z };
 	fixed_t viewZ = m_pPlayer->mo->z + m_pPlayer->viewheight;
 	fixed_t dist = P_AproxDistance(m_pPlayer->mo->x - lookPos.x, m_pPlayer->mo->y - lookPos.y);
 	m_pPlayer->mo->pitch = -(SDWORD)R_PointToAngle2(0, viewZ, dist, lookPos.z);
@@ -397,15 +437,15 @@ bool CWootBot::TraceAhead(int dist, fixed_t height, FTraceResults* tr) {
 	fixed_t dy = finesine[angle >> ANGLETOFINESHIFT];
 	FVector3 start(m_pPlayer->mo->x, m_pPlayer->mo->y, m_pPlayer->mo->z + height);
 	fixed_t testDist = dist << FRACBITS;
-	sector_t* sector = R_PointInSubsector(start.X, start.Y)->sector;
+	sector_t* sector = R_PointInSubsector((fixed_t)start.X, (fixed_t)start.Y)->sector;
 
-	return Trace(start.X, start.Y, start.Z, sector, dx, dy, 0, testDist, 0, ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, NULL, *tr);
+	return Trace((fixed_t)start.X, (fixed_t)start.Y, (fixed_t)start.Z, sector, dx, dy, 0, testDist, 0, ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, NULL, *tr);
 }
 
 bool CWootBot::MoveTo(FVector3 pos, int radius, int speed) {
 	m_forwardMove = speed;
 	m_sideMove = 0;
-	pos.Z = m_pPlayer->mo->z + m_pPlayer->viewheight;
+	pos.Z = (float)(m_pPlayer->mo->z + m_pPlayer->viewheight);
 	AimAtPos(pos);
 
 	// jump over short walls and open doors
@@ -414,7 +454,7 @@ bool CWootBot::MoveTo(FVector3 pos, int radius, int speed) {
 		m_lButtons |= BT_JUMP | BT_USE;
 	}
 
-	fixed_t dist = P_AproxDistance(m_pPlayer->mo->x - pos.X, m_pPlayer->mo->y - pos.Y);
+	fixed_t dist = P_AproxDistance(m_pPlayer->mo->x - (fixed_t)pos.X, m_pPlayer->mo->y - (fixed_t)pos.Y);
 	return dist < (radius << FRACBITS);
 }
 
@@ -558,6 +598,15 @@ bool CWootBot::FindGoal() {
 }
 
 void CWootBot::PushGoal(BotGoal& goal) {
+	if (!m_goals.empty()) {
+		BotGoal& lastGoal = m_goals[m_goals.size() - 1];
+		if (lastGoal.matches(goal)) {
+			// can happen when hugging the wall of a triggerable sectors
+			DebugPrint(VarArgs("Skipping duplicate goal push: %s\n", goal.desc()));
+			return;
+		}
+	}
+
 	DebugPrint(VarArgs("New goal: %s\n", goal.desc().c_str()));
 	m_goals.push_back(goal);
 	RouteToGoal();
@@ -588,6 +637,7 @@ void CWootBot::RouteToGoal() {
 
 	int goalSubId = goal.getNavId();
 	int thisSubId = g_wbot_nav.get_nav_id(m_pPlayer->mo);
+	g_wbot_nav.blocked_link_cache.clear();
 	m_route = g_wbot_nav.get_astar_route(m_pPlayer->mo, thisSubId, goalSubId);
 
 	if (m_route.size()) {

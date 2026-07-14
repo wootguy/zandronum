@@ -15,7 +15,14 @@ struct BotGoal {
 
 	std::string desc();
 	int getNavId();
+
+	bool matches(BotGoal& other) {
+		return action == other.action && lineid == other.lineid && actor == other.actor;
+	}
 };
+
+#define FL_WBOT_WAITING_ELEV 1 // bot is waiting for an elevator to lift/descend before continuing their route
+#define FL_WBOT_WAITING_DOOR 2 // bot is waiting for a door or platform to move out of the way before continuing their route
 
 class CWootBot : public CSkullBot {
 public:
@@ -29,6 +36,7 @@ public:
 	int lastInit = 0; // last time the bot was initialized (for level change detection)
 	int pretendRouteSector = -1; // pretend we're in this sector for now
 	int stuckCounter = 0; // increases while trying to move with nothing happening
+	int stateFlags = 0; // FL_WBOT_*
 	FVector2 lastPos;
 
 	CWootBot(const char* pszName, const char* pszTeamName, ULONG ulPlayerNum);

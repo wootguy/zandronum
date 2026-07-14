@@ -16,20 +16,33 @@ SectorNavMesh g_wbot_nav;
 
 bool NavSectorLink::blocked(AActor* actor, BotGoal* unblockGoal) {
 	if (!g_wbot_nav.can_cross_seg_now(seg)) {
-		if (seg->linedef) {
-			switch (seg->linedef->special) {
-			case Door_Open:
-			case Door_Raise:
-				return false;
-			default:
-				break;
-			}
+		if (seg->linedef && g_wbot_nav.does_linedef_move_tag(seg->linedef, 0)) {
+			// border is an untagged linedef, which means it moves the target sector,
+			// which probably unblocks the path. TODO: not always!
+			return false;
 		}
 
-		if (actor) {
-			subsector_t& targetSub = subsectors[target];
-			if (targetSub.sector->tag && g_wbot_nav.can_trigger_tag(actor, targetSub.sector->tag, unblockGoal)) {
-				// the target sector can be moved by a linedef that the actor can currently reach.
+		if (!actor)
+			return true;
+
+		// check if the path can be unblocked by triggering something else in the map
+		int actorNavId = g_wbot_nav.get_nav_id(actor);
+		NavSector& targetNav = g_wbot_nav.nav_sectors[target];
+
+		// don't try to traverse this link again while routing to sub-goals
+		g_wbot_nav.blocked_link_cache.insert(id);
+
+		for (BotGoal& goal : targetNav.triggers) {
+			int subid = goal.getNavId();
+			// passing null to the route so we don't get an infinite loop into blocked()
+			if (subid == actorNavId || g_wbot_nav.get_astar_route(actor, actorNavId, subid).size()) {
+				// the target sector can be moved by something the actor can currently reach
+				if (unblockGoal)
+					*unblockGoal = goal;
+
+				// so, it isn't blocked after all.
+				g_wbot_nav.blocked_link_cache.erase(id);
+
 				return false;
 			}
 		}
@@ -185,10 +198,62 @@ subsector_t* SectorNavMesh::get_neighbor_subsector(subsector_t* ignoreSector, se
 	return NULL;
 }
 
+bool SectorNavMesh::does_linedef_move_tag(line_t* line, short tag) {
+	// only add specials here that could be potentially helpful for unblocking a path.
+	// For instance, raising a door or elevator. A ceiling or door coming down lower 
+	// will not help a bot pass the sector
+	switch (line->special) {
+	case Door_Open:
+	case Door_Raise:
+	case Door_LockedRaise:
+	case Plat_PerpetualRaise:
+	case Plat_DownWaitUpStay:
+	case Plat_DownByValue:
+	case Plat_UpWaitDownStay:
+	case Plat_UpByValue:
+	case Plat_UpNearestWaitDownStay:
+	case Plat_DownWaitUpStayLip:
+	case Plat_PerpetualRaiseLip:
+	case Plat_RaiseAndStayTx0:
+	case Plat_UpByValueStayTx:
+	case Floor_LowerToLowest:
+	case Floor_LowerToNearest:
+	case Floor_LowerToHighest:
+	case Floor_RaiseToHighest:
+	case Floor_RaiseToNearest:
+	case Floor_RaiseByValueTxTy:
+	case Floor_LowerToLowestTxTy:
+	case Floor_RaiseToLowestCeiling:
+	case Elevator_RaiseToNearest:
+	case Elevator_MoveToFloor:
+	case Elevator_LowerToNearest:
+	case Ceiling_RaiseByValue:
+	case Ceiling_RaiseToNearest:
+	case Generic_Floor:
+	case Generic_Ceiling:
+	case Generic_Door:
+	case Generic_Lift:
+	case Generic_Stairs:
+	case Stairs_BuildDown:
+	case Stairs_BuildUp:
+	case Stairs_BuildDownSync:
+	case Stairs_BuildUpSync:
+	case Stairs_BuildUpDoom:
+		return line->args[0] == tag;
+	default:
+		if (tag != 0 && line->args[0] == tag) {
+			Printf("Line %d targets tag %d but don't know what special %d is\n", line - lines, tag, line->special);
+		}
+
+		return false;
+	}
+}
+
 void SectorNavMesh::generate_node_graph() {
 	nav_sectors.clear();
 	nav_sectors.resize(numsubsectors);
 	line_subsectors.clear();
+	blocked_link_cache.clear();
 
 	int totalLinks = 0;
 
@@ -226,9 +291,8 @@ void SectorNavMesh::generate_node_graph() {
 			link.overlap = linkseg;
 			link.overlapCenter = FVector3(cx, cy, z);
 			link.seg = &seg;
+			link.id = totalLinks++;
 			nav.links.push_back(link);
-
-			totalLinks++;
 		}
 
 		nav.id = i;
@@ -243,16 +307,64 @@ void SectorNavMesh::generate_node_graph() {
 		if (!line.special) {
 			continue;
 		}
+		seg_t lineSeg; // fake seg for overlap test
+		lineSeg.v1 = line.v1;
+		lineSeg.v2 = line.v2;
 
 		for (int s = 0; s < numsubsectors; s++) {
 			subsector_t& sub = subsectors[s];
 
+			float mostOverlap = 0;
+
 			for (int k = 0; k < sub.numlines; k++) {
-				if (sub.firstline[k].linedef != &line) {
+				seg_t& seg = sub.firstline[k];
+				if (seg.linedef != &line) {
 					continue;
 				}
+				if (seg.frontsector != line.frontsector) {
+					continue; // only want the sector in front of the line
+				}
 
-				line_subsectors[i].push_back(s);
+				LinkSeg linkseg = GetSegmentOverlap(&seg, &lineSeg);
+				float overlap = linkseg.length();
+				if (overlap > mostOverlap) {
+					mostOverlap = overlap;
+					line_subsectors[i] = s;
+				}
+			}
+		}
+	}
+
+	// add sector triggers
+	for (int i = 0; i < numsubsectors; i++) {
+		subsector_t& sub = subsectors[i];
+		sector_t* sec = sub.sector;
+		NavSector& nav = nav_sectors[i];
+
+		if (sec->tag) {
+			// any line with this sector's tag can move the sector
+			for (int k = 0; k < numlines; k++) {
+				line_t& line = lines[k];
+
+				if (does_linedef_move_tag(&line, sec->tag)) {
+					BotGoal trig;
+					trig.action = WBOT_GOAL_ACTION_USE;
+					trig.lineid = k;
+					nav.triggers.push_back(trig);
+				}
+			}
+		}
+		else {
+			// surrounding lines can move the sector if untagged
+			for (int k = 0; k < sec->linecount; k++) {
+				line_t* line = sec->lines[k];
+
+				if (line->backsector == sec && does_linedef_move_tag(line, 0)) {
+					BotGoal trig;
+					trig.action = WBOT_GOAL_ACTION_USE;
+					trig.lineid = line - lines;
+					nav.triggers.push_back(trig);
+				}
 			}
 		}
 	}
@@ -273,8 +385,7 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 	if (!player)
 		return;
 
-	triggerable_tags.clear();
-
+	blocked_link_cache.clear();
 	subsector_t* sub = R_PointInSubsector(player->x, player->y);
 	int subId = sub - subsectors;
 
@@ -317,7 +428,7 @@ void SectorNavMesh::draw_debug_line(FVector3 start, FVector3 end, AActor* actor)
 		if (i == spawns - 1) {
 			pos = end;
 		}
-		SERVERCOMMANDS_SpawnBlood(pos.X, pos.Y, pos.Z, 0, 1, actor);
+		SERVERCOMMANDS_SpawnBlood((fixed_t)pos.X, (fixed_t)pos.Y, (fixed_t)pos.Z, 0, 1, actor);
 	}
 }
 
@@ -338,8 +449,6 @@ float SectorNavMesh::path_cost(int a, int b) {
 
 vector<int> SectorNavMesh::get_astar_route(AActor* actor, int startSubSectorId, int endSubSectorId)
 {
-	triggerable_tags.clear();
-
 	unordered_set<int> closedSet;
 	unordered_set<int> openSet;
 
@@ -427,11 +536,9 @@ vector<int> SectorNavMesh::get_astar_route(AActor* actor, int startSubSectorId, 
 			if (closedSet.count(neighbor))
 				continue;
 
-			if (link.blocked(actor, NULL)) {
+			if (blocked_link_cache.count(link.id) || link.blocked(actor, NULL)) {
 				continue;
 			}
-			//if (currentNode.blockers.size() > i and currentNode.blockers[i] & blockers != 0)
-			//	continue; // blocked by something (monsterclip, normal clip, etc.). Don't route through this path.
 
 			// discover a new node
 			openSet.insert(neighbor);
@@ -457,57 +564,4 @@ vector<int> SectorNavMesh::get_astar_route(AActor* actor, int startSubSectorId, 
 	}
 
 	return emptyRoute;
-}
-
-bool SectorNavMesh::can_trigger_tag(AActor* actor, short tag, BotGoal* unblockGoal) {
-	auto alreadyChecked = g_wbot_nav.triggerable_tags.find(tag);
-	if (alreadyChecked != g_wbot_nav.triggerable_tags.end()) {
-		if (unblockGoal)
-			*unblockGoal = alreadyChecked->second.goal;
-		return alreadyChecked->second.canTrigger;
-	}
-
-	TagTriggerGoal tgoal;
-	tgoal.canTrigger = false;
-
-	int actorNavId = get_nav_id(actor);
-
-	int lineid = -1;
-	for (int i = 0; i < numlines; i++) {
-		line_t& line = lines[i];
-
-		if (line.args[0] == tag) {
-			lineid = i;
-			break;
-		}
-	}
-
-	if (lineid == -1) {
-		triggerable_tags[tag] = tgoal;
-		return false;
-	}
-
-	auto lineSectors = line_subsectors.find(lineid);
-	if (lineSectors == line_subsectors.end()) {
-		triggerable_tags[tag] = tgoal;
-		return false;
-	}
-
-	for (int subid : lineSectors->second) {
-		// not passing an actor to prevent infinite loops
-		if (subid == actorNavId || get_astar_route(NULL, actorNavId, subid).size()) {
-			// actor can route to a subsector which touches the linedef which activates the tag
-			tgoal.canTrigger = true;
-			tgoal.goal.action = WBOT_GOAL_ACTION_USE;
-			tgoal.goal.lineid = lineid;
-			triggerable_tags[tag] = tgoal;
-			if (unblockGoal)
-				*unblockGoal = tgoal.goal;
-			//Printf("Line %d targets tag %d and can be routed to\n", subid, (int)tag);
-			return true;
-		}
-	}
-
-	triggerable_tags[tag] = tgoal;
-	return false;
 }

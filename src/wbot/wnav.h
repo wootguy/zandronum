@@ -2,6 +2,7 @@
 #include "bots.h"
 #include "wbot.h"
 #include <unordered_map>
+#include <unordered_set>
 
 #define STEP_HEIGHT 24
 #define JUMP_HEIGHT 48
@@ -11,12 +12,13 @@ struct LinkSeg {
 	fixed_t x2, y2;
 
 	float length() {
-		return (FVector2(x1, y1) - FVector2(x2, y2)).Length();
+		return (float)(FVector2(x1, y1) - FVector2(x2, y2)).Length();
 	}
 };
 
 struct NavSectorLink {
 	int target; // subsector ID
+	int id;		// link ID, not associated with any bsp structure
 	LinkSeg overlap; // overlapping region of the segments joining these sectors
 	FVector3 overlapCenter;
 	seg_t* seg;
@@ -38,7 +40,7 @@ struct TagTriggerGoal {
 struct NavSector {
 	int x, y, z; // center point of the sector
 	int id; // also index into nav array
-	fixed_t minZ, maxZ; // last known floor and ceiling height at the center point
+	std::vector<BotGoal> triggers; // things which can trigger this sector to move up/down
 	std::vector<NavSectorLink> links;
 
 	FVector3 pos() {
@@ -52,10 +54,8 @@ struct NavSector {
 class SectorNavMesh {
 public:
 	std::vector<NavSector> nav_sectors;
-	std::unordered_map<int, std::vector<int>> line_subsectors; // list of subsectors for special linedefs
-	
-	// tags that can be triggered by the current path finder. Only valid for a single route calculation
-	std::unordered_map<short, TagTriggerGoal> triggerable_tags;
+	std::unordered_map<int, int> line_subsectors; // maps a linedef to the subsector in front of it
+	std::unordered_set<int> blocked_link_cache; // prevents infinite loops when creating subgoals (e.g to unlock this door you must first open this door then press the button beyond it! oh wait...)
 
 	void generate_node_graph();
 	void draw_nodes(AActor* actor);
@@ -63,7 +63,7 @@ public:
 	int get_nav_id(fixed_t x, fixed_t y);
 	int get_nav_id(AActor* actor);
 	bool can_cross_seg_now(seg_t* seg);
-	bool can_trigger_tag(AActor* actor, short tag, BotGoal* unblockGoal);
+	bool does_linedef_move_tag(line_t* line, short tag); // true if this linedef moves the given sector tag
 
 private:
 	void draw_debug_line(FVector3 start, FVector3 end, AActor* actor);
