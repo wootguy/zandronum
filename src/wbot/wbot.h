@@ -1,5 +1,6 @@
 #pragma once
 #include "bots.h"
+#include <unordered_set>
 
 struct FTraceResults;
 
@@ -11,6 +12,7 @@ enum BotGoalAction {
 struct BotGoal {
 	int action = -1; // WBOT_GOAL_ACTION_*
 	int lineid = -1; // lindef id to interact with
+	std::unordered_set<int> blockers; // path IDs that block A* from reaching routing to this goal
 	TObjPtr<AActor> actor = NULL; // actor to interact with
 
 	std::string desc();
@@ -45,8 +47,8 @@ public:
 	// all thinking logic happens here
 	void ParseScript(void) override;
 
-	bool FindGoal(); // find something to move towards in the map
-	void PushGoal(BotGoal& goal);
+	bool FindGoal(); // find something to do in the map
+	bool PushGoal(BotGoal& goal); // returns false if this is already the current goal
 	void PopGoal();
 	void RouteToGoal();
 	void FindEnemy();

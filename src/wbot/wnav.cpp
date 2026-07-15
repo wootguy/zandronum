@@ -14,7 +14,9 @@ using namespace std;
 
 SectorNavMesh g_wbot_nav;
 
-bool NavSectorLink::blocked(AActor* actor, BotGoal* unblockGoal) {
+bool NavSectorLink::blocked(bool recurse) {
+	g_wbot_nav.pathTests++;
+
 	if (!g_wbot_nav.can_cross_seg_now(seg)) {
 		if (seg->linedef && g_wbot_nav.does_linedef_move_tag(seg->linedef, 0)) {
 			// border is an untagged linedef, which means it moves the target sector,
@@ -22,29 +24,39 @@ bool NavSectorLink::blocked(AActor* actor, BotGoal* unblockGoal) {
 			return false;
 		}
 
-		if (!actor)
-			return true;
+		return true;
+	}
+	
+	if (recurse && linkWidth <= PLAYER_WIDTH) {
+		// too narrow to move thru unless the neighbor sectors are passable
+		NavSector& nav = g_wbot_nav.nav_sectors[parent];
 
-		// check if the path can be unblocked by triggering something else in the map
-		int actorNavId = g_wbot_nav.get_nav_id(actor);
-		NavSector& targetNav = g_wbot_nav.nav_sectors[target];
+		int expandedWidth = linkWidth;
+		int neighbors[2] = {leftSector, rightSector};
+		for (int i = 0; i < 2; i++) {
+			if (neighbors[i] < 0)
+				continue;
 
-		// don't try to traverse this link again while routing to sub-goals
-		g_wbot_nav.blocked_link_cache.insert(id);
-
-		for (BotGoal& goal : targetNav.triggers) {
-			int subid = goal.getNavId();
-			// passing null to the route so we don't get an infinite loop into blocked()
-			if (subid == actorNavId || g_wbot_nav.get_astar_route(actor, actorNavId, subid).size()) {
-				// the target sector can be moved by something the actor can currently reach
-				if (unblockGoal)
-					*unblockGoal = goal;
-
-				// so, it isn't blocked after all.
-				g_wbot_nav.blocked_link_cache.erase(id);
-
-				return false;
+			NavSector& neighborNav = g_wbot_nav.nav_sectors[neighbors[i]];
+			bool isWalkable = nav.getFloorZ() + (STEP_HEIGHT << FRACBITS) > neighborNav.getFloorZ();
+			bool wontHitHead = neighborNav.getCeilZ() > nav.getFloorZ() + (DUCK_HEIGHT << FRACBITS);
+			if (isWalkable && wontHitHead) {
+				// the neighboring sector is not a wall and won't prevent movement on the target sector
+				// TODO: need to check how thick the neighbor is too
+				expandedWidth += PLAYER_WIDTH;
+				continue;
 			}
+
+			NavSectorLink* link = nav.getLink(neighbors[i]);
+
+			if (link && !link->blocked(false)) {
+				expandedWidth += link->linkWidth;
+			}
+		}
+		
+		if (expandedWidth > PLAYER_WIDTH) {
+			// wide enough if you consider the neighbor sectors
+			return false;
 		}
 
 		return true;
@@ -54,14 +66,56 @@ bool NavSectorLink::blocked(AActor* actor, BotGoal* unblockGoal) {
 }
 
 NavSectorLink* NavSector::getLink(int subSectorId) {
+	if (subSectorId < 0)
+		return NULL;
+
 	for (int i = 0; i < links.size(); i++) {
 		if (links[i].target == subSectorId) {
 			return &links[i];
 		}
 	}
 
-	Printf("Nav sector %d has no link to %d\n", id, subSectorId);
+	//Printf("Nav sector %d has no link to %d\n", id, subSectorId);
 	return NULL;
+}
+
+fixed_t NavSector::getHeight() {
+	fixed_t fx = x << FRACBITS;
+	fixed_t fy = y << FRACBITS;
+
+	sector_t* sec = subsectors[id].sector;
+	if (!sec) {
+		Printf("Nav %d has no sector!\n", id);
+		return 0;
+	}
+
+	return sec->ceilingplane.ZatPoint(fx, fy) - sec->floorplane.ZatPoint(fx, fy);
+}
+
+fixed_t NavSector::getFloorZ() {
+	fixed_t fx = x << FRACBITS;
+	fixed_t fy = y << FRACBITS;
+
+	sector_t* sec = subsectors[id].sector;
+	if (!sec) {
+		Printf("Nav %d has no sector!\n", id);
+		return 0;
+	}
+
+	return sec->floorplane.ZatPoint(fx, fy);
+}
+
+fixed_t NavSector::getCeilZ() {
+	fixed_t fx = x << FRACBITS;
+	fixed_t fy = y << FRACBITS;
+
+	sector_t* sec = subsectors[id].sector;
+	if (!sec) {
+		Printf("Nav %d has no sector!\n", id);
+		return 0;
+	}
+
+	return sec->ceilingplane.ZatPoint(fx, fy);
 }
 
 LinkSeg SectorNavMesh::GetSegmentOverlap(seg_t* a, seg_t* b)
@@ -165,16 +219,17 @@ bool SectorNavMesh::can_cross_seg_now(seg_t* seg)
 
 	fixed_t backCeil = seg->backsector->ceilingplane.ZatPoint(x, y);
 
-	if ((backCeil - backFloor) < (56 << FRACBITS)) {
+	if ((backCeil - backFloor) < (DUCK_HEIGHT << FRACBITS)) {
 		return false; // not enough space
 	}
 
 	return true;
 }
 
-subsector_t* SectorNavMesh::get_neighbor_subsector(subsector_t* ignoreSector, seg_t* borderSeg, LinkSeg& linkseg) {
-	const fixed_t playerWidth = 32 << FRACBITS;
-	memset(&linkseg, 0, sizeof(linkseg));
+LinkSeg SectorNavMesh::get_neighbor_subsector(subsector_t* ignoreSector, seg_t* borderSeg) {
+	const fixed_t epsilonWidth = 1 << FRACBITS;
+	LinkSeg ret;
+	memset(&ret, 0, sizeof(ret));
 
 	for (int j = 0; j < numsubsectors; j++) {
 		subsector_t& otherSub = subsectors[j];
@@ -188,14 +243,17 @@ subsector_t* SectorNavMesh::get_neighbor_subsector(subsector_t* ignoreSector, se
 				continue; // impassable wall
 
 			// TODO: Allow thin segments for tightrope areas
-			linkseg = GetSegmentOverlap(&tseg, borderSeg);
-			if (linkseg.length() >= playerWidth) {
-				return &otherSub;
+			ret = GetSegmentOverlap(&tseg, borderSeg);
+			if (ret.length() >= epsilonWidth) {
+				ret.idx = s;
+				ret.otherSub = j;
+				return ret;
 			}
 		}
 	}
 
-	return NULL;
+	ret.otherSub = -1;
+	return ret;
 }
 
 bool SectorNavMesh::does_linedef_move_tag(line_t* line, short tag) {
@@ -253,7 +311,6 @@ void SectorNavMesh::generate_node_graph() {
 	nav_sectors.clear();
 	nav_sectors.resize(numsubsectors);
 	line_subsectors.clear();
-	blocked_link_cache.clear();
 
 	int totalLinks = 0;
 
@@ -275,10 +332,9 @@ void SectorNavMesh::generate_node_graph() {
 			if (!is_seg_potentially_crossable(&seg))
 				continue;
 
-			LinkSeg linkseg;
-			subsector_t* neighborSector = get_neighbor_subsector(&sub, &seg, linkseg);
+			LinkSeg linkseg = get_neighbor_subsector(&sub, &seg);
 
-			if (!neighborSector)
+			if (linkseg.otherSub < 0)
 				continue;
 
 			fixed_t cx = (linkseg.x1 + linkseg.x2) / 2;
@@ -287,11 +343,30 @@ void SectorNavMesh::generate_node_graph() {
 			float z = csector->sector->floorplane.ZatPoint(cx, cy);
 
 			NavSectorLink link;
-			link.target = neighborSector - subsectors;
-			link.overlap = linkseg;
+			link.target = linkseg.otherSub;
 			link.overlapCenter = FVector3(cx, cy, z);
 			link.seg = &seg;
 			link.id = totalLinks++;
+			link.parent = i;
+			link.linkWidth = (int)linkseg.length() >> FRACBITS;
+
+			if (i == 87 && linkseg.otherSub == 94) {
+				Printf("");
+			}
+
+			subsector_t& neighbor = subsectors[linkseg.otherSub];
+			int leftIdx = (linkseg.idx + neighbor.numlines - 1) % neighbor.numlines;
+			int rightIdx = (linkseg.idx + 1) % neighbor.numlines;
+			LinkSeg leftSector = get_neighbor_subsector(&neighbor, &neighbor.firstline[leftIdx]);
+			LinkSeg rightSector = get_neighbor_subsector(&neighbor, &neighbor.firstline[rightIdx]);
+			link.leftSector = leftSector.otherSub;
+			link.rightSector = rightSector.otherSub;
+
+			if (link.linkWidth < PLAYER_WIDTH && link.leftSector == -1 && link.rightSector == -1) {
+				// link is too narrow to enter and both sides of it are impassable walls
+				continue;
+			}
+
 			nav.links.push_back(link);
 		}
 
@@ -385,51 +460,79 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 	if (!player)
 		return;
 
-	blocked_link_cache.clear();
 	subsector_t* sub = R_PointInSubsector(player->x, player->y);
 	int subId = sub - subsectors;
 
 	if (sub && subId < nav_sectors.size()) {
 		NavSector& nav = nav_sectors[subId];
 		FVector3 pos(nav.x << FRACBITS, nav.y << FRACBITS, nav.z << FRACBITS);
-		FVector3 plr(player->x, player->y, player->z + 16);
+		int spritesDrawn = 0;
+		const int maxSprites = 1000;
 
-		for (int k = 0; k < nav.links.size(); k++) {
+		for (int k = 0; k < nav.links.size() && spritesDrawn < maxSprites; k++) {
 			NavSectorLink& link = nav.links[k];
 			NavSector& linkNav = nav_sectors[link.target];
-			if (!link.blocked(actor, NULL)) {
-				draw_debug_line(nav.pos(), link.pos(), actor);
-				draw_debug_line(link.pos(), linkNav.pos(), actor);
+			
+			if (!link.blocked()) {
+				spritesDrawn += draw_debug_line(nav.pos(), link.pos(), actor);
+				spritesDrawn += draw_debug_line(link.pos(), linkNav.pos(), actor);
 			}
 		}
 
 		fixed_t borderZ = nav.z << FRACBITS;
-		for (int k = 0; k < sub->numlines; k++) {
+		for (int k = 0; k < sub->numlines && spritesDrawn < maxSprites; k++) {
 			seg_t& seg = sub->firstline[k];
 
 			FVector3 start(seg.v1->x, seg.v1->y, borderZ);
 			FVector3 end(seg.v2->x, seg.v2->y, borderZ);
-			draw_debug_line(start, end, actor);
+			spritesDrawn += draw_debug_line(start, end, actor);
+		}
+
+		if (spritesDrawn >= maxSprites) {
+			Printf("Overflow sprites!\n");
 		}
 	}
 
 	for (int i = 0; i < nav_sectors.size(); i++) {
 		NavSector& node = nav_sectors[i];
+
+		if (P_AproxDistance((node.x << FRACBITS) - player->x, (node.y << FRACBITS) - player->y) > (1000 << FRACBITS)) {
+			continue;
+		}
+
 		SERVERCOMMANDS_SpawnBlood(node.x << FRACBITS, node.y << FRACBITS, (node.z + 16) << FRACBITS, 0, 100, player);
 	}
 }
 
-void SectorNavMesh::draw_debug_line(FVector3 start, FVector3 end, AActor* actor) {
+int SectorNavMesh::draw_debug_line(FVector3 start, FVector3 end, AActor* actor) {
 	// this sucks and the railgun effect crashes the client so can't use that
-	FVector3 dir = (end - start).Resize(4 << FRACBITS);
-	int spawns = (end - start).Length() / (4 << FRACBITS);
-	for (int i = 0; i < spawns; i++) {
+	
+	FVector3 delta = end - start;
+	float len = delta.Length();
+	int ilen = (int)len >> FRACBITS;
+	int spacing = 4;
+	
+	if (ilen > 1600)
+		spacing = 64;
+	else if (ilen > 800)
+		spacing = 32;
+	else if (ilen > 400)
+		spacing = 16;
+	else if (ilen > 200)
+		spacing = 8;
+
+	FVector3 dir = delta.Resize(spacing << FRACBITS);
+	int spawns = len / (spacing << FRACBITS);
+	int i = 0;
+	for (i = 0; i < spawns; i++) {
 		FVector3 pos = start + (dir * i);
 		if (i == spawns - 1) {
 			pos = end;
 		}
 		SERVERCOMMANDS_SpawnBlood((fixed_t)pos.X, (fixed_t)pos.Y, (fixed_t)pos.Z, 0, 1, actor);
 	}
+
+	return i;
 }
 
 int SectorNavMesh::get_nav_id(fixed_t x, fixed_t y) {
@@ -447,7 +550,7 @@ float SectorNavMesh::path_cost(int a, int b) {
 	return delta.Length();
 }
 
-vector<int> SectorNavMesh::get_astar_route(AActor* actor, int startSubSectorId, int endSubSectorId)
+vector<int> SectorNavMesh::get_astar_route(int startSubSectorId, int endSubSectorId, unordered_set<int>* blockedPaths)
 {
 	unordered_set<int> closedSet;
 	unordered_set<int> openSet;
@@ -457,6 +560,10 @@ vector<int> SectorNavMesh::get_astar_route(AActor* actor, int startSubSectorId, 
 	unordered_map<int, int> cameFrom;
 
 	vector<int> emptyRoute;
+
+	if (verbose) {
+		Printf("START route from %d to %d\n", startSubSectorId, endSubSectorId);
+	}
 
 	if (startSubSectorId < 0 || endSubSectorId < 0 || startSubSectorId > nav_sectors.size() || endSubSectorId > nav_sectors.size()) {
 		Printf("AStarRoute: invalid start/end nodes\n");
@@ -478,6 +585,7 @@ vector<int> SectorNavMesh::get_astar_route(AActor* actor, int startSubSectorId, 
 	const int maxIter = 8192;
 	int curIter = 0;
 	while (!openSet.empty()) {
+
 		if (++curIter > maxIter) {
 			Printf("AStarRoute exceeded max iterations searching path (%d)", maxIter);
 			break;
@@ -495,10 +603,7 @@ vector<int> SectorNavMesh::get_astar_route(AActor* actor, int startSubSectorId, 
 			}
 		}
 
-		//println("Current is " + current);
-
 		if (current == goal.id) {
-			//println("MAde it to the goal");
 			// goal reached, build the route
 			vector<int> path;
 			path.push_back(current);
@@ -515,6 +620,10 @@ vector<int> SectorNavMesh::get_astar_route(AActor* actor, int startSubSectorId, 
 			}
 			reverse(path.begin(), path.end());
 
+			if (verbose) {
+				Printf("FINISH route calculation from %d to %d. Size is %d. visited %d nodes\n", startSubSectorId, endSubSectorId, path.size(), closedSet.size());
+			}
+
 			return path;
 		}
 
@@ -530,15 +639,14 @@ vector<int> SectorNavMesh::get_astar_route(AActor* actor, int startSubSectorId, 
 			}
 
 			int neighbor = link.target;
-			if (neighbor < 0 || neighbor >= nav_sectors.size()) {
+			if (neighbor < 0 || neighbor >= nav_sectors.size())
 				continue;
-			}
+
 			if (closedSet.count(neighbor))
 				continue;
 
-			if (blocked_link_cache.count(link.id) || link.blocked(actor, NULL)) {
+			if (blockedPaths && blockedPaths->count(link.id))
 				continue;
-			}
 
 			// discover a new node
 			openSet.insert(neighbor);

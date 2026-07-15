@@ -76,6 +76,14 @@ std::string BotGoal::desc() {
 
 	thingName += " in sector " + to_string(getNavId());
 
+	string blockerStr;
+	for (const int& id : blockers) {
+		blockerStr += " " + to_string(id);
+	}
+	if (blockerStr.size()) {
+		thingName += "   (blocked at " + blockerStr + ")";
+	}
+
 	switch (action) {
 	case WBOT_GOAL_ACTION_MOVE_TO:
 		return "Move to " + thingName;
@@ -165,7 +173,6 @@ void CWootBot::ParseScript() {
 
 void CWootBot::ShowDebugInfo() {
 	g_wbot_nav.draw_nodes(m_pPlayer->mo);
-	g_wbot_nav.blocked_link_cache.clear();
 
 	int thisSubId = g_wbot_nav.get_nav_id(m_pPlayer->mo);
 
@@ -190,9 +197,9 @@ void CWootBot::ShowDebugInfo() {
 
 		int numBlocked = 0;
 		for (int i = 0; i < nav.links.size(); i++) {
-			if (nav.links[i].blocked(player, NULL)) {
+			if (nav.links[i].blocked()) {
 				numBlocked++;
-				nav.links[i].blocked(player, NULL); // place breakpoint here
+				nav.links[i].blocked(); // place breakpoint here
 			}
 		}
 		navInfo += " (" + to_string(nav.links.size()) + " links, " + to_string(numBlocked) + " blocked)";
@@ -350,37 +357,73 @@ void CWootBot::RouteThink() {
 		if (thisSubId == m_route[0]) {
 			NavSectorLink* link = g_wbot_nav.nav_sectors[thisSubId].getLink(m_route[1]);
 
-			BotGoal unblockGoal;
-			if (!link || link->blocked(m_pPlayer->mo, &unblockGoal)) {
-				link->blocked(m_pPlayer->mo, NULL); // debug here
-				DebugPrint(VarArgs("Link got blocked from %d to %d!\n", thisSubId, link->target));
-				CancelRoute();
+			if (!link)
 				return;
-			}
 
-			if (link->blocked(NULL, NULL)) {
-				// link is blocked by something the actor can activate
-				sector_t* thisSector = subsectors[thisSubId].sector;
-				sector_t* targetSector = subsectors[link->target].sector;
-				if (targetSector && (targetSector->floordata || targetSector->ceilingdata)) {
-					stateFlags |= FL_WBOT_WAITING_DOOR;
-					return; // wait until the blocker is done moving
+			if (link->blocked()) {
+				link->blocked(); // debug here
+
+				DebugPrint(VarArgs("Link got blocked from %d to %d!\n", thisSubId, link->target));
+
+				// if the blocker is moving or we're on an elevator, then be patient
+				{
+					sector_t* thisSector = subsectors[thisSubId].sector;
+					sector_t* targetSector = subsectors[link->target].sector;
+					if (targetSector && (targetSector->floordata || targetSector->ceilingdata)) {
+						stateFlags |= FL_WBOT_WAITING_DOOR;
+						return; // wait until the blocker is done moving
+					}
+					else if (thisSector && (thisSector->floordata || thisSector->ceilingdata)) {
+						stateFlags |= FL_WBOT_WAITING_ELEV;
+						return; // wait until the elevator is done moving
+					}
 				}
-				else if (thisSector && (thisSector->floordata || thisSector->ceilingdata)) {
-					stateFlags |= FL_WBOT_WAITING_ELEV;
-					return; // wait until the elevator is done moving
+
+				BotGoal& curGoal = m_goals[m_goals.size() - 1];
+				curGoal.blockers.insert(link->id);
+
+				// don't try to route through previous paths we've been trying to unblock
+				unordered_set<int> allBlockedPaths;
+				for (BotGoal& goal : m_goals) {
+					allBlockedPaths.insert(goal.blockers.begin(), goal.blockers.end());
 				}
-				else {
-					PushGoal(unblockGoal); // nothing is moving yet, so go try to activate the sector ourselves
+
+				// nothing is moving, try unblocking it ourselves.
+				NavSector& targetNav = g_wbot_nav.nav_sectors[link->target];
+				for (BotGoal& goal : targetNav.triggers) {
+					int subid = goal.getNavId();
+
+					if (subid == thisSubId || g_wbot_nav.get_astar_route(thisSubId, subid, &allBlockedPaths).size()) {
+						if (PushGoal(goal)) {
+							return;
+						}
+					}
 				}
+
+				// nothing can unblock the path that stopped us. Try routing around it.
+				m_route = g_wbot_nav.get_astar_route(thisSubId, curGoal.getNavId(), &allBlockedPaths);
+				if (m_route.size()) {
+					DebugPrint("Routing around the blocked path...\n");
+					return;
+				}
+				
+				DebugPrint("Route aborted. No way to reach the goal.\n");
+				CancelRoute();
 				return;
 			}
 
 			// move to the next link
 			if (MoveTo(link->pos(), 32, routeSpeed)) {
 				// now move towards the center until we end up inside the target sector
-				FVector3 centerGoal = g_wbot_nav.nav_sectors[m_route[1]].pos();
+				NavSector& nav = g_wbot_nav.nav_sectors[m_route[1]];
+				FVector3 centerGoal = nav.pos();
 				MoveTo(centerGoal, 16, routeSpeed);
+
+				// duck if unable to fit while standing
+				int secHeight = nav.getHeight() >> FRACBITS;
+				if (secHeight < STAND_HEIGHT) {
+					m_lButtons |= BT_CROUCH;
+				}
 			}
 		}
 		else {
@@ -597,19 +640,21 @@ bool CWootBot::FindGoal() {
 	return m_route.size();
 }
 
-void CWootBot::PushGoal(BotGoal& goal) {
+bool CWootBot::PushGoal(BotGoal& goal) {
 	if (!m_goals.empty()) {
 		BotGoal& lastGoal = m_goals[m_goals.size() - 1];
 		if (lastGoal.matches(goal)) {
 			// can happen when hugging the wall of a triggerable sectors
-			DebugPrint(VarArgs("Skipping duplicate goal push: %s\n", goal.desc()));
-			return;
+			DebugPrint(VarArgs("Skipping duplicate goal push: %s\n", goal.desc().c_str()));
+			return false;
 		}
 	}
 
 	DebugPrint(VarArgs("New goal: %s\n", goal.desc().c_str()));
 	m_goals.push_back(goal);
 	RouteToGoal();
+
+	return true;
 }
 
 void CWootBot::PopGoal() {
@@ -622,7 +667,11 @@ void CWootBot::PopGoal() {
 	BotGoal& goal = m_goals[m_goals.size() - 1];
 	DebugPrint(VarArgs("Finished goal: %s\n", goal.desc().c_str()));
 	m_goals.pop_back();
-	RouteToGoal();
+
+	if (m_goals.size())
+		RouteToGoal();
+	else
+		CancelRoute();
 }
 
 void CWootBot::RouteToGoal() {
@@ -637,8 +686,7 @@ void CWootBot::RouteToGoal() {
 
 	int goalSubId = goal.getNavId();
 	int thisSubId = g_wbot_nav.get_nav_id(m_pPlayer->mo);
-	g_wbot_nav.blocked_link_cache.clear();
-	m_route = g_wbot_nav.get_astar_route(m_pPlayer->mo, thisSubId, goalSubId);
+	m_route = g_wbot_nav.get_astar_route(thisSubId, goalSubId);
 
 	if (m_route.size()) {
 		DebugPrint(VarArgs("Routing to goal: %s\n", goal.desc().c_str()));
