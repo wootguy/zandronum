@@ -9,6 +9,7 @@
 #define STAND_HEIGHT 56
 #define DUCK_HEIGHT 28
 #define PLAYER_WIDTH 32
+#define PLAYER_RADIUS 16
 
 struct LinkSeg {
 	fixed_t x1, y1;
@@ -36,7 +37,7 @@ struct NavSectorLink {
 	}
 	
 	// true if this link can be moved thru, else it is too high or blocked.
-	bool blocked(bool recurse=true);
+	bool blocked(AActor* actor, bool recurse=true);
 };
 
 struct TagTriggerGoal {
@@ -79,6 +80,7 @@ public:
 	std::vector<int> get_astar_route(int startSubSectorId, int endSubSectorId, std::unordered_set<int>* blockedPaths=NULL);
 	int get_nav_id(fixed_t x, fixed_t y);
 	int get_nav_id(AActor* actor);
+	bool get_key_goals_for_line(AActor* actor, line_t* linedef, std::vector<BotGoal>& keyGoals, std::unordered_set<int>* blockedPaths); // get key required to use the linedef. Returns false if keys don't exist anywhere in the map.
 
 private:
 	int draw_debug_line(FVector3 start, FVector3 end, AActor* actor); // returns number of sprites drawn

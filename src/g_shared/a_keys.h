@@ -20,5 +20,6 @@ void P_InitKeyMessages ();
 void P_DeinitKeyMessages ();
 int P_GetMapColorForLock (int lock);
 int P_GetMapColorForKey (AInventory *key);
+TArray<TArray<PClass*>> P_GetRequiredKeys(int keynum); // key classes required to activate a linedef with the given keynum arg
 
 #endif

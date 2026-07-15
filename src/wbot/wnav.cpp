@@ -4,6 +4,7 @@
 #include "sv_commands.h"
 #include "p_local.h"
 #include "p_lnspec.h"
+#include "a_keys.h"
 
 #include <algorithm>
 #include <unordered_set>
@@ -14,11 +15,17 @@ using namespace std;
 
 SectorNavMesh g_wbot_nav;
 
-bool NavSectorLink::blocked(bool recurse) {
+bool NavSectorLink::blocked(AActor* actor, bool recurse) {
 	g_wbot_nav.pathTests++;
 
 	if (!g_wbot_nav.can_cross_seg_now(seg)) {
-		if (seg->linedef && g_wbot_nav.does_linedef_move_tag(seg->linedef, 0)) {
+		line_t* line = seg->linedef;
+
+		if (line && g_wbot_nav.does_linedef_move_tag(line, 0)) {
+			if (line->special == Door_LockedRaise && !P_CheckKeys(actor, line->args[3], false)) {
+				return true; // don't have the keys required to use this
+			}
+
 			// border is an untagged linedef, which means it moves the target sector,
 			// which probably unblocks the path. TODO: not always!
 			return false;
@@ -49,7 +56,7 @@ bool NavSectorLink::blocked(bool recurse) {
 
 			NavSectorLink* link = nav.getLink(neighbors[i]);
 
-			if (link && !link->blocked(false)) {
+			if (link && !link->blocked(actor, false)) {
 				expandedWidth += link->linkWidth;
 			}
 		}
@@ -422,10 +429,7 @@ void SectorNavMesh::generate_node_graph() {
 				line_t& line = lines[k];
 
 				if (does_linedef_move_tag(&line, sec->tag)) {
-					BotGoal trig;
-					trig.action = WBOT_GOAL_ACTION_USE;
-					trig.lineid = k;
-					nav.triggers.push_back(trig);
+					nav.triggers.push_back(BotGoal(WBOT_GOAL_ACTION_USE, k));
 				}
 			}
 		}
@@ -435,10 +439,7 @@ void SectorNavMesh::generate_node_graph() {
 				line_t* line = sec->lines[k];
 
 				if (line->backsector == sec && does_linedef_move_tag(line, 0)) {
-					BotGoal trig;
-					trig.action = WBOT_GOAL_ACTION_USE;
-					trig.lineid = line - lines;
-					nav.triggers.push_back(trig);
+					nav.triggers.push_back(BotGoal(WBOT_GOAL_ACTION_USE, line - lines));
 				}
 			}
 		}
@@ -473,7 +474,7 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 			NavSectorLink& link = nav.links[k];
 			NavSector& linkNav = nav_sectors[link.target];
 			
-			if (!link.blocked()) {
+			if (!link.blocked(player)) {
 				spritesDrawn += draw_debug_line(nav.pos(), link.pos(), actor);
 				spritesDrawn += draw_debug_line(link.pos(), linkNav.pos(), actor);
 			}
@@ -672,4 +673,75 @@ vector<int> SectorNavMesh::get_astar_route(int startSubSectorId, int endSubSecto
 	}
 
 	return emptyRoute;
+}
+
+bool SectorNavMesh::get_key_goals_for_line(AActor* actor, line_t* line, vector<BotGoal>& keyGoals, std::unordered_set<int>* blockedPaths) {
+	if (line->special != Door_LockedRaise)
+		return true; // not a locked door
+
+	if (P_CheckKeys(actor, line->args[3], false))
+		return true; // already have all the keys
+
+	TArray<TArray<PClass*>> keyGroups = P_GetRequiredKeys(line->args[3]);
+
+	if (keyGroups.Size() == 0)
+		return true; // no keys required
+
+	// Get routes to all keys in the map, so the closest one can be selected
+	struct KeyRoute {
+		AKey* key;
+		int routeSize;
+	};
+
+	int actorNavId = get_nav_id(actor);
+	unordered_map<PClass*, KeyRoute> mapKeys;
+	TThinkerIterator<AKey> it;
+	AKey* mapKey;
+	while ((mapKey = it.Next()) != NULL) {
+		int keyNavId = get_nav_id(mapKey);
+
+		KeyRoute keyRoute;
+		keyRoute.key = mapKey;
+		keyRoute.routeSize = get_astar_route(actorNavId, keyNavId, blockedPaths).size();
+
+		if (keyRoute.routeSize > 0 || actorNavId == keyNavId) {
+			mapKeys[mapKey->GetClass()] = keyRoute;
+		}
+	}
+
+	for (int i = 0; i < keyGroups.Size(); i++) {
+		TArray<PClass*>& group = keyGroups[i];
+
+		int bestKeyDist = INT_MAX;
+		AKey* bestKey = NULL;
+
+		if (group.Size()) {
+			for (int k = 0; k < group.Size(); k++) {
+				auto key = mapKeys.find(group[k]);
+				if (key != mapKeys.end() && key->second.routeSize < bestKeyDist) {
+					bestKeyDist = key->second.routeSize;
+					bestKey = key->second.key;
+				}
+			}
+		}
+		else {
+			// empty group means any key will work
+			for (auto item : mapKeys) {
+				if (item.second.routeSize < bestKeyDist) {
+					bestKeyDist = item.second.routeSize;
+					bestKey = item.second.key;
+				}
+			}
+		}
+
+		if (!bestKey) {
+			// no key satisfies the group requirement
+			Printf("Impossible key requirements for line %d\n", line - lines);
+			return false;
+		}
+
+		keyGoals.push_back(BotGoal(WBOT_GOAL_ACTION_TOUCH, bestKey));
+	}
+
+	return true;
 }

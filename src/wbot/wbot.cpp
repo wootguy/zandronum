@@ -9,6 +9,9 @@
 #include "po_man.h"
 #include "wnav.h"
 #include "p_trace.h"
+#include "p_lnspec.h"
+#include "a_keys.h"
+#include "actor.h"
 
 #include <stdlib.h>
 #include <time.h>
@@ -65,6 +68,13 @@ AActor* getAnyPlayer() {
 	return NULL;
 }
 
+void MakeVectors(angle_t angle, FVector3& forward, FVector3& right) {
+	fixed_t fsine = finesine[angle >> ANGLETOFINESHIFT];
+	fixed_t fcosine = finecosine[angle >> ANGLETOFINESHIFT];
+	forward = FVector3(fcosine, fsine, 0);
+	right = FVector3(fsine, -fcosine, 0);
+}
+
 std::string BotGoal::desc() {
 	std::string thingName;
 	if (actor) {
@@ -89,6 +99,8 @@ std::string BotGoal::desc() {
 		return "Move to " + thingName;
 	case WBOT_GOAL_ACTION_USE:
 		return "Use " + thingName;
+	case WBOT_GOAL_ACTION_TOUCH:
+		return "Touch " + thingName;
 	}
 
 	return "??? " + thingName;
@@ -113,6 +125,31 @@ int BotGoal::getNavId() {
 	return -1;
 }
 
+FVector3 BotGoal::pos() {
+	if (actor) {
+		return FVector3(actor->x, actor->y, actor->Sector->floorplane.ZatPoint(actor->x, actor->y));
+	}
+	else if (lineid >= 0) {
+		line_t& line = lines[lineid];
+		fixed_t x = (line.v1->x + line.v2->x) / 2;
+		fixed_t y = (line.v1->y + line.v2->y) / 2;
+		fixed_t z = line.frontsector->floorplane.ZatPoint(x, y);
+		return FVector3(x, y, z);
+	}
+
+	Printf("Goal has no actor nor lineid\n");
+	return FVector3(0, 0, 0);
+}
+
+int BotGoal::touchDistance(AActor* toucher) {
+	if (actor) {
+		return ((actor->radius + toucher->radius) >> FRACBITS) - 1; // subtracted 1 unit just in case
+	}
+	else if (lineid >= 0) {
+		return (toucher->radius >> FRACBITS) + 1; // added 1 in case wall is solid and you can't go inside it
+	}
+}
+
 CWootBot::CWootBot(const char* pszName, const char* pszTeamName, ULONG ulPlayerNum)
 	: CSkullBot(pszName, pszTeamName, ulPlayerNum) {
 	
@@ -125,6 +162,8 @@ CWootBot::~CWootBot() {}
 
 void CWootBot::ParseScript() {
 	init_wootbots();
+
+	m_navid = g_wbot_nav.get_nav_id(m_pPlayer->mo);
 
 	// level changed
 	if (lastInit != level.levelnum) {
@@ -195,19 +234,46 @@ void CWootBot::ShowDebugInfo() {
 		navInfo += to_string(plrnavid);
 		NavSector& nav = g_wbot_nav.nav_sectors[plrnavid];
 
-		int numBlocked = 0;
+		navInfo += "\nLinks:";
 		for (int i = 0; i < nav.links.size(); i++) {
-			if (nav.links[i].blocked()) {
-				numBlocked++;
-				nav.links[i].blocked(); // place breakpoint here
+			NavSectorLink& link = nav.links[i];
+			NavSector& targ = g_wbot_nav.nav_sectors[link.target];
+			navInfo += "\n   " + to_string(link.id) + " -> " + to_string(link.target);
+			if (targ.triggers.size())
+				navInfo += " (" + to_string(targ.triggers.size()) + " triggers)";
+			if (link.blocked(player)) {
+				navInfo += " (blocked)";
 			}
 		}
-		navInfo += " (" + to_string(nav.links.size()) + " links, " + to_string(numBlocked) + " blocked)";
 
 		navInfo += "\nSector triggers:";
 		for (int i = 0; i < nav.triggers.size(); i++) {
 			navInfo += "\n   " + nav.triggers[i].desc() 
 				+ " (sector " + to_string(nav.triggers[i].getNavId()) + ")";
+		}
+
+		navInfo += "\nLinedef: ";
+		FVector3 forward, right;
+		MakeVectors(player->angle, forward, right);
+		FVector3 start = FVector3(player->x, player->y, player->z + player->player->viewheight);
+		fixed_t testDist = 64 << FRACBITS;
+		sector_t* sector = R_PointInSubsector((fixed_t)start.X, (fixed_t)start.Y)->sector;
+		FTraceResults tr;
+		if (Trace((fixed_t)start.X, (fixed_t)start.Y, (fixed_t)start.Z, sector,
+			(fixed_t)forward.X, (fixed_t)forward.Y, 0, testDist, 0,
+			ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, NULL, tr))
+		{
+			line_t* line = tr.Line;
+			navInfo += "ID: " + to_string(tr.Line - lines);
+			
+			if (line->special) {
+				navInfo += ", Special: " + to_string(line->special) + ", Tags:";
+				for (int i = 0; i < 5; i++)
+					navInfo += " " + to_string(line->args[i]);
+			}
+		}
+		else {
+			navInfo += "<none>";
 		}
 	}
 
@@ -292,26 +358,17 @@ void CWootBot::GoalActionThink() {
 	case WBOT_GOAL_ACTION_MOVE_TO:
 		PopGoal(); // nothing to do
 		break;
-	case WBOT_GOAL_ACTION_USE:
-		if (goal.lineid >= 0) {
-			line_t& line = lines[goal.lineid];
-			fixed_t x = (line.v1->x + line.v2->x) / 2;
-			fixed_t y = (line.v1->y + line.v2->y) / 2;
-			fixed_t z = m_pPlayer->mo->z + m_pPlayer->viewheight;
-			AimAtPos(FVector3(x, y, z));
-			m_forwardMove = RUN_SPEED;
-
-			// press use when close enough to the linedef
-			FTraceResults tr;
-			if (TraceAhead(24, m_pPlayer->viewheight, &tr)) {
-				if (tr.Line == &line) {
-					m_lButtons |= BT_USE;
-					PopGoal();
-				}
-			}
+	case WBOT_GOAL_ACTION_USE: {
+		int useDist = (m_pPlayer->mo->UseRange >> FRACBITS) - 1;
+		if (MoveTo(goal.pos(), useDist)) {
+			m_lButtons |= BT_USE;
+			PopGoal();
 		}
-		else if (goal.actor) {
-			DebugPrint("Actor goal use action not implemented\n");
+		break;
+	}
+	case WBOT_GOAL_ACTION_TOUCH:
+		if (MoveTo(goal.pos(), goal.touchDistance(m_pPlayer->mo))) {
+			PopGoal();
 		}
 		break;
 	}
@@ -322,7 +379,6 @@ void CWootBot::GoalActionThink() {
 }
 
 void CWootBot::RouteThink() {
-	int thisSubId = g_wbot_nav.get_nav_id(m_pPlayer->mo);
 	const int routeSpeed = 100;
 
 	m_forwardMove = 0;
@@ -330,7 +386,7 @@ void CWootBot::RouteThink() {
 	stateFlags = 0;
 
 	if (m_route.size() > 1) {
-		if (thisSubId == m_route[1]) {
+		if (m_navid == m_route[1]) {
 			// inside the target sector. Advance the route.
 			m_route.erase(m_route.begin());
 			pretendRouteSector = -1;
@@ -350,65 +406,18 @@ void CWootBot::RouteThink() {
 	}
 
 	if (pretendRouteSector >= 0) {
-		thisSubId = pretendRouteSector;
+		m_navid = pretendRouteSector;
 	}
 
 	if (m_route.size() > 1) {	
-		if (thisSubId == m_route[0]) {
-			NavSectorLink* link = g_wbot_nav.nav_sectors[thisSubId].getLink(m_route[1]);
+		if (m_navid == m_route[0]) {
+			NavSectorLink* link = g_wbot_nav.nav_sectors[m_navid].getLink(m_route[1]);
 
 			if (!link)
 				return;
 
-			if (link->blocked()) {
-				link->blocked(); // debug here
-
-				DebugPrint(VarArgs("Link got blocked from %d to %d!\n", thisSubId, link->target));
-
-				// if the blocker is moving or we're on an elevator, then be patient
-				{
-					sector_t* thisSector = subsectors[thisSubId].sector;
-					sector_t* targetSector = subsectors[link->target].sector;
-					if (targetSector && (targetSector->floordata || targetSector->ceilingdata)) {
-						stateFlags |= FL_WBOT_WAITING_DOOR;
-						return; // wait until the blocker is done moving
-					}
-					else if (thisSector && (thisSector->floordata || thisSector->ceilingdata)) {
-						stateFlags |= FL_WBOT_WAITING_ELEV;
-						return; // wait until the elevator is done moving
-					}
-				}
-
-				BotGoal& curGoal = m_goals[m_goals.size() - 1];
-				curGoal.blockers.insert(link->id);
-
-				// don't try to route through previous paths we've been trying to unblock
-				unordered_set<int> allBlockedPaths;
-				for (BotGoal& goal : m_goals) {
-					allBlockedPaths.insert(goal.blockers.begin(), goal.blockers.end());
-				}
-
-				// nothing is moving, try unblocking it ourselves.
-				NavSector& targetNav = g_wbot_nav.nav_sectors[link->target];
-				for (BotGoal& goal : targetNav.triggers) {
-					int subid = goal.getNavId();
-
-					if (subid == thisSubId || g_wbot_nav.get_astar_route(thisSubId, subid, &allBlockedPaths).size()) {
-						if (PushGoal(goal)) {
-							return;
-						}
-					}
-				}
-
-				// nothing can unblock the path that stopped us. Try routing around it.
-				m_route = g_wbot_nav.get_astar_route(thisSubId, curGoal.getNavId(), &allBlockedPaths);
-				if (m_route.size()) {
-					DebugPrint("Routing around the blocked path...\n");
-					return;
-				}
-				
-				DebugPrint("Route aborted. No way to reach the goal.\n");
-				CancelRoute();
+			if (link->blocked(m_pPlayer->mo)) {
+				BlockedPathThink(link);
 				return;
 			}
 
@@ -427,7 +436,7 @@ void CWootBot::RouteThink() {
 			}
 		}
 		else {
-			DebugPrint(VarArgs("Fell off the route (expected %d but got %d)\n", m_route[0], thisSubId));
+			DebugPrint(VarArgs("Fell off the route (expected %d but got %d)\n", m_route[0], m_navid));
 			CancelRoute();
 		}
 	}
@@ -443,6 +452,87 @@ void CWootBot::RouteThink() {
 		CancelRoute();
 		DebugPrint("I got stuck! Cancelling route\n");
 	}
+}
+
+void CWootBot::BlockedPathThink(NavSectorLink* link) {
+	link->blocked(m_pPlayer->mo); // debug here
+
+	// if the blocker is moving or we're on an elevator, then be patient
+	{
+		sector_t* thisSector = subsectors[m_navid].sector;
+		sector_t* targetSector = subsectors[link->target].sector;
+		if (targetSector && (targetSector->floordata || targetSector->ceilingdata)) {
+			stateFlags |= FL_WBOT_WAITING_DOOR;
+			return; // wait until the blocker is done moving
+		}
+		else if (thisSector && (thisSector->floordata || thisSector->ceilingdata)) {
+			stateFlags |= FL_WBOT_WAITING_ELEV;
+			return; // wait until the elevator is done moving
+		}
+	}
+
+	string blockMsg = VarArgs("Link %d blocked!", link->id);
+
+	BotGoal& curGoal = m_goals[m_goals.size() - 1];
+	curGoal.blockers.insert(link->id);
+
+	// don't try to route through previous paths we've been trying to unblock
+	unordered_set<int> allBlockedPaths;
+	for (BotGoal& goal : m_goals) {
+		allBlockedPaths.insert(goal.blockers.begin(), goal.blockers.end());
+	}
+
+	// get keys needed to cross this line, if missing
+	line_t* line = link->seg->linedef;
+	if (line && line->special == Door_LockedRaise && !P_CheckKeys(m_pPlayer->mo, line->args[3], false)) {
+		vector<BotGoal> keyGoals;
+		g_wbot_nav.get_key_goals_for_line(m_pPlayer->mo, line, keyGoals, &allBlockedPaths);
+
+		bool allGoalsPushed = true;
+		for (BotGoal& keyGoal : keyGoals) {
+			if (!PushGoal(keyGoal)) {
+				allGoalsPushed = false;
+			}
+		}
+
+		if (allGoalsPushed) {
+			DebugPrint(VarArgs("%s Added locked door subgoals.\n", blockMsg.c_str()));
+			return;
+		}
+	}
+
+	// nothing is moving, try unblocking it ourselves.
+	NavSector& targetNav = g_wbot_nav.nav_sectors[link->target];
+	for (BotGoal& goal : targetNav.triggers) {
+		int subid = goal.getNavId();
+
+		if (subid == m_navid || g_wbot_nav.get_astar_route(m_navid, subid, &allBlockedPaths).size()) {
+			if (PushGoal(goal)) {
+				DebugPrint(VarArgs("%s Added unblock subgoal.\n", blockMsg.c_str()));
+				return;
+			}
+		}
+	}
+
+	// nothing can unblock the path that stopped us. Try routing around it.
+	m_route = g_wbot_nav.get_astar_route(m_navid, curGoal.getNavId(), &allBlockedPaths);
+	if (m_route.size()) {
+		DebugPrint(VarArgs("%s Routing around the blocked path.\n", blockMsg.c_str()));
+		return;
+	}
+
+	// clearing previous blocked links and try again, maybe paths got unblocked
+	if (curGoal.blockers.size()) {
+		curGoal.blockers.clear();
+		m_route = g_wbot_nav.get_astar_route(m_navid, curGoal.getNavId(), NULL);
+		if (m_route.size()) {
+			DebugPrint(VarArgs("%s Forgetting blocked paths and trying again...\n", blockMsg.c_str()));
+			return;
+		}
+	}
+
+	DebugPrint(VarArgs("%s Route aborted. No way to reach the goal.\n", blockMsg.c_str()));
+	CancelRoute();
 }
 
 bool CWootBot::StuckThink(int maxStuck) {
@@ -474,15 +564,16 @@ void CWootBot::AimAtPos(FVector3 pos) {
 	m_pPlayer->mo->angle = R_PointToAngle2(m_pPlayer->mo->x, m_pPlayer->mo->y, lookPos.x, lookPos.y);
 }
 
-bool CWootBot::TraceAhead(int dist, fixed_t height, FTraceResults* tr) {
-	angle_t angle = m_pPlayer->mo->angle;
-	fixed_t dx = finecosine[angle >> ANGLETOFINESHIFT];
-	fixed_t dy = finesine[angle >> ANGLETOFINESHIFT];
-	FVector3 start(m_pPlayer->mo->x, m_pPlayer->mo->y, m_pPlayer->mo->z + height);
+bool CWootBot::TraceAhead(int dist, FVector3 offset, bool ignoreMonsters, FTraceResults* tr) {
+	FVector3 forward, right;
+	MakeVectors(m_pPlayer->mo->angle, forward, right);
+	FVector3 start = FVector3(m_pPlayer->mo->x, m_pPlayer->mo->y, m_pPlayer->mo->z) + offset;
 	fixed_t testDist = dist << FRACBITS;
 	sector_t* sector = R_PointInSubsector((fixed_t)start.X, (fixed_t)start.Y)->sector;
 
-	return Trace((fixed_t)start.X, (fixed_t)start.Y, (fixed_t)start.Z, sector, dx, dy, 0, testDist, 0, ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, NULL, *tr);
+	return Trace((fixed_t)start.X, (fixed_t)start.Y, (fixed_t)start.Z, sector,
+		(fixed_t)forward.X, (fixed_t)forward.Y, 0, testDist, ignoreMonsters ? 0 : 0xffffffff,
+		ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, m_pPlayer->mo, *tr);
 }
 
 bool CWootBot::MoveTo(FVector3 pos, int radius, int speed) {
@@ -493,8 +584,18 @@ bool CWootBot::MoveTo(FVector3 pos, int radius, int speed) {
 
 	// jump over short walls and open doors
 	FTraceResults tr;
-	if (TraceAhead(32, STEP_HEIGHT << FRACBITS, &tr)) {
+	if (TraceAhead(32, FVector3(0, 0, STEP_HEIGHT << FRACBITS), true, &tr)) {
 		m_lButtons |= BT_JUMP | BT_USE;
+	}
+
+	// strafe around objects/walls partially blocking the way
+	FVector3 forward, right;
+	MakeVectors(m_pPlayer->mo->angle, forward, right);
+	FVector3 viewOffset = FVector3(0, 0, m_pPlayer->viewheight);
+	bool hitRight = TraceAhead(32, viewOffset + right * 16, false, &tr);
+	bool hitLeft = TraceAhead(32, viewOffset + right * -16, false, &tr);
+	if (hitRight != hitLeft) {
+		m_sideMove = hitRight ? -speed : speed;
 	}
 
 	fixed_t dist = P_AproxDistance(m_pPlayer->mo->x - (fixed_t)pos.X, m_pPlayer->mo->y - (fixed_t)pos.Y);
@@ -631,10 +732,7 @@ bool CWootBot::FindGoal() {
 		if (thisSubId == g_wbot_nav.get_nav_id(actor))
 			continue; // already with this player
 
-		BotGoal goal = BotGoal();
-		goal.action = WBOT_GOAL_ACTION_MOVE_TO;
-		goal.actor = actor;
-		PushGoal(goal);
+		PushGoal(BotGoal(WBOT_GOAL_ACTION_MOVE_TO, actor));
 	}
 
 	return m_route.size();
@@ -668,8 +766,11 @@ void CWootBot::PopGoal() {
 	DebugPrint(VarArgs("Finished goal: %s\n", goal.desc().c_str()));
 	m_goals.pop_back();
 
-	if (m_goals.size())
+	if (m_goals.size()) {
+		BotGoal& lastGoal = m_goals[m_goals.size() - 1];
+		lastGoal.blockers.clear(); // if subgoals were completed, then paths to this goal are probably unblocked now
 		RouteToGoal();
+	}
 	else
 		CancelRoute();
 }

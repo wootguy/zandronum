@@ -462,6 +462,27 @@ bool P_CheckKeys (AActor *owner, int keynum, bool remote)
 	return false;
 }
 
+TArray<TArray<PClass*>> P_GetRequiredKeys(int keynum) {
+	TArray<TArray<PClass*>> groups;
+
+	if (keynum <= 0 || keynum > 255 || !locks[keynum])
+		return groups;
+
+	for (int i = 0; i < locks[keynum]->keylist.Size(); i++) {
+		Keygroup* group = locks[keynum]->keylist[i];
+		
+		TArray<PClass*> anyGroup;
+		for (int k = 0; k < group->anykeylist.Size(); k++) {
+			anyGroup.Push((PClass*)group->anykeylist[k].key);
+		}
+
+		if (anyGroup.Size())
+			groups.Push(anyGroup);
+	}
+
+	return groups;
+}
+
 //==========================================================================
 //
 // AKey implementation
