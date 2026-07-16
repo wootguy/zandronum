@@ -91,6 +91,22 @@ AActor* getAnyPlayer() {
 	return NULL;
 }
 
+// get direction pointing behind the given linedef
+FVector3 getLineBackDir(line_t* line) {
+	fixed_t dx = line->v2->x - line->v1->x;
+	fixed_t dy = line->v2->y - line->v1->y;
+	double len = sqrt((double)dx * dx + (double)dy * dy);
+	return FVector3(-(double)dy / len, (double)dx / len, 0);
+}
+
+FVector3 getLineCenter(line_t* line) {
+	return FVector3((line->v1->x + line->v2->x) * 0.5, (line->v1->y + line->v2->y) * 0.5, 0);
+}
+
+int getLineLength(line_t* line) {
+	return (int)(FVector2(line->v1->x, line->v1->y) - FVector2(line->v2->x, line->v2->y)).Length() >> FRACBITS;
+}
+
 void MakeVectors(angle_t angle, FVector3& forward, FVector3& right) {
 	fixed_t fsine = finesine[angle >> ANGLETOFINESHIFT];
 	fixed_t fcosine = finecosine[angle >> ANGLETOFINESHIFT];
@@ -124,6 +140,10 @@ std::string BotGoal::desc() {
 		return "Use " + thingName;
 	case WBOT_GOAL_ACTION_TOUCH:
 		return "Touch " + thingName;
+	case WBOT_GOAL_ACTION_CROSS:
+		return "Cross " + thingName;
+	case WBOT_GOAL_ACTION_SHOOT:
+		return "Shoot " + thingName;
 	}
 
 	return "??? " + thingName;
@@ -193,6 +213,10 @@ void CWootBot::ParseScript() {
 		lastInit = level.levelnum;
 		m_goals.clear();
 		CancelRoute();
+		m_lastAttack = 0;
+		stateFlags = 0;
+		m_targetLastSeenTic = 0;
+		stuckPath = -1;
 	}
 
 	if (m_debug) {
@@ -370,15 +394,23 @@ void CWootBot::CancelRoute() {
 	m_route.clear();
 	pretendRouteSector = -1;
 	stuckCounter = 0;
-	stuckPath = -1;
 }
 
 void CWootBot::GoalActionThink() {
 	BotGoal& goal = m_goals[m_goals.size() - 1];
 
 	int goalSector = goal.getNavId();
-	int thisNavId = g_wbot_nav.get_nav_id(m_pPlayer->mo);
-	if (thisNavId != goalSector && pretendRouteSector != goalSector) {
+
+	if (m_navid != goalSector && pretendRouteSector != goalSector) {
+
+		if (goal.action == WBOT_GOAL_ACTION_CROSS && goal.lineid >= 0) {
+			if (m_pPlayer->mo->Sector == lines[goal.lineid].backsector) {
+				// moving to a different sector was required for this goal
+				PopGoal();
+				return;
+			}
+		}
+
 		// route was cancelled or the target moved. Route to it again.
 		DebugPrint("Goal moved or movement failed. Rerouting...\n");
 		RouteToGoal();
@@ -415,6 +447,49 @@ void CWootBot::GoalActionThink() {
 			PopGoal();
 		}
 		break;
+	case WBOT_GOAL_ACTION_CROSS: {
+		if (goal.lineid >= 0) {
+			// move through the line to the backside of it
+			line_t* line = &lines[goal.lineid];
+			FVector3 backDir = getLineBackDir(line);
+			FVector3 backGoal = getLineCenter(line) + backDir * 32;
+
+			fixed_t dist = P_AproxDistance(m_pPlayer->mo->x - (fixed_t)backGoal.X, m_pPlayer->mo->y - (fixed_t)backGoal.Y);
+
+			// be careful not to miss skinny lines
+			int speed = getLineLength(line) > 32 ? RUN_SPEED : RUN_SPEED / 4;
+
+			if (MoveTo(backGoal, 16, speed)) {
+				PopGoal();
+			}
+		}
+		else {
+			DebugPrint("Can't cross an actor as a goal!\n");
+			PopGoal();
+		}
+		break;
+	}
+	case WBOT_GOAL_ACTION_SHOOT: {
+		int shootRange = 200;
+
+		if (m_pPlayer->ReadyWeapon) {
+			WeaponInfo& info = g_wbot_weapon_info[m_pPlayer->ReadyWeapon->GetClass()->TypeName.GetChars()];
+			shootRange = info.maxRange;
+		}
+
+		MoveTo(goal.pos(), 100);
+
+		FTraceResults tr;
+		TraceAhead(shootRange, FVector3(0, 0, m_pPlayer->viewheight), false, &tr);
+		if (tr.Line && (tr.Line - lines) == goal.lineid) {
+			// wait a bit in case the gun needs to reload
+			if (level.time - m_lastAttack > 35) {
+				Attack();
+				PopGoal();
+			}
+		}
+		break;
+	}
 	}
 
 	if (StuckThink(1000)) {
@@ -473,12 +548,7 @@ void CWootBot::RouteThink() {
 				if (link->isTeleport && link->seg->linedef) {
 					// move behind the teleporter line edge.
 					// The target sector may be in a completely different direction.
-					line_t* line = link->seg->linedef;
-					fixed_t dx = line->v2->x - line->v1->x;
-					fixed_t dy = line->v2->y - line->v1->y;
-					double len = sqrt((double)dx * dx + (double)dy * dy);
-
-					FVector3 backDir = FVector3(-(double)dy / len, (double)dx / len, 0);
+					FVector3 backDir = getLineBackDir(link->seg->linedef);
 					FVector3 teleGoal = link->pos() + backDir * 200;
 					MoveTo(teleGoal, 0, routeSpeed);
 				}
@@ -509,6 +579,7 @@ void CWootBot::RouteThink() {
 		FVector3 centerGoal = g_wbot_nav.nav_sectors[m_route[0]].pos();
 		if (MoveTo(centerGoal, 32, routeSpeed)) {
 			m_route.clear(); // don't reset pretendsector in case a goal is inside it
+			stuckPath = -1;
 			DebugPrint("Finished route\n");
 		}
 	}
@@ -520,11 +591,8 @@ void CWootBot::RouteThink() {
 			NavSectorLink* failedLink = g_wbot_nav.nav_sectors[m_navid].getLink(m_route[1]);
 			stuckPath = failedLink ? failedLink->id : -1;
 		}
-		int oldStuckPath = stuckPath;
 
 		CancelRoute();
-
-		stuckPath = oldStuckPath;
 	}
 }
 
@@ -754,7 +822,7 @@ void CWootBot::CombatThink() {
 	}
 
 	if (hasLineOfSight && dist > minRange && dist < maxRange) {
-		m_lButtons |= BT_ATTACK;
+		Attack();
 	}
 }
 
@@ -955,6 +1023,11 @@ void CWootBot::RouteToGoal() {
 		DebugPrint(VarArgs("Failed goal (no route): %s\n", goal.desc().c_str()));
 		m_goals.pop_back();
 	}
+}
+
+void CWootBot::Attack() {
+	m_lButtons |= BT_ATTACK;
+	m_lastAttack = level.time;
 }
 
 CCMD(addbotw)

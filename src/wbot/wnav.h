@@ -93,6 +93,7 @@ private:
 	bool can_cross_seg_now(seg_t* seg);
 	bool can_sector_move(sector_t* sec);
 	bool does_linedef_move_tag(line_t* line, short tag); // true if this linedef moves the given sector tag
+	int get_linedef_goal_action(line_t* line);
 };
 
 extern SectorNavMesh g_wbot_nav;

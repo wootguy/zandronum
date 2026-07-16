@@ -9,6 +9,8 @@ enum BotGoalAction {
 	WBOT_GOAL_ACTION_MOVE_TO,	// move to the goal and do nothing
 	WBOT_GOAL_ACTION_USE,		// use the given linedef
 	WBOT_GOAL_ACTION_TOUCH,		// touch the given actor
+	WBOT_GOAL_ACTION_CROSS,		// cross the given line
+	WBOT_GOAL_ACTION_SHOOT,		// shoot the given line
 };
 
 struct BotGoal {
@@ -48,6 +50,7 @@ public:
 	int stuckPath = -1; // path the bot got stuck at
 	int stateFlags = 0; // FL_WBOT_*
 	int m_navid; // current navigation node/subsector id
+	int m_lastAttack; // last tic the player attacked
 	FVector2 lastPos;
 
 	CWootBot(const char* pszName, const char* pszTeamName, ULONG ulPlayerNum);
@@ -80,6 +83,8 @@ public:
 
 	void ShowDebugInfo();
 	void DebugPrint(const char* msg);
+
+	void Attack();
 
 	FVector3 GetViewPos();
 	std::unordered_set<int> GetBlockedPaths(); // paths blocked during path to current goal

@@ -340,6 +340,24 @@ bool SectorNavMesh::does_linedef_move_tag(line_t* line, short tag) {
 	}
 }
 
+int SectorNavMesh::get_linedef_goal_action(line_t* line) {
+	if (line->activation & SPAC_Impact) {
+		return WBOT_GOAL_ACTION_SHOOT;
+	}
+	if (line->activation & (SPAC_Use | SPAC_UseThrough)) {
+		return WBOT_GOAL_ACTION_USE;
+	}
+	if (line->activation & (SPAC_Cross | SPAC_AnyCross)) {
+		return WBOT_GOAL_ACTION_CROSS;
+	}
+	if (line->activation & SPAC_Push) {
+		return WBOT_GOAL_ACTION_TOUCH;
+	}
+
+	Printf("Don't know how to activate line %d\n", line - lines);
+	return WBOT_GOAL_ACTION_USE;
+}
+
 void SectorNavMesh::generate_node_graph() {
 	nav_sectors.clear();
 	nav_sectors.resize(numsubsectors);
@@ -462,7 +480,7 @@ void SectorNavMesh::generate_node_graph() {
 				line_t& line = lines[k];
 
 				if (does_linedef_move_tag(&line, sec->tag)) {
-					nav.triggers.push_back(BotGoal(WBOT_GOAL_ACTION_USE, k));
+					nav.triggers.push_back(BotGoal(get_linedef_goal_action(&line), k));
 				}
 			}
 		}
@@ -472,7 +490,7 @@ void SectorNavMesh::generate_node_graph() {
 				line_t* line = sec->lines[k];
 
 				if (line->backsector == sec && does_linedef_move_tag(line, 0)) {
-					nav.triggers.push_back(BotGoal(WBOT_GOAL_ACTION_USE, line - lines));
+					nav.triggers.push_back(BotGoal(get_linedef_goal_action(line), line - lines));
 				}
 			}
 		}
@@ -749,9 +767,7 @@ bool SectorNavMesh::get_key_goals_for_line(AActor* actor, line_t* line, vector<B
 		keyRoute.key = mapKey;
 		keyRoute.routeSize = get_astar_route(actorNavId, keyNavId, blockedPaths).size();
 
-		if (keyRoute.routeSize > 0 || actorNavId == keyNavId) {
-			mapKeys[mapKey->GetClass()] = keyRoute;
-		}
+		mapKeys[mapKey->GetClass()] = keyRoute;
 	}
 
 	for (int i = 0; i < keyGroups.Size(); i++) {
@@ -781,7 +797,21 @@ bool SectorNavMesh::get_key_goals_for_line(AActor* actor, line_t* line, vector<B
 
 		if (!bestKey) {
 			// no key satisfies the group requirement
-			Printf("Impossible key requirements for line %d\n", line - lines);
+			Printf("Impossible key requirements for line %d:\n", line - lines);
+
+			for (int i = 0; i < keyGroups.Size(); i++) {
+				TArray<PClass*>& group = keyGroups[i];
+				for (int k = 0; k < group.Size(); k++) {
+					Printf("  %s", group[k]->TypeName.GetChars());
+				}
+				Printf("\n");
+			}
+			Printf("Map keys:\n");
+			for (auto item : mapKeys) {
+				Printf("   %s", item.second.key->GetClass()->TypeName.GetChars());
+			}
+			Printf("\n");
+
 			return false;
 		}
 
