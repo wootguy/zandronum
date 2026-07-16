@@ -10,10 +10,22 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <vector>
+#include <chrono>
 
 using namespace std;
+using namespace std::chrono;
 
 SectorNavMesh g_wbot_nav;
+int g_total_links;
+
+float DotProduct(const FVector2& a, const FVector2& b)
+{
+	return a.X * b.X + a.Y * b.Y;
+}
+
+uint64_t getEpochMillis() {
+	return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+}
 
 bool NavSectorLink::blocked(AActor* actor, bool recurse) {
 	g_wbot_nav.pathTests++;
@@ -330,7 +342,33 @@ bool SectorNavMesh::does_linedef_move_tag(line_t* line, short tag) {
 	case Stairs_BuildDownSync:
 	case Stairs_BuildUpSync:
 	case Stairs_BuildUpDoom:
+	case Ceiling_RaiseInstant:
+	case Ceiling_RaiseByValueTimes8:
 		return line->args[0] == tag;
+
+	case Ceiling_LowerToHighestFloor:
+	case Ceiling_LowerInstant:
+	case Ceiling_CrushRaiseAndStayA:
+	case Ceiling_CrushAndRaiseA:
+	case Ceiling_CrushAndRaiseSilentA:
+	case Ceiling_LowerByValueTimes8:
+		return false; // a ceiling getting lower is not helpful
+
+	case Scroll_Texture_Left:
+	case Scroll_Texture_Right:
+	case Scroll_Texture_Up:
+	case Scroll_Texture_Down:
+	case Light_ForceLightning:
+	case Light_RaiseByValue:
+	case Light_LowerByValue:
+	case Light_ChangeToValue:
+	case Light_Fade:
+	case Light_Glow:
+	case Light_Flicker:
+	case Light_Strobe:
+	case Light_Stop:
+		return false; // visual-only specials
+
 	default:
 		if (tag != 0 && line->args[0] == tag) {
 			Printf("Line %d targets tag %d but don't know what special %d is\n", line - lines, tag, line->special);
@@ -358,12 +396,73 @@ int SectorNavMesh::get_linedef_goal_action(line_t* line) {
 	return WBOT_GOAL_ACTION_USE;
 }
 
+bool SectorNavMesh::create_jump_link(NavSector& fromNav, NavSectorLink& fromLink, NavSector& toNav, NavSectorLink& toLink) {
+	fixed_t fromHeight = fromNav.getFloorZ();
+	fixed_t toHeight = toNav.getFloorZ();
+	fixed_t dropHeight = fromHeight - toHeight;
+
+	if (dropHeight < -(JUMP_HEIGHT << FRACBITS)) {
+		return false; // too high to jump to
+	}
+
+	// increase link distance for drops, decrease for jumps
+	int maxDist = 100 << FRACBITS;
+	maxDist += dropHeight / 2;
+
+	fixed_t linkDist = (fromLink.pos() - toLink.pos()).Length();
+	if (linkDist > maxDist) {
+		return false; // too far to link to
+	}
+
+	FVector2 e1v1(fromLink.seg->v1->x, fromLink.seg->v1->y);
+	FVector2 e1v2(fromLink.seg->v2->x, fromLink.seg->v2->y);
+
+	FVector2 e2v1(toLink.seg->v1->x, toLink.seg->v1->y);
+	FVector2 e2v2(toLink.seg->v2->x, toLink.seg->v2->y);
+
+	FVector2 edge1 = (e1v2 - e1v1);
+	FVector2 edge2 = (e2v2 - e2v1);
+	edge1.MakeUnit();
+	edge2.MakeUnit();
+
+	//if (fromLink.id == 403 && toLink.id == 417) {
+	//	Printf("");
+	//}
+
+	FVector2 normalA(edge1.Y, -edge1.X);
+	FVector2 normalB(edge2.Y, -edge2.X);
+
+	float dot = DotProduct(normalA, normalB);
+	if (dot > -0.5f) {
+		return false; // edges not facing each other enough
+	}
+
+	NavSectorLink link;
+	link.parent = fromLink.parent;
+	link.overlapCenter = fromLink.overlapCenter;
+	link.linkWidth = fromLink.linkWidth;
+	link.leftSector = fromLink.leftSector;
+	link.rightSector = fromLink.rightSector;
+	link.isTeleport = fromLink.isTeleport;
+	link.isCliff = fromLink.isCliff;
+	link.seg = fromLink.seg;
+
+	link.target = toNav.id;
+	link.id = g_total_links++;
+	link.isJump = true;
+
+	fromNav.links.push_back(link);
+
+	return true;
+}
+
 void SectorNavMesh::generate_node_graph() {
+	uint64_t genStart = getEpochMillis();
+
 	nav_sectors.clear();
 	nav_sectors.resize(numsubsectors);
 	line_subsectors.clear();
-
-	int totalLinks = 0;
+	g_total_links = 0;
 
 	// link sectors as a nav mesh
 	for (int i = 0; i < numsubsectors; i++) {
@@ -380,8 +479,9 @@ void SectorNavMesh::generate_node_graph() {
 			subCenterX += seg.v1->x >> FRACBITS;
 			subCenterY += seg.v1->y >> FRACBITS;
 
-			if (!is_seg_potentially_crossable(&seg))
+			if (!is_seg_potentially_crossable(&seg)) {
 				continue;
+			}
 
 			LinkSeg linkseg = get_neighbor_subsector(&sub, &seg);
 
@@ -390,16 +490,16 @@ void SectorNavMesh::generate_node_graph() {
 
 			fixed_t cx = (linkseg.x1 + linkseg.x2) / 2;
 			fixed_t cy = (linkseg.y1 + linkseg.y2) / 2;
-			subsector_t* csector = R_PointInSubsector(cx, cy);
-			float z = csector->sector->floorplane.ZatPoint(cx, cy);
+			float z = sub.sector->floorplane.ZatPoint(cx, cy);
 
 			NavSectorLink link;
 			link.target = linkseg.otherSub;
 			link.overlapCenter = FVector3(cx, cy, z);
 			link.seg = &seg;
-			link.id = totalLinks++;
+			link.id = g_total_links++;
 			link.parent = i;
 			link.linkWidth = (int)linkseg.length() >> FRACBITS;
+			link.isJump = false;
 
 			subsector_t& neighbor = subsectors[linkseg.otherSub];
 			int leftIdx = (linkseg.idx + neighbor.numlines - 1) % neighbor.numlines;
@@ -409,12 +509,16 @@ void SectorNavMesh::generate_node_graph() {
 			link.leftSector = leftSector.otherSub;
 			link.rightSector = rightSector.otherSub;
 
+			link.isCliff = sub.sector->floorplane.ZatPoint(cx, cy)
+				- neighbor.sector->floorplane.ZatPoint(cx, cy) > (JUMP_HEIGHT << FRACBITS);
+
 			if (link.linkWidth < PLAYER_WIDTH && link.leftSector == -1 && link.rightSector == -1) {
 				// link is too narrow to enter and both sides of it are impassable walls
 				continue;
 			}
 
 			// redirect target sector if this is a teleport
+			link.isTeleport = false;
 			line_t* line = seg.linedef;
 			if (line && line->special == Teleport && seg.frontsector == sub.sector) {
 				AActor* dest = SelectTeleDest(line->args[0], line->args[1]);
@@ -496,7 +600,36 @@ void SectorNavMesh::generate_node_graph() {
 		}
 	}
 
-	Printf("Nav mesh is %d sectors with %d links\n", (int)nav_sectors.size(), totalLinks);
+	// add jump links between cliff segments
+	for (int i = 0; i < numsubsectors; i++) {
+		NavSector& nav = nav_sectors[i];
+		for (int k = 0; k < nav.links.size(); k++) {
+			NavSectorLink& link = nav.links[k];
+
+			if (!link.isCliff || link.isJump)
+				continue;
+
+			// find other other cliff segments to try linking to
+			for (int j = 0; j < numsubsectors; j++) {
+				NavSector& otherNav = nav_sectors[j];
+
+				if (j == i)
+					continue;
+
+				for (int x = 0; x < otherNav.links.size(); x++) {
+					NavSectorLink& otherLink = otherNav.links[x];
+					if (!otherLink.isCliff || otherLink.isJump)
+						continue;
+
+					if (create_jump_link(nav, nav.links[k], otherNav, otherLink)) {
+						break;
+					}
+				}
+			}
+		}
+	}
+
+	Printf("Generated %d nodes, %d links in %d ms\n", (int)nav_sectors.size(), g_total_links, (int)(getEpochMillis() - genStart));
 }
 
 void SectorNavMesh::draw_nodes(AActor* actor) {
@@ -526,8 +659,10 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 			NavSector& linkNav = nav_sectors[link.target];
 			
 			if (!link.blocked(player)) {
-				spritesDrawn += draw_debug_line(nav.pos(), link.pos(), actor);
-				spritesDrawn += draw_debug_line(link.pos(), linkNav.pos(), actor);
+				FVector3 linkPos = link.pos();
+				linkPos.Z = nav.getFloorZ();
+				spritesDrawn += draw_debug_line(nav.pos(), linkPos, actor);
+				spritesDrawn += draw_debug_line(linkPos, linkNav.pos(), actor);
 			}
 		}
 

@@ -30,10 +30,15 @@ struct BotGoal {
 	bool matches(BotGoal& other) {
 		return action == other.action && lineid == other.lineid && actor == other.actor;
 	}
+
+	// false if the actor or lineid are no longer interactable
+	bool valid();
 };
 
-#define FL_WBOT_WAITING_ELEV 1 // bot is waiting for an elevator to lift/descend before continuing their route
-#define FL_WBOT_WAITING_DOOR 2 // bot is waiting for a door or platform to move out of the way before continuing their route
+#define FL_WBOT_WAIT_ELEV	1 // bot is waiting for an elevator to lift/descend
+#define FL_WBOT_WAIT_DOOR	2 // bot is waiting for a door or platform to move out of the way
+#define FL_WBOT_JUMPING		4 // bot is jumping across multiple sectors
+#define FL_WBOT_FLYING		8 // bot is jumping or above a gap in the floor
 
 class CWootBot : public CSkullBot {
 public:
@@ -51,6 +56,8 @@ public:
 	int stateFlags = 0; // FL_WBOT_*
 	int m_navid; // current navigation node/subsector id
 	int m_lastAttack; // last tic the player attacked
+	float m_speedMult = 1.0f;
+	bool m_freezeOnRouteChange = false; // set to true to stop moving when the route changes. For debugging
 	FVector2 lastPos;
 
 	CWootBot(const char* pszName, const char* pszTeamName, ULONG ulPlayerNum);
@@ -58,6 +65,8 @@ public:
 
 	// all thinking logic happens here
 	void ParseScript(void) override;
+
+	void Reset(); // clear all memory and restart the bot
 
 	bool FindGoal(); // find something to do in the map
 	bool PushGoal(BotGoal& goal); // returns false if this is already the current goal
@@ -93,3 +102,4 @@ public:
 };
 
 AActor* getAnyPlayer();
+void wbot_handle_chat_command(ULONG ulPlayer, const char* msg);

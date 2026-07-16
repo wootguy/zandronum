@@ -12,6 +12,7 @@
 #include "p_lnspec.h"
 #include "a_keys.h"
 #include "actor.h"
+#include "m_cheat.h"
 
 #include <stdlib.h>
 #include <time.h>
@@ -101,6 +102,13 @@ FVector3 getLineBackDir(line_t* line) {
 
 FVector3 getLineCenter(line_t* line) {
 	return FVector3((line->v1->x + line->v2->x) * 0.5, (line->v1->y + line->v2->y) * 0.5, 0);
+}
+
+void set_ori(AActor* actor, int x, int y, angle_t angle) {
+	fixed_t fx = x << FRACBITS;
+	fixed_t fy = y << FRACBITS;
+	fixed_t z = R_PointInSubsector(fx, fy)->sector->floorplane.ZatPoint(fx, fy);
+	P_Teleport(actor, fx, fy, ONFLOORZ, angle, false, false, false, true, false);
 }
 
 int getLineLength(line_t* line) {
@@ -193,6 +201,13 @@ int BotGoal::touchDistance(AActor* toucher) {
 	}
 }
 
+bool BotGoal::valid() {
+	if (lineid >= 0) {
+		return lines[lineid].special != 0;
+	}
+	return actor != NULL;
+}
+
 CWootBot::CWootBot(const char* pszName, const char* pszTeamName, ULONG ulPlayerNum)
 	: CSkullBot(pszName, pszTeamName, ulPlayerNum) {
 	
@@ -206,21 +221,26 @@ CWootBot::~CWootBot() {}
 void CWootBot::ParseScript() {
 	init_wootbots();
 
-	m_navid = g_wbot_nav.get_nav_id(m_pPlayer->mo);
-
 	// level changed
 	if (lastInit != level.levelnum) {
 		lastInit = level.levelnum;
-		m_goals.clear();
-		CancelRoute();
-		m_lastAttack = 0;
-		stateFlags = 0;
-		m_targetLastSeenTic = 0;
-		stuckPath = -1;
+		Reset();
+	}
+
+	m_navid = g_wbot_nav.get_nav_id(m_pPlayer->mo);
+	if (m_pPlayer->mo->z > g_wbot_nav.nav_sectors[m_navid].getFloorZ()) {
+		stateFlags |= FL_WBOT_FLYING;
+	}
+	else {
+		stateFlags &= ~FL_WBOT_FLYING;
 	}
 
 	if (m_debug) {
 		ShowDebugInfo();
+	}
+
+	if (m_pPlayer->cheats & CF_FROZEN) {
+		return;
 	}
 
 	if (m_pPlayer->health <= 0) {
@@ -250,8 +270,25 @@ void CWootBot::ParseScript() {
 		}
 	}
 
+	if (m_speedMult != 1.0f) {
+		m_forwardMove *= m_speedMult;
+		m_sideMove *= m_speedMult;
+	}
+
 	m_lForwardMove = static_cast<LONG>(0x32 * (m_forwardMove / 100.0f));
 	m_lSideMove = static_cast<LONG>(0x32 * (m_sideMove / 100.0f));
+}
+
+void CWootBot::Reset() {
+	CancelRoute();
+	m_goals.clear();
+	m_lastAttack = 0;
+	stateFlags = 0;
+	m_targetLastSeenTic = 0;
+	stuckPath = -1;
+	m_pPlayer->mo->target = NULL;
+	m_forwardMove = 0;
+	m_sideMove = 0;
 }
 
 void CWootBot::ShowDebugInfo() {
@@ -296,6 +333,9 @@ void CWootBot::ShowDebugInfo() {
 			navInfo += "\n      " + to_string(link.id) + arrow + to_string(link.target);
 			if (targ.triggers.size())
 				navInfo += " (" + to_string(targ.triggers.size()) + " T)";
+			if (link.isCliff) { navInfo += " C"; }
+			if (link.isTeleport) { navInfo += " T"; }
+			if (link.isJump) { navInfo += " J"; }
 		}
 
 		FVector3 forward, right;
@@ -317,11 +357,17 @@ void CWootBot::ShowDebugInfo() {
 					navInfo += " " + to_string(line->args[i]);
 			}
 		}
+
+		navInfo += "\nOrigin: " + to_string(player->x >> FRACBITS) + " " + to_string(player->y >> FRACBITS)
+			+ " " + to_string(nav.getFloorZ() >> FRACBITS);
 	}
 
 	string stateStr = "State:";
-	if (stateFlags & FL_WBOT_WAITING_ELEV) { stateStr += " WAIT_ELEV"; }
-	if (stateFlags & FL_WBOT_WAITING_DOOR) { stateStr += " WAIT_DOOR"; }
+	if (stateFlags & FL_WBOT_WAIT_ELEV) { stateStr += " WAIT_ELEV"; }
+	if (stateFlags & FL_WBOT_WAIT_DOOR) { stateStr += " WAIT_DOOR"; }
+	if (stateFlags & FL_WBOT_JUMPING) { stateStr += " JUMP"; }
+	if (stateFlags & FL_WBOT_FLYING) { stateStr += " FLY"; }
+	if (m_pPlayer->cheats & (CF_FROZEN | CF_TOTALLYFROZEN)) { stateStr += " FROZEN"; }
 
 	string stuckStr = "Stuck: " + to_string(stuckCounter);
 
@@ -391,6 +437,13 @@ void CWootBot::IdleThink() {
 }
 
 void CWootBot::CancelRoute() {
+	if (m_route.size() && m_freezeOnRouteChange) {
+		m_pPlayer->cheats |= CF_FROZEN;
+		m_pPlayer->mo->velx = 0;
+		m_pPlayer->mo->vely = 0;
+		m_pPlayer->mo->velz = 0;
+	}
+
 	m_route.clear();
 	pretendRouteSector = -1;
 	stuckCounter = 0;
@@ -502,13 +555,14 @@ void CWootBot::RouteThink() {
 
 	m_forwardMove = 0;
 	m_sideMove = 0;
-	stateFlags = 0;
+	stateFlags &= ~(FL_WBOT_WAIT_ELEV | FL_WBOT_WAIT_DOOR);
 
 	if (m_route.size() > 1) {
 		if (m_navid == m_route[1]) {
 			// inside the target sector. Advance the route.
 			m_route.erase(m_route.begin());
 			pretendRouteSector = -1;
+			stateFlags &= ~FL_WBOT_JUMPING;
 		}
 		else {
 			FVector3 center = g_wbot_nav.nav_sectors[m_route[1]].pos();
@@ -528,12 +582,24 @@ void CWootBot::RouteThink() {
 		m_navid = pretendRouteSector;
 	}
 
-	if (m_route.size() > 1) {	
-		if (m_navid == m_route[0]) {
-			NavSectorLink* link = g_wbot_nav.nav_sectors[m_navid].getLink(m_route[1]);
+	NavSector& nav = g_wbot_nav.nav_sectors[m_navid];
 
-			if (!link)
-				return;
+	if (m_route.size() > 1) {	
+		NavSectorLink* link = nav.getLink(m_route[1]);
+
+		if (m_navid == m_route[0] && link) {
+			sector_t* thisSector = subsectors[m_navid].sector;
+			if (thisSector && thisSector->floordata) {
+				stateFlags |= FL_WBOT_WAIT_ELEV;
+
+				// stay centered on the elevator to avoid blocking it or falling off
+				NavSector& nav = g_wbot_nav.nav_sectors[m_navid];
+				FVector3 navPos = nav.pos();
+				fixed_t dist = P_AproxDistance(m_pPlayer->mo->x - (fixed_t)navPos.X, m_pPlayer->mo->y - (fixed_t)navPos.Y);
+				if (dist > (16 << FRACBITS))
+					MoveTo(navPos, 0, RUN_SPEED / 4);
+				return; // wait until the elevator is done moving
+			}
 
 			if (link->blocked(m_pPlayer->mo)) {
 				BlockedPathThink(link);
@@ -543,7 +609,7 @@ void CWootBot::RouteThink() {
 			// move to the next link
 			if (MoveTo(link->pos(), 32, routeSpeed)) {
 				// close enough to the link edge
-				NavSector& nav = g_wbot_nav.nav_sectors[m_route[1]];
+				NavSector& targetNav = g_wbot_nav.nav_sectors[m_route[1]];
 				
 				if (link->isTeleport && link->seg->linedef) {
 					// move behind the teleporter line edge.
@@ -552,20 +618,33 @@ void CWootBot::RouteThink() {
 					FVector3 teleGoal = link->pos() + backDir * 200;
 					MoveTo(teleGoal, 0, routeSpeed);
 				}
+				else if (link->isJump) {
+					stateFlags |= FL_WBOT_JUMPING;
+					MoveTo(targetNav.pos(), 16, routeSpeed);
+				}
 				else {
 					// move towards the target sector until we end up inside it
-					MoveTo(nav.pos(), 16, routeSpeed);
+					MoveTo(targetNav.pos(), 16, routeSpeed);
 				}
 
 				// duck if unable to fit while standing
-				int secHeight = nav.getHeight() >> FRACBITS;
+				int secHeight = targetNav.getHeight() >> FRACBITS;
 				if (secHeight < STAND_HEIGHT) {
 					m_lButtons |= BT_CROUCH;
 				}
 			}
 		}
 		else { // fell off the route
-			if (g_wbot_nav.nav_sectors[m_navid].getLink(m_route[1])) {
+			if ((stateFlags & FL_WBOT_JUMPING) && (stateFlags & FL_WBOT_FLYING)) {
+				// don't abort the route until the jump is complete
+				NavSector& jumpToNav = g_wbot_nav.nav_sectors[m_route[1]];
+				MoveTo(jumpToNav.pos(), 16, routeSpeed);
+				return;
+			}
+
+			stateFlags &= ~FL_WBOT_JUMPING;
+
+			if (nav.getLink(m_route[1])) {
 				// slipped into an adjacent node, so just update the route
 				m_route[0] = m_navid;
 				return;
@@ -576,7 +655,7 @@ void CWootBot::RouteThink() {
 		}
 	}
 	else if (m_route.size() == 1) {
-		FVector3 centerGoal = g_wbot_nav.nav_sectors[m_route[0]].pos();
+		FVector3 centerGoal = nav.pos();
 		if (MoveTo(centerGoal, 32, routeSpeed)) {
 			m_route.clear(); // don't reset pretendsector in case a goal is inside it
 			stuckPath = -1;
@@ -588,7 +667,7 @@ void CWootBot::RouteThink() {
 		DebugPrint("I got stuck! Cancelling route.\n");
 
 		if (m_route.size() > 1) {
-			NavSectorLink* failedLink = g_wbot_nav.nav_sectors[m_navid].getLink(m_route[1]);
+			NavSectorLink* failedLink = nav.getLink(m_route[1]);
 			stuckPath = failedLink ? failedLink->id : -1;
 		}
 
@@ -599,25 +678,12 @@ void CWootBot::RouteThink() {
 void CWootBot::BlockedPathThink(NavSectorLink* link) {
 	link->blocked(m_pPlayer->mo); // debug here
 
-	// if the blocker is moving or we're on an elevator, then be patient
-	{
-		sector_t* thisSector = subsectors[m_navid].sector;
-		sector_t* targetSector = subsectors[link->target].sector;
-		if (targetSector && (targetSector->floordata || targetSector->ceilingdata)) {
-			stateFlags |= FL_WBOT_WAITING_DOOR;
-			return; // wait until the blocker is done moving
-		}
-		else if (thisSector && (thisSector->floordata || thisSector->ceilingdata)) {
-			stateFlags |= FL_WBOT_WAITING_ELEV;
-
-			// stay centered on the elevator to avoid blocking it or falling off
-			NavSector& nav = g_wbot_nav.nav_sectors[m_navid];
-			FVector3 navPos = nav.pos();
-			fixed_t dist = P_AproxDistance(m_pPlayer->mo->x - (fixed_t)navPos.X, m_pPlayer->mo->y - (fixed_t)navPos.Y);
-			if (dist > (16 << FRACBITS))
-				MoveTo(navPos, 0, RUN_SPEED / 4);
-			return; // wait until the elevator is done moving
-		}
+	// if the blocker is moving, be patient
+	sector_t* thisSector = subsectors[m_navid].sector;
+	sector_t* targetSector = subsectors[link->target].sector;
+	if (targetSector && (targetSector->floordata || targetSector->ceilingdata)) {
+		stateFlags |= FL_WBOT_WAIT_DOOR;
+		return; // wait until the blocker is done moving
 	}
 
 	string blockMsg = VarArgs("Link %d blocked!", link->id);
@@ -650,6 +716,23 @@ void CWootBot::BlockedPathThink(NavSectorLink* link) {
 	// nothing is moving, try unblocking it ourselves.
 	NavSector& targetNav = g_wbot_nav.nav_sectors[link->target];
 	for (BotGoal& goal : targetNav.triggers) {
+		if (!goal.valid())
+			continue;
+		int subid = goal.getNavId();
+
+		if (subid == m_navid || RouteToSector(subid).size()) {
+			if (PushGoal(goal)) {
+				DebugPrint(VarArgs("%s Added unblock subgoal.\n", blockMsg.c_str()));
+				return;
+			}
+		}
+	}
+
+	// if we're on an elevator, try triggering it.
+	NavSector& thisNav = g_wbot_nav.nav_sectors[m_navid];
+	for (BotGoal& goal : thisNav.triggers) {
+		if (!goal.valid())
+			continue;
 		int subid = goal.getNavId();
 
 		if (subid == m_navid || RouteToSector(subid).size()) {
@@ -683,10 +766,10 @@ void CWootBot::BlockedPathThink(NavSectorLink* link) {
 
 bool CWootBot::StuckThink(int maxStuck) {
 	FVector2 curPos = FVector2(m_pPlayer->mo->x, m_pPlayer->mo->y);
-	int movedDist = (int)(curPos - lastPos).Length() >> FRACBITS;
+	fixed_t movedDist = (curPos - lastPos).Length();
 	lastPos = curPos;
 
-	if ((m_forwardMove || m_sideMove) && movedDist <= 1) {
+	if ((m_forwardMove || m_sideMove) && movedDist <= (1 << FRACBITS) * m_speedMult) {
 		stuckCounter += 10;
 		if (stuckCounter > maxStuck) {
 			stuckCounter = 0;
@@ -1050,4 +1133,78 @@ CCMD(addbotw)
 	}
 
 	new CWootBot(NULL, NULL, ulPlayerIdx);
+}
+
+void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
+	// clear all enemies for general pathfinding tests
+	if (!strcmp(msg, "y")) {
+		TThinkerIterator<AActor> it;
+		AActor* actor;
+		while ((actor = it.Next())) {
+			if (actor->flags3 & MF3_ISMONSTER) {
+				P_DamageMobj(actor, actor, actor, actor->health * 2, FName());
+			}
+		}
+
+		for (int i = 0; i < MAXPLAYERS; i++) {
+			AActor* player = players[i].mo;
+			if (!playeringame[i] || !player)
+				continue;
+		}
+	}
+
+	// give weapons/ammo for combat testing
+	if (!strcmp(msg, "x")) {
+		for (int i = 0; i < MAXPLAYERS; i++) {
+			AActor* player = players[i].mo;
+			if (!playeringame[i] || !player)
+				continue;
+
+			cht_Give(player->player, "backpack");
+			cht_Give(player->player, "weapons");
+			cht_Give(player->player, "ammo");
+			cht_Give(player->player, "keys");
+			cht_Give(player->player, "armor");
+		}
+	}
+	
+	// test a specific route
+	if (!strcmp(msg, "r")) {
+		TThinkerIterator<AActor> it;
+		AActor* actor;
+		while ((actor = it.Next())) {
+			if (actor->flags3 & MF3_ISMONSTER) {
+				P_DamageMobj(actor, actor, actor, actor->health * 2, FName());
+			}
+		}
+
+		for (int i = 0; i < MAXPLAYERS; i++) {
+			AActor* player = players[i].mo;
+			if (!playeringame[i] || !player)
+				continue;
+
+			if (player->player->bIsBot)	set_ori(player, -223, 1758, ANGLE_1 * 270);
+			else						set_ori(player, -170, 1581, ANGLE_1 * 90);
+
+			if (player->player->bIsBot) {
+				CWootBot* bot = (CWootBot*)player->player->pSkullBot;
+				bot->Reset();
+				player->player->cheats &= ~CF_FROZEN;
+				//bot->m_freezeOnRouteChange = true;
+			}
+		}
+	}
+
+	// slowmotion bots
+	if (!strcmp(msg, "f") || !strcmp(msg, "s")) {
+		bool slowMotion = !strcmp(msg, "s");
+		for (int i = 0; i < MAXPLAYERS; i++) {
+			AActor* player = players[i].mo;
+			if (!playeringame[i] || !player || !player->player->bIsBot)
+				continue;
+
+			CWootBot* bot = (CWootBot*)player->player->pSkullBot;
+			bot->m_speedMult = slowMotion ? 0.1f : 1.0f;
+		}
+	}
 }

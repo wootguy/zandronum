@@ -31,6 +31,8 @@ struct NavSectorLink {
 	int leftSector; // setor on the left side of the target sector, relative to the border segment
 	int rightSector; // setor on the right side of the target sector, relative to the border segment
 	bool isTeleport;
+	bool isCliff; // crossing this segs drops you down to a floor so low that you can't get back
+	bool isJump; // jump required to reach the target sector
 	seg_t* seg;
 
 	FVector3 pos() {
@@ -94,6 +96,7 @@ private:
 	bool can_sector_move(sector_t* sec);
 	bool does_linedef_move_tag(line_t* line, short tag); // true if this linedef moves the given sector tag
 	int get_linedef_goal_action(line_t* line);
+	bool create_jump_link(NavSector& fromNav, NavSectorLink& fromLink, NavSector& toNav, NavSectorLink& toLink);
 };
 
 extern SectorNavMesh g_wbot_nav;

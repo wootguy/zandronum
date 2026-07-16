@@ -125,6 +125,7 @@
 #include "p_lnspec.h"
 #include "unlagged.h"
 #include "scoreboard.h"
+#include "wbot/wbot.h"
 
 //*****************************************************************************
 //	MISC CRAP THAT SHOULDN'T BE HERE BUT HAS TO BE BECAUSE OF SLOPPY CODING
@@ -6103,6 +6104,7 @@ static bool server_Say( BYTESTREAM_s *pByteStream )
 		}
 
 		SERVER_SendChatMessage( ulPlayer, ulChatMode, pszChatString, ulReceiver );
+		wbot_handle_chat_command(ulPlayer, pszChatString);
 		return ( false );
 	}
 }
