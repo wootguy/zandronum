@@ -695,6 +695,11 @@ vector<int> SectorNavMesh::get_astar_route(int startSubSectorId, int endSubSecto
 			else
 				tentative_gScore += path_cost(currentNode.id, neighborNode.id);
 
+			if (link.linkWidth < PLAYER_WIDTH) {
+				// try to avoid tiny links. They gets the bot stuck on corners.
+				tentative_gScore += 200 << FRACBITS;
+			}
+
 			float neighbor_gScore = 9e99;
 			if (gScore.count(neighbor))
 				neighbor_gScore = gScore[neighbor];
@@ -735,6 +740,9 @@ bool SectorNavMesh::get_key_goals_for_line(AActor* actor, line_t* line, vector<B
 	TThinkerIterator<AKey> it;
 	AKey* mapKey;
 	while ((mapKey = it.Next()) != NULL) {
+		if (mapKey->Owner)
+			continue; // key in someone's inventory
+
 		int keyNavId = get_nav_id(mapKey);
 
 		KeyRoute keyRoute;

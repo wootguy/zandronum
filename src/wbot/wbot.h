@@ -45,6 +45,7 @@ public:
 	int lastInit = 0; // last time the bot was initialized (for level change detection)
 	int pretendRouteSector = -1; // pretend we're in this sector for now
 	int stuckCounter = 0; // increases while trying to move with nothing happening
+	int stuckPath = -1; // path the bot got stuck at
 	int stateFlags = 0; // FL_WBOT_*
 	int m_navid; // current navigation node/subsector id
 	FVector2 lastPos;
@@ -60,7 +61,7 @@ public:
 	void PopGoal();
 	void RouteToGoal();
 	std::vector<int> RouteToSector(int subid);
-	void FindEnemy();
+	AActor* BestEnemy();
 	void AimAtPos(FVector3 pos);
 	bool MoveTo(FVector3 pos, int radius=32, int speed=100);
 	
@@ -70,6 +71,7 @@ public:
 	void RouteThink();	// following a route somewhere
 	void BlockedPathThink(NavSectorLink* link); // a path in the route is blocked
 	void CombatThink();	// attacking an enemy
+	void SelectBestWeapon();
 	bool StuckThink(int maxStuck=1000);	// true if stuck longer than the given time
 
 	bool TraceAhead(int dist, FVector3 offset, bool ignoreMonsters, FTraceResults* tr);
@@ -81,6 +83,8 @@ public:
 
 	FVector3 GetViewPos();
 	std::unordered_set<int> GetBlockedPaths(); // paths blocked during path to current goal
+
+	inline AActor* GetActor() { return m_pPlayer->mo; }
 };
 
 AActor* getAnyPlayer();

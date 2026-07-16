@@ -26,6 +26,29 @@ using namespace std;
 
 extern FRandom g_RandomBotAimSeed;
 
+struct WeaponInfo {
+	int priority;
+	int minRange;
+	int idealRange;
+	int maxRange;
+};
+
+unordered_map<string, WeaponInfo> g_wbot_weapon_info = {
+	{"Fist",			{0,  0,   0,   64}},
+	{"Chainsaw",		{1,  0,   0,   64}},
+	{"Pistol",			{2,  0,   200, 4000}},
+	{"Shotgun",			{3,  0,   200, 2000}},
+	{"Chaingun",		{4,  0,   400, 4000}},
+	{"Minigun",			{4,  0,   400, 4000}},
+	{"GrenadeLauncher",	{5,  200, 400, 2000}},
+	{"RocketLauncher",	{5,  200, 500, 4000}},
+	{"SuperShotgun",	{6,  0,   200, 2000}},
+	{"PlasmaRifle",		{7,  0,   400, 4000}},
+	{"Railgun",			{7,	 0,   400, 4000}},
+	{"BFG9000",			{8,  0,   200, 2000}},
+	{"BFG10K",			{8,  0,   200, 2000}},
+};
+
 char* VarArgs(const char* format, ...)
 {
 	va_list		argptr;
@@ -183,12 +206,9 @@ void CWootBot::ParseScript() {
 
 	m_lButtons = 0;
 
-	FindEnemy();
+	CombatThink();
 
-	if (m_pPlayer->mo->target) {
-		CombatThink();
-	}
-	else {
+	if (!m_pPlayer->mo->target) {
 		if (m_route.empty()) {
 			if (m_goals.empty()) {
 				FindGoal();
@@ -223,36 +243,37 @@ void CWootBot::ShowDebugInfo() {
 	for (int i = 0; i < m_route.size(); i++) {
 		if (i != 0)
 			routeStr += " ";
+		if (i > 0 && i % 10 == 0) {
+			routeStr += "\n                     ";
+		}
 		routeStr += to_string(m_route[i]);
 	}
 	
 	AActor* player = getAnyPlayer();
-	string navInfo = "Your sector: ";
+	if (!player)
+		return;
 
-	if (player) {
+	string navInfo;
+	{
 		int plrnavid = g_wbot_nav.get_nav_id(player);
-		navInfo += to_string(plrnavid);
+		navInfo = "Sector " + to_string(plrnavid) + ":";
 		NavSector& nav = g_wbot_nav.nav_sectors[plrnavid];
 
-		navInfo += "\nLinks:";
+		navInfo += "\n   Triggers:";
+		for (int i = 0; i < nav.triggers.size(); i++) {
+			navInfo += "\n      " + nav.triggers[i].desc();
+		}
+
+		navInfo += "\n   Links:";
 		for (int i = 0; i < nav.links.size(); i++) {
 			NavSectorLink& link = nav.links[i];
 			NavSector& targ = g_wbot_nav.nav_sectors[link.target];
-			navInfo += "\n   " + to_string(link.id) + " -> " + to_string(link.target);
+			string arrow = link.blocked(player) ? " -X> " : " --> ";
+			navInfo += "\n      " + to_string(link.id) + arrow + to_string(link.target);
 			if (targ.triggers.size())
-				navInfo += " (" + to_string(targ.triggers.size()) + " triggers)";
-			if (link.blocked(player)) {
-				navInfo += " (blocked)";
-			}
+				navInfo += " (" + to_string(targ.triggers.size()) + " T)";
 		}
 
-		navInfo += "\nSector triggers:";
-		for (int i = 0; i < nav.triggers.size(); i++) {
-			navInfo += "\n   " + nav.triggers[i].desc() 
-				+ " (sector " + to_string(nav.triggers[i].getNavId()) + ")";
-		}
-
-		navInfo += "\nLinedef: ";
 		FVector3 forward, right;
 		MakeVectors(player->angle, forward, right);
 		FVector3 start = FVector3(player->x, player->y, player->z + player->player->viewheight);
@@ -264,16 +285,13 @@ void CWootBot::ShowDebugInfo() {
 			ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, NULL, tr))
 		{
 			line_t* line = tr.Line;
-			navInfo += "ID: " + to_string(tr.Line - lines);
-			
+			navInfo += "\nLine " + to_string(tr.Line - lines) + ":";
+
 			if (line->special) {
-				navInfo += ", Special: " + to_string(line->special) + ", Tags:";
+				navInfo += "\n   Special: " + to_string(line->special) + "\n   Tags:";
 				for (int i = 0; i < 5; i++)
 					navInfo += " " + to_string(line->args[i]);
 			}
-		}
-		else {
-			navInfo += "<none>";
 		}
 	}
 
@@ -284,18 +302,43 @@ void CWootBot::ShowDebugInfo() {
 	string stuckStr = "Stuck: " + to_string(stuckCounter);
 
 	string enemyStr = "Enemy: <none>";
-	if (m_pPlayer->mo->target)
-		enemyStr = string("Enemy: ") + m_pPlayer->mo->target->GetClass()->TypeName.GetChars();
+	if (m_pPlayer->mo->target) {
+		AActor* targ = m_pPlayer->mo->target;
+		fixed_t dist = P_AproxDistance(m_pPlayer->mo->x - targ->x, m_pPlayer->mo->y - targ->y);
+		enemyStr = string("Enemy: ") + m_pPlayer->mo->target->GetClass()->TypeName.GetChars()
+			+ ", Dist: " + to_string(dist >> FRACBITS);
+	}
+
+	string weaponStr = "Weapons:";
+	for (AInventory* item = m_pPlayer->mo->Inventory; item != NULL; item = item->Inventory) {
+		if (item->IsKindOf(RUNTIME_CLASS(AWeapon))) {
+			AWeapon* weapon = static_cast<AWeapon*>(item);
+
+			bool hasAmmo = weapon->Ammo1 && weapon->Ammo1->Amount > 0 && weapon->Ammo1->Amount >= weapon->MinAmmo1;
+			if (!weapon->AmmoType1 || hasAmmo) {
+				string wepname = weapon->GetClass()->TypeName.GetChars();
+				WeaponInfo& info = g_wbot_weapon_info[wepname];
+				weaponStr += "\n   " + wepname + " "
+					+ to_string(weapon->Ammo1 ? weapon->Ammo1->Amount : 0)
+					+ " p" + to_string(info.priority);
+					//+ ", [" + to_string(info.minRange) + "," + to_string(info.idealRange) + "," + to_string(info.maxRange) + "] range";
+				if (m_pPlayer->ReadyWeapon == weapon) {
+					weaponStr += " <--";
+				}
+			}
+		}
+	}
 
 	string goalStr = "Goals:";
 	for (int i = 0; i < m_goals.size(); i++) {
 		goalStr += "\n   " + m_goals[i].desc();
 	}
 
-	string debugStr = navInfo + "\n\n" + enemyStr + "\n" + routeStr + "\n" + stateStr + "\n" +
-		stuckStr + "\n" + goalStr;
+	string botInfo = enemyStr + "\n" + weaponStr + "\n" + routeStr + "\n"
+		+ stateStr + "\n" + stuckStr + "\n" + goalStr;
 
-	SERVERCOMMANDS_PrintHUDMessage(debugStr.c_str(), 0, 0.3f, 0, 0, 0, CR_RED, 1.0f, 0, 0, "SmallFont", MAKE_ID('W', 'B', 'O', 'T'));
+	SERVERCOMMANDS_PrintHUDMessage(navInfo.c_str(), 0.95f, 0.5f, 0, 0, 0, CR_RED, 1.0f, 0, 0, "SmallFont", MAKE_ID('W', 'N', 'A', 'V'));
+	SERVERCOMMANDS_PrintHUDMessage(botInfo.c_str(), 0, 0.5f, 0, 0, 0, CR_RED, 1.0f, 0, 0, "SmallFont", MAKE_ID('W', 'B', 'O', 'T'));
 }
 
 void CWootBot::DebugPrint(const char* msg) {
@@ -327,6 +370,7 @@ void CWootBot::CancelRoute() {
 	m_route.clear();
 	pretendRouteSector = -1;
 	stuckCounter = 0;
+	stuckPath = -1;
 }
 
 void CWootBot::GoalActionThink() {
@@ -450,7 +494,13 @@ void CWootBot::RouteThink() {
 				}
 			}
 		}
-		else {
+		else { // fell off the route
+			if (g_wbot_nav.nav_sectors[m_navid].getLink(m_route[1])) {
+				// slipped into an adjacent node, so just update the route
+				m_route[0] = m_navid;
+				return;
+			}
+
 			DebugPrint(VarArgs("Fell off the route (expected %d but got %d)\n", m_route[0], m_navid));
 			CancelRoute();
 		}
@@ -464,8 +514,17 @@ void CWootBot::RouteThink() {
 	}
 
 	if (StuckThink(500)) {
+		DebugPrint("I got stuck! Cancelling route.\n");
+
+		if (m_route.size() > 1) {
+			NavSectorLink* failedLink = g_wbot_nav.nav_sectors[m_navid].getLink(m_route[1]);
+			stuckPath = failedLink ? failedLink->id : -1;
+		}
+		int oldStuckPath = stuckPath;
+
 		CancelRoute();
-		DebugPrint("I got stuck! Cancelling route\n");
+
+		stuckPath = oldStuckPath;
 	}
 }
 
@@ -482,6 +541,13 @@ void CWootBot::BlockedPathThink(NavSectorLink* link) {
 		}
 		else if (thisSector && (thisSector->floordata || thisSector->ceilingdata)) {
 			stateFlags |= FL_WBOT_WAITING_ELEV;
+
+			// stay centered on the elevator to avoid blocking it or falling off
+			NavSector& nav = g_wbot_nav.nav_sectors[m_navid];
+			FVector3 navPos = nav.pos();
+			fixed_t dist = P_AproxDistance(m_pPlayer->mo->x - (fixed_t)navPos.X, m_pPlayer->mo->y - (fixed_t)navPos.Y);
+			if (dist > (16 << FRACBITS))
+				MoveTo(navPos, 0, RUN_SPEED / 4);
 			return; // wait until the elevator is done moving
 		}
 	}
@@ -604,10 +670,11 @@ bool CWootBot::MoveTo(FVector3 pos, int radius, int speed) {
 	FVector3 forward, right;
 	MakeVectors(m_pPlayer->mo->angle, forward, right);
 	FVector3 viewOffset = FVector3(0, 0, m_pPlayer->viewheight);
-	bool hitRight = TraceAhead(32, viewOffset + right * 16, false, &tr);
-	bool hitLeft = TraceAhead(32, viewOffset + right * -16, false, &tr);
-	if (hitRight != hitLeft) {
-		m_sideMove = hitRight ? -speed : speed;
+	FTraceResults trLeft, trRight;
+	TraceAhead(32, viewOffset + right * 16, false, &trRight);
+	TraceAhead(32, viewOffset + right * -16, false, &trLeft);
+	if (trLeft.Fraction != trRight.Fraction) {
+		m_sideMove = trRight.Fraction < trLeft.Fraction ? -speed : speed;
 	}
 
 	fixed_t dist = P_AproxDistance(m_pPlayer->mo->x - (fixed_t)pos.X, m_pPlayer->mo->y - (fixed_t)pos.Y);
@@ -615,20 +682,59 @@ bool CWootBot::MoveTo(FVector3 pos, int radius, int speed) {
 }
 
 void CWootBot::CombatThink() {
+	AActor* bestEnemy = BestEnemy();
+
+	if (bestEnemy) {
+		m_pPlayer->mo->target = bestEnemy;
+	}
+
 	AActor* targ = m_pPlayer->mo->target;
 
-	if (!targ)
+	if (!targ || targ->health <= 0) {
+		m_pPlayer->mo->target = NULL;
 		return;
+	}
+
+	SelectBestWeapon();
+
+	fixed_t dist = P_AproxDistance(m_pPlayer->mo->x - targ->x, m_pPlayer->mo->y - targ->y);
+	fixed_t minChaseDist = 200 << FRACBITS;
+	fixed_t maxChaseDist = 500 << FRACBITS;
+	fixed_t maxRange = 2000 << FRACBITS;
+	fixed_t minRange = 0;
+	bool isMeleeWeapon = false;
+
+	if (m_pPlayer->ReadyWeapon) {
+		WeaponInfo& info = g_wbot_weapon_info[m_pPlayer->ReadyWeapon->GetClass()->TypeName.GetChars()];
+		minChaseDist = (info.minRange << FRACBITS) + 64;
+		maxChaseDist = std::max(minChaseDist, (info.idealRange << FRACBITS));
+		minRange = info.minRange << FRACBITS;
+		maxRange = info.maxRange << FRACBITS;
+		isMeleeWeapon = info.maxRange < 200;
+	}
+
+	if (isMeleeWeapon && dist > maxRange && targ->Sector != m_pPlayer->mo->Sector) {
+		m_pPlayer->mo->target = NULL;
+		return; // ignore enemies not close enough to punch
+	}
+
+	bool hasLineOfSight = P_CheckSight(m_pPlayer->mo, targ, SF_SEEPASTSHOOTABLELINES);
+
+	if (!hasLineOfSight) {
+		// forget about the target if not seen for a while
+		if (level.maptime - m_targetLastSeenTic < 35) {
+			m_pPlayer->mo->target = NULL;
+			return;
+		}
+	}
+
+	m_targetLastSeenTic = level.maptime;
 
 	// aim at enemy
 	AimAtPos(FVector3(targ->x, targ->y, targ->z + targ->height / 2));
 
 	m_forwardMove = 0;
 	m_sideMove = 0;
-
-	fixed_t dist = P_AproxDistance(m_pPlayer->mo->x - targ->x, m_pPlayer->mo->y - targ->y);
-	fixed_t minChaseDist = 200 << FRACBITS;
-	fixed_t maxChaseDist = 500 << FRACBITS;
 
 	// don't get too close/far
 	if (dist < minChaseDist) {
@@ -640,18 +746,43 @@ void CWootBot::CombatThink() {
 
 	// randomly strafe around the target
 	int r = rand() % 10;
-	if (r < 4) {
+	if (r < 5) {
 		m_sideMove = -RUN_SPEED;
 	}
-	else if (r < 8) {
+	else {
 		m_sideMove = RUN_SPEED;
 	}
-	else {
-		m_sideMove = 0;
+
+	if (hasLineOfSight && dist > minRange && dist < maxRange) {
+		m_lButtons |= BT_ATTACK;
+	}
+}
+
+void CWootBot::SelectBestWeapon() {
+	AWeapon* bestWeapon = NULL;
+	int bestPriority = -1;
+	for (AInventory* item = m_pPlayer->mo->Inventory; item != NULL; item = item->Inventory) {
+		if (item->IsKindOf(RUNTIME_CLASS(AWeapon))) {
+			AWeapon* weapon = static_cast<AWeapon*>(item);
+
+			int prio = g_wbot_weapon_info[weapon->GetClass()->TypeName.GetChars()].priority;
+			bool hasAmmo = weapon->Ammo1 && weapon->Ammo1->Amount > 0 && weapon->Ammo1->Amount >= weapon->MinAmmo1;
+			if ((!weapon->AmmoType1 || hasAmmo) && prio > bestPriority) {
+				bestPriority = prio;
+				bestWeapon = weapon;
+			}
+		}
 	}
 
-	if (P_CheckSight(m_pPlayer->mo, targ, SF_SEEPASTSHOOTABLELINES)) {
-		m_lButtons |= BT_ATTACK;
+	if (bestWeapon && m_pPlayer->ReadyWeapon != bestWeapon && m_pPlayer->PendingWeapon != bestWeapon) {
+		DebugPrint(VarArgs("Switching to best weapon '%s'\n", bestWeapon->GetClass()->TypeName.GetChars()));
+		m_pPlayer->PendingWeapon = bestWeapon;
+		if (m_pPlayer->ReadyWeapon != NULL) {
+			P_DropWeapon(m_pPlayer);
+		}
+		else if (m_pPlayer->PendingWeapon != WP_NOCHANGE) {
+			P_BringUpWeapon(m_pPlayer);
+		}
 	}
 }
 
@@ -661,6 +792,9 @@ AActor* wbot_LookForEnemiesInBlock(AActor* lookee, int index, void* extparam)
 	AActor* link;
 	CWootBot* pbot = (CWootBot*)extparam;
 	angle_t fov = pbot->m_fov;
+	AActor* plr = pbot->GetActor();
+	AActor* oldTarget = plr->target;
+	fixed_t oldDist = oldTarget ? P_AproxDistance(oldTarget->x - plr->x, oldTarget->y - plr->y) : 0;
 
 	for (block = blocklinks[index]; block != NULL; block = block->NextActor)
 	{
@@ -701,8 +835,14 @@ AActor* wbot_LookForEnemiesInBlock(AActor* lookee, int index, void* extparam)
 			continue;
 		}
 
+		// only retarget to closer enemies
+		if (oldTarget && P_AproxDistance(plr->x - link->x, plr->y - link->y) >= oldDist) {
+			continue;
+		}
+
 		return link;
 	}
+
 	return NULL;
 }
 
@@ -718,19 +858,8 @@ std::unordered_set<int> CWootBot::GetBlockedPaths() {
 	return allBlockedPaths;
 }
 
-void CWootBot::FindEnemy() {
-	if (m_pPlayer->mo->target && m_pPlayer->mo->target->health > 0) {
-		if (P_CheckSight(m_pPlayer->mo, m_pPlayer->mo->target, SF_SEEPASTSHOOTABLELINES)) {
-			m_targetLastSeenTic = level.maptime;
-		}
-
-		if (level.maptime - m_targetLastSeenTic < 35) {
-			// don't forget about the target until some time has passed
-			return;
-		}
-	}
-
-	m_pPlayer->mo->target = P_BlockmapSearch(m_pPlayer->mo, 10, wbot_LookForEnemiesInBlock, this);
+AActor* CWootBot::BestEnemy() {
+	return P_BlockmapSearch(m_pPlayer->mo, 10, wbot_LookForEnemiesInBlock, this);
 }
 
 bool CWootBot::FindGoal() {
@@ -797,6 +926,14 @@ void CWootBot::PopGoal() {
 
 std::vector<int> CWootBot::RouteToSector(int subid) {
 	unordered_set<int> allBlockedPaths = GetBlockedPaths();
+
+	if (stuckPath >= 0) {
+		// avoid the path that got the bot stuck in the last movement
+		allBlockedPaths.insert(stuckPath);
+		stuckPath = -1;
+		DebugPrint(VarArgs("Ignoring stucked path %d for this route\n", stuckPath));
+	}
+
 	return g_wbot_nav.get_astar_route(m_navid, subid, &allBlockedPaths);
 }
 
