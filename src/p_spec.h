@@ -1144,6 +1144,7 @@ bool EV_SilentLineTeleport (line_t *line, int side, AActor *thing, int id, INTBO
 bool EV_TeleportOther (int other_tid, int dest_tid, bool fog);
 bool EV_TeleportGroup (int group_tid, AActor *victim, int source_tid, int dest_tid, bool moveSource, bool fog);
 bool EV_TeleportSector (int tag, int source_tid, int dest_tid, bool fog, int group_tid);
+AActor* SelectTeleDest(int tid, int tag);
 
 
 //

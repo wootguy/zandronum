@@ -423,10 +423,25 @@ void CWootBot::RouteThink() {
 
 			// move to the next link
 			if (MoveTo(link->pos(), 32, routeSpeed)) {
-				// now move towards the center until we end up inside the target sector
+				// close enough to the link edge
 				NavSector& nav = g_wbot_nav.nav_sectors[m_route[1]];
-				FVector3 centerGoal = nav.pos();
-				MoveTo(centerGoal, 16, routeSpeed);
+				
+				if (link->isTeleport && link->seg->linedef) {
+					// move behind the teleporter line edge.
+					// The target sector may be in a completely different direction.
+					line_t* line = link->seg->linedef;
+					fixed_t dx = line->v2->x - line->v1->x;
+					fixed_t dy = line->v2->y - line->v1->y;
+					double len = sqrt((double)dx * dx + (double)dy * dy);
+
+					FVector3 backDir = FVector3(-(double)dy / len, (double)dx / len, 0);
+					FVector3 teleGoal = link->pos() + backDir * 200;
+					MoveTo(teleGoal, 0, routeSpeed);
+				}
+				else {
+					// move towards the target sector until we end up inside it
+					MoveTo(nav.pos(), 16, routeSpeed);
+				}
 
 				// duck if unable to fit while standing
 				int secHeight = nav.getHeight() >> FRACBITS;
@@ -477,10 +492,7 @@ void CWootBot::BlockedPathThink(NavSectorLink* link) {
 	curGoal.blockers.insert(link->id);
 
 	// don't try to route through previous paths we've been trying to unblock
-	unordered_set<int> allBlockedPaths;
-	for (BotGoal& goal : m_goals) {
-		allBlockedPaths.insert(goal.blockers.begin(), goal.blockers.end());
-	}
+	unordered_set<int> allBlockedPaths = GetBlockedPaths();
 
 	// get keys needed to cross this line, if missing
 	line_t* line = link->seg->linedef;
@@ -506,7 +518,7 @@ void CWootBot::BlockedPathThink(NavSectorLink* link) {
 	for (BotGoal& goal : targetNav.triggers) {
 		int subid = goal.getNavId();
 
-		if (subid == m_navid || g_wbot_nav.get_astar_route(m_navid, subid, &allBlockedPaths).size()) {
+		if (subid == m_navid || RouteToSector(subid).size()) {
 			if (PushGoal(goal)) {
 				DebugPrint(VarArgs("%s Added unblock subgoal.\n", blockMsg.c_str()));
 				return;
@@ -515,7 +527,7 @@ void CWootBot::BlockedPathThink(NavSectorLink* link) {
 	}
 
 	// nothing can unblock the path that stopped us. Try routing around it.
-	m_route = g_wbot_nav.get_astar_route(m_navid, curGoal.getNavId(), &allBlockedPaths);
+	m_route = RouteToSector(curGoal.getNavId());
 	if (m_route.size()) {
 		DebugPrint(VarArgs("%s Routing around the blocked path.\n", blockMsg.c_str()));
 		return;
@@ -524,7 +536,7 @@ void CWootBot::BlockedPathThink(NavSectorLink* link) {
 	// clearing previous blocked links and try again, maybe paths got unblocked
 	if (curGoal.blockers.size()) {
 		curGoal.blockers.clear();
-		m_route = g_wbot_nav.get_astar_route(m_navid, curGoal.getNavId(), NULL);
+		m_route = RouteToSector(curGoal.getNavId());
 		if (m_route.size()) {
 			DebugPrint(VarArgs("%s Forgetting blocked paths and trying again...\n", blockMsg.c_str()));
 			return;
@@ -698,6 +710,14 @@ FVector3 CWootBot::GetViewPos() {
 	return FVector3(m_pPlayer->mo->x, m_pPlayer->mo->y, m_pPlayer->mo->z + m_pPlayer->mo->ViewHeight);
 }
 
+std::unordered_set<int> CWootBot::GetBlockedPaths() {
+	unordered_set<int> allBlockedPaths;
+	for (BotGoal& goal : m_goals) {
+		allBlockedPaths.insert(goal.blockers.begin(), goal.blockers.end());
+	}
+	return allBlockedPaths;
+}
+
 void CWootBot::FindEnemy() {
 	if (m_pPlayer->mo->target && m_pPlayer->mo->target->health > 0) {
 		if (P_CheckSight(m_pPlayer->mo, m_pPlayer->mo->target, SF_SEEPASTSHOOTABLELINES)) {
@@ -775,6 +795,11 @@ void CWootBot::PopGoal() {
 		CancelRoute();
 }
 
+std::vector<int> CWootBot::RouteToSector(int subid) {
+	unordered_set<int> allBlockedPaths = GetBlockedPaths();
+	return g_wbot_nav.get_astar_route(m_navid, subid, &allBlockedPaths);
+}
+
 void CWootBot::RouteToGoal() {
 	CancelRoute();
 
@@ -784,10 +809,7 @@ void CWootBot::RouteToGoal() {
 	}
 
 	BotGoal& goal = m_goals[m_goals.size() - 1];
-
-	int goalSubId = goal.getNavId();
-	int thisSubId = g_wbot_nav.get_nav_id(m_pPlayer->mo);
-	m_route = g_wbot_nav.get_astar_route(thisSubId, goalSubId);
+	m_route = RouteToSector(goal.getNavId());
 
 	if (m_route.size()) {
 		DebugPrint(VarArgs("Routing to goal: %s\n", goal.desc().c_str()));

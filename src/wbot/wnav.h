@@ -30,6 +30,7 @@ struct NavSectorLink {
 	int linkWidth;
 	int leftSector; // setor on the left side of the target sector, relative to the border segment
 	int rightSector; // setor on the right side of the target sector, relative to the border segment
+	bool isTeleport;
 	seg_t* seg;
 
 	FVector3 pos() {
@@ -90,6 +91,7 @@ private:
 	LinkSeg get_neighbor_subsector(subsector_t* ignoreSector, seg_t* borderSeg);
 
 	bool can_cross_seg_now(seg_t* seg);
+	bool can_sector_move(sector_t* sec);
 	bool does_linedef_move_tag(line_t* line, short tag); // true if this linedef moves the given sector tag
 };
 

@@ -206,6 +206,12 @@ bool SectorNavMesh::is_seg_potentially_crossable(seg_t* seg) {
 	if (seg->linedef && (seg->linedef->flags & ML_BLOCKING))
 		return false; // impassable
 
+	if (!can_cross_seg_now(seg)) {
+		if (!can_sector_move(seg->frontsector) && !can_sector_move(seg->backsector)) {
+			return false;
+		}
+	}
+
 	return true;
 }
 
@@ -231,6 +237,26 @@ bool SectorNavMesh::can_cross_seg_now(seg_t* seg)
 	}
 
 	return true;
+}
+
+bool SectorNavMesh::can_sector_move(sector_t* sec) {
+	if (sec->tag) {
+		for (int k = 0; k < numlines; k++) {
+			line_t& line = lines[k];
+
+			if (does_linedef_move_tag(&line, sec->tag)) {
+				return true;
+			}
+		}
+	}
+
+	for (int i = 0; i < sec->linecount; i++) {
+		if (sec->lines[i]->backsector == sec && does_linedef_move_tag(sec->lines[i], 0)) {
+			return true;
+		}
+	}
+
+	return false;
 }
 
 LinkSeg SectorNavMesh::get_neighbor_subsector(subsector_t* ignoreSector, seg_t* borderSeg) {
@@ -357,10 +383,6 @@ void SectorNavMesh::generate_node_graph() {
 			link.parent = i;
 			link.linkWidth = (int)linkseg.length() >> FRACBITS;
 
-			if (i == 87 && linkseg.otherSub == 94) {
-				Printf("");
-			}
-
 			subsector_t& neighbor = subsectors[linkseg.otherSub];
 			int leftIdx = (linkseg.idx + neighbor.numlines - 1) % neighbor.numlines;
 			int rightIdx = (linkseg.idx + 1) % neighbor.numlines;
@@ -372,6 +394,17 @@ void SectorNavMesh::generate_node_graph() {
 			if (link.linkWidth < PLAYER_WIDTH && link.leftSector == -1 && link.rightSector == -1) {
 				// link is too narrow to enter and both sides of it are impassable walls
 				continue;
+			}
+
+			// redirect target sector if this is a teleport
+			line_t* line = seg.linedef;
+			if (line && line->special == Teleport && seg.frontsector == sub.sector) {
+				AActor* dest = SelectTeleDest(line->args[0], line->args[1]);
+				if (dest) {
+					subsector_t* destSub = R_PointInSubsector(dest->x, dest->y);
+					link.target = destSub - subsectors;
+					link.isTeleport = true;
+				}
 			}
 
 			nav.links.push_back(link);
@@ -656,7 +689,11 @@ vector<int> SectorNavMesh::get_astar_route(int startSubSectorId, int endSubSecto
 			NavSector& neighborNode = nav_sectors[neighbor];
 
 			float tentative_gScore = gScore[current];
-			tentative_gScore += path_cost(currentNode.id, neighborNode.id);
+			
+			if (link.isTeleport)
+				tentative_gScore += (link.pos() - currentNode.pos()).Length();
+			else
+				tentative_gScore += path_cost(currentNode.id, neighborNode.id);
 
 			float neighbor_gScore = 9e99;
 			if (gScore.count(neighbor))

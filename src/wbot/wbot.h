@@ -59,6 +59,7 @@ public:
 	bool PushGoal(BotGoal& goal); // returns false if this is already the current goal
 	void PopGoal();
 	void RouteToGoal();
+	std::vector<int> RouteToSector(int subid);
 	void FindEnemy();
 	void AimAtPos(FVector3 pos);
 	bool MoveTo(FVector3 pos, int radius=32, int speed=100);
@@ -79,6 +80,7 @@ public:
 	void DebugPrint(const char* msg);
 
 	FVector3 GetViewPos();
+	std::unordered_set<int> GetBlockedPaths(); // paths blocked during path to current goal
 };
 
 AActor* getAnyPlayer();

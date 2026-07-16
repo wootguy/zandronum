@@ -252,7 +252,7 @@ bool P_Teleport (AActor *thing, fixed_t x, fixed_t y, fixed_t z, angle_t angle,
 	return true;
 }
 
-static AActor *SelectTeleDest (int tid, int tag)
+AActor *SelectTeleDest (int tid, int tag)
 {
 	AActor *searcher;
 
