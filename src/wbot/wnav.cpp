@@ -98,6 +98,20 @@ NavSectorLink* NavSector::getLink(int subSectorId) {
 	return NULL;
 }
 
+bool NavSector::touches(AActor* actor) {
+	if (!actor)
+		return false;
+
+	FVector2 center = pos();
+	FVector2 actorPos = FVector2(actor->x, actor->y);
+	FVector2 dir = FVector2(center.X - actor->x, center.Y - actor->y);
+	dir.MakeUnit();
+
+	FVector2 nearestPoint = actorPos + dir * actor->radius;
+	int subid = R_PointInSubsector(nearestPoint.X, nearestPoint.Y) - subsectors;
+	return subid == id;
+}
+
 fixed_t NavSector::getHeight() {
 	fixed_t fx = x << FRACBITS;
 	fixed_t fy = y << FRACBITS;
@@ -245,7 +259,10 @@ bool SectorNavMesh::can_cross_seg_now(seg_t* seg)
 	fixed_t backCeil = seg->backsector->ceilingplane.ZatPoint(x, y);
 
 	if ((backCeil - backFloor) < (DUCK_HEIGHT << FRACBITS)) {
-		return false; // not enough space
+		return false; // not enough space in target sector
+	}
+	if ((backCeil - frontFloor) < (DUCK_HEIGHT << FRACBITS)) {
+		return false; // not enough space at the border segment (can't step down)
 	}
 
 	return true;
@@ -954,4 +971,32 @@ bool SectorNavMesh::get_key_goals_for_line(AActor* actor, line_t* line, vector<B
 	}
 
 	return true;
+}
+
+std::vector<int> SectorNavMesh::GetTouchedSubsectors(AActor* actor) {
+	unordered_set<int> subs;
+
+	fixed_t r = actor->radius;
+	fixed_t d = FixedMul(r, 46341); // diagonal radius
+
+	subs.insert(R_PointInSubsector(actor->x,		actor->y)		- subsectors);
+
+	// axes
+	subs.insert(R_PointInSubsector(actor->x + r,	actor->y	)	- subsectors);
+	subs.insert(R_PointInSubsector(actor->x - r,	actor->y	)	- subsectors);
+	subs.insert(R_PointInSubsector(actor->x,		actor->y + r)	- subsectors);
+	subs.insert(R_PointInSubsector(actor->x,		actor->y - r)	- subsectors);
+
+	// diagonals
+	subs.insert(R_PointInSubsector(actor->x + d, actor->y + d) - subsectors);
+	subs.insert(R_PointInSubsector(actor->x + d, actor->y - d) - subsectors);
+	subs.insert(R_PointInSubsector(actor->x - d, actor->y + d) - subsectors);
+	subs.insert(R_PointInSubsector(actor->x - d, actor->y - d) - subsectors);
+
+	std::vector<int> ret;
+	for (auto item : subs) {
+		ret.push_back(item);
+	}
+
+	return ret;
 }

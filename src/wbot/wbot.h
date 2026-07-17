@@ -4,6 +4,7 @@
 
 struct FTraceResults;
 struct NavSectorLink;
+class AActor;
 
 enum BotGoalAction {
 	WBOT_GOAL_ACTION_MOVE_TO,	// move to the goal and do nothing

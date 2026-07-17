@@ -61,6 +61,8 @@ struct NavSector {
 	// get link by id
 	NavSectorLink* getLink(int subSectorId);
 
+	bool touches(AActor* actor);
+
 	// get vertical space between the floor and ceiling at the center point of the subsector
 	fixed_t getHeight();
 	fixed_t getFloorZ();
@@ -84,6 +86,7 @@ public:
 	int get_nav_id(fixed_t x, fixed_t y);
 	int get_nav_id(AActor* actor);
 	bool get_key_goals_for_line(AActor* actor, line_t* linedef, std::vector<BotGoal>& keyGoals, std::unordered_set<int>* blockedPaths); // get key required to use the linedef. Returns false if keys don't exist anywhere in the map.
+	std::vector<int> GetTouchedSubsectors(AActor* actor);
 
 private:
 	int draw_debug_line(FVector3 start, FVector3 end, AActor* actor); // returns number of sprites drawn

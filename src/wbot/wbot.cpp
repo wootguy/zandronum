@@ -360,6 +360,10 @@ void CWootBot::ShowDebugInfo() {
 
 		navInfo += "\nOrigin: " + to_string(player->x >> FRACBITS) + " " + to_string(player->y >> FRACBITS)
 			+ " " + to_string(nav.getFloorZ() >> FRACBITS);
+
+		int yaw = (int)((uint64_t)player->angle * 360 / 0x100000000ULL);
+		int pitch = (int)((uint64_t)player->pitch * 360 / 0x100000000ULL);
+		navInfo += "\nAngles: " + to_string(yaw) + " " + to_string(pitch);
 	}
 
 	string stateStr = "State:";
@@ -368,6 +372,17 @@ void CWootBot::ShowDebugInfo() {
 	if (stateFlags & FL_WBOT_JUMPING) { stateStr += " JUMP"; }
 	if (stateFlags & FL_WBOT_FLYING) { stateStr += " FLY"; }
 	if (m_pPlayer->cheats & (CF_FROZEN | CF_TOTALLYFROZEN)) { stateStr += " FROZEN"; }
+
+	string btnStr = "Buttons: ";
+	if (m_lButtons & BT_ATTACK) btnStr += " ATTACK";
+	if (m_lButtons & BT_USE) btnStr += " USE";
+	if (m_lButtons & BT_JUMP) btnStr += " JUMP";
+	if (m_lButtons & BT_CROUCH) btnStr += " CROUCH";
+	if (m_lButtons & BT_TURN180) btnStr += " TURN180";
+	if (m_lButtons & BT_ALTATTACK) btnStr += " ALTATTACK";
+	if (m_lButtons & BT_RELOAD) btnStr += " RELOAD";
+	if (m_lButtons & BT_ZOOM) btnStr += " ZOOM";
+	if (m_lButtons & BT_SPEED) btnStr += " SPEED";
 
 	string stuckStr = "Stuck: " + to_string(stuckCounter);
 
@@ -405,9 +420,9 @@ void CWootBot::ShowDebugInfo() {
 	}
 
 	string botInfo = enemyStr + "\n" + weaponStr + "\n" + routeStr + "\n"
-		+ stateStr + "\n" + stuckStr + "\n" + goalStr;
+		+ stateStr + "\n" + btnStr + "\n" + stuckStr + "\n" + goalStr;
 
-	SERVERCOMMANDS_PrintHUDMessage(navInfo.c_str(), 0.95f, 0.5f, 0, 0, 0, CR_RED, 1.0f, 0, 0, "SmallFont", MAKE_ID('W', 'N', 'A', 'V'));
+	SERVERCOMMANDS_PrintHUDMessage(navInfo.c_str(), 0.94f, 0.5f, 0, 0, 0, CR_RED, 1.0f, 0, 0, "SmallFont", MAKE_ID('W', 'N', 'A', 'V'));
 	SERVERCOMMANDS_PrintHUDMessage(botInfo.c_str(), 0, 0.5f, 0, 0, 0, CR_RED, 1.0f, 0, 0, "SmallFont", MAKE_ID('W', 'B', 'O', 'T'));
 }
 
@@ -451,6 +466,7 @@ void CWootBot::CancelRoute() {
 
 void CWootBot::GoalActionThink() {
 	BotGoal& goal = m_goals[m_goals.size() - 1];
+	NavSector& nav = g_wbot_nav.nav_sectors[m_navid];
 
 	int goalSector = goal.getNavId();
 
@@ -463,11 +479,16 @@ void CWootBot::GoalActionThink() {
 				return;
 			}
 		}
+		
+		// actor may be routed here but technically in an adjacent sector
+		bool actorReachable = nav.touches(goal.actor);
 
-		// route was cancelled or the target moved. Route to it again.
-		DebugPrint("Goal moved or movement failed. Rerouting...\n");
-		RouteToGoal();
-		return;
+		if (!actorReachable) {
+			// route was cancelled or the target moved. Route to it again.
+			DebugPrint("Goal moved or movement failed. Rerouting...\n");
+			RouteToGoal();
+			return;
+		}
 	}
 
 	m_forwardMove = 0;
@@ -582,23 +603,32 @@ void CWootBot::RouteThink() {
 		m_navid = pretendRouteSector;
 	}
 
-	NavSector& nav = g_wbot_nav.nav_sectors[m_navid];
+	NavSector& idealNav = g_wbot_nav.nav_sectors[m_route[0]];
+	NavSector& curNav = g_wbot_nav.nav_sectors[m_navid];
 
-	if (m_route.size() > 1) {	
-		NavSectorLink* link = nav.getLink(m_route[1]);
+	if (m_route.size() > 1) {
+		NavSector& targetNav = g_wbot_nav.nav_sectors[m_route[1]];
+		NavSectorLink* link = idealNav.getLink(m_route[1]);
 
-		if (m_navid == m_route[0] && link) {
+		// allow slipping off the route into adjacent sectors while heading towards the target sector
+		bool onTrack = m_navid == m_route[0] || curNav.getLink(m_route[1]) || curNav.getLink(m_route[0]);
+
+		if (onTrack) {
 			sector_t* thisSector = subsectors[m_navid].sector;
 			if (thisSector && thisSector->floordata) {
-				stateFlags |= FL_WBOT_WAIT_ELEV;
+				// on an elevator that is about to move or is moving
+				// wait for it to raise/lower the bot to a height close enough to the target sector
+				int zDelta = ((fixed_t)targetNav.pos().Z - m_pPlayer->mo->z) >> FRACBITS;
+				if (abs(zDelta) > STEP_HEIGHT) {
+					stateFlags |= FL_WBOT_WAIT_ELEV;
 
-				// stay centered on the elevator to avoid blocking it or falling off
-				NavSector& nav = g_wbot_nav.nav_sectors[m_navid];
-				FVector3 navPos = nav.pos();
-				fixed_t dist = P_AproxDistance(m_pPlayer->mo->x - (fixed_t)navPos.X, m_pPlayer->mo->y - (fixed_t)navPos.Y);
-				if (dist > (16 << FRACBITS))
-					MoveTo(navPos, 0, RUN_SPEED / 4);
-				return; // wait until the elevator is done moving
+					// stay centered on the elevator to avoid blocking it or falling off
+					FVector3 navPos = curNav.pos();
+					fixed_t dist = P_AproxDistance(m_pPlayer->mo->x - (fixed_t)navPos.X, m_pPlayer->mo->y - (fixed_t)navPos.Y);
+					if (dist > (16 << FRACBITS))
+						MoveTo(navPos, 0, RUN_SPEED / 4);
+					return; // wait until the elevator is done moving
+				}
 			}
 
 			if (link->blocked(m_pPlayer->mo)) {
@@ -606,11 +636,15 @@ void CWootBot::RouteThink() {
 				return;
 			}
 
+			// duck if unable to fit while standing
+			bool crampedTarg = (targetNav.getHeight() >> FRACBITS) < STAND_HEIGHT;
+			if (crampedTarg) {
+				m_lButtons |= BT_CROUCH;
+			}
+
 			// move to the next link
 			if (MoveTo(link->pos(), 32, routeSpeed)) {
-				// close enough to the link edge
-				NavSector& targetNav = g_wbot_nav.nav_sectors[m_route[1]];
-				
+				// close enough to the link edge				
 				if (link->isTeleport && link->seg->linedef) {
 					// move behind the teleporter line edge.
 					// The target sector may be in a completely different direction.
@@ -626,36 +660,23 @@ void CWootBot::RouteThink() {
 					// move towards the target sector until we end up inside it
 					MoveTo(targetNav.pos(), 16, routeSpeed);
 				}
-
-				// duck if unable to fit while standing
-				int secHeight = targetNav.getHeight() >> FRACBITS;
-				if (secHeight < STAND_HEIGHT) {
-					m_lButtons |= BT_CROUCH;
-				}
 			}
 		}
 		else { // fell off the route
 			if ((stateFlags & FL_WBOT_JUMPING) && (stateFlags & FL_WBOT_FLYING)) {
 				// don't abort the route until the jump is complete
-				NavSector& jumpToNav = g_wbot_nav.nav_sectors[m_route[1]];
-				MoveTo(jumpToNav.pos(), 16, routeSpeed);
+				MoveTo(targetNav.pos(), 16, routeSpeed);
 				return;
 			}
 
 			stateFlags &= ~FL_WBOT_JUMPING;
-
-			if (nav.getLink(m_route[1])) {
-				// slipped into an adjacent node, so just update the route
-				m_route[0] = m_navid;
-				return;
-			}
 
 			DebugPrint(VarArgs("Fell off the route (expected %d but got %d)\n", m_route[0], m_navid));
 			CancelRoute();
 		}
 	}
 	else if (m_route.size() == 1) {
-		FVector3 centerGoal = nav.pos();
+		FVector3 centerGoal = idealNav.pos();
 		if (MoveTo(centerGoal, 32, routeSpeed)) {
 			m_route.clear(); // don't reset pretendsector in case a goal is inside it
 			stuckPath = -1;
@@ -667,7 +688,7 @@ void CWootBot::RouteThink() {
 		DebugPrint("I got stuck! Cancelling route.\n");
 
 		if (m_route.size() > 1) {
-			NavSectorLink* failedLink = nav.getLink(m_route[1]);
+			NavSectorLink* failedLink = curNav.getLink(m_route[1]);
 			stuckPath = failedLink ? failedLink->id : -1;
 		}
 
@@ -1080,9 +1101,9 @@ std::vector<int> CWootBot::RouteToSector(int subid) {
 
 	if (stuckPath >= 0) {
 		// avoid the path that got the bot stuck in the last movement
+		DebugPrint(VarArgs("Ignoring stucked path %d for this route\n", stuckPath));
 		allBlockedPaths.insert(stuckPath);
 		stuckPath = -1;
-		DebugPrint(VarArgs("Ignoring stucked path %d for this route\n", stuckPath));
 	}
 
 	return g_wbot_nav.get_astar_route(m_navid, subid, &allBlockedPaths);
@@ -1097,7 +1118,23 @@ void CWootBot::RouteToGoal() {
 	}
 
 	BotGoal& goal = m_goals[m_goals.size() - 1];
-	m_route = RouteToSector(goal.getNavId());
+	int goalNavId = goal.getNavId();
+	m_route = RouteToSector(goalNavId);
+
+	if (m_route.empty() && goal.actor) {
+		// actor origin is in an unreachable sector, but it's collision box may be touching a reachable one
+		vector<int> subs = g_wbot_nav.GetTouchedSubsectors(goal.actor);
+
+		for (const int& subid : subs) {
+			if (subid == goalNavId) {
+				continue;
+			}
+
+			m_route = RouteToSector(subid);
+			if (m_route.size())
+				break;
+		}
+	}
 
 	if (m_route.size()) {
 		DebugPrint(VarArgs("Routing to goal: %s\n", goal.desc().c_str()));
@@ -1183,8 +1220,8 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 			if (!playeringame[i] || !player)
 				continue;
 
-			if (player->player->bIsBot)	set_ori(player, -223, 1758, ANGLE_1 * 270);
-			else						set_ori(player, -170, 1581, ANGLE_1 * 90);
+			if (player->player->bIsBot)	set_ori(player, 933, 120, ANGLE_1 * 90);
+			else						set_ori(player, 922, 445, ANGLE_1 * 270);
 
 			if (player->player->bIsBot) {
 				CWootBot* bot = (CWootBot*)player->player->pSkullBot;
