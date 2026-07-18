@@ -201,6 +201,7 @@ void CWootBot::Reset() {
 	CancelRoute();
 	m_goals.clear();
 	m_lastAttack = 0;
+	m_lastUse = 0;
 	stateFlags = 0;
 	m_targetLastSeenTic = 0;
 	stuckPath = -1;
@@ -401,15 +402,6 @@ void CWootBot::GoalActionThink() {
 	int goalSector = goal.getNavId();
 
 	if (m_navid != goalSector && pretendRouteSector != goalSector) {
-
-		if (goal.action == WBOT_GOAL_ACTION_CROSS && goal.lineid >= 0) {
-			if (m_pPlayer->mo->Sector == lines[goal.lineid].backsector) {
-				// moving to a different sector was required for this goal
-				PopGoal();
-				return;
-			}
-		}
-		
 		// actor may be routed here but technically in an adjacent sector
 		bool actorReachable = nav.touches(goal.actor);
 
@@ -423,14 +415,6 @@ void CWootBot::GoalActionThink() {
 
 	m_forwardMove = 0;
 	m_sideMove = 0;
-
-	if (goal.lineid >= 0) {
-		if (lines[goal.lineid].special == 0) {
-			// single-use special is no longer usable
-			DebugPrint("Single-use special is no longer usable\n");
-			PopGoal();
-		}
-	}
 	
 	switch (goal.action) {
 	default:
@@ -441,14 +425,14 @@ void CWootBot::GoalActionThink() {
 	case WBOT_GOAL_ACTION_USE: {
 		int useDist = (m_pPlayer->mo->UseRange >> FRACBITS) - 1;
 		if (MoveTo(goal.pos(), useDist)) {
-			m_lButtons |= BT_USE;
-			PopGoal();
+			Use();
 		}
 		break;
 	}
 	case WBOT_GOAL_ACTION_TOUCH:
 		if (MoveTo(goal.pos(), goal.touchDistance(m_pPlayer->mo))) {
-			PopGoal();
+			if (goal.lineid == -1)
+				PopGoal(); // only lines are hooked and pop goals automatically
 		}
 		break;
 	case WBOT_GOAL_ACTION_CROSS: {
@@ -463,9 +447,7 @@ void CWootBot::GoalActionThink() {
 			// be careful not to miss skinny lines
 			int speed = getLineLength(line) > 32 ? RUN_SPEED : RUN_SPEED / 4;
 
-			if (MoveTo(backGoal, 16, speed)) {
-				PopGoal();
-			}
+			MoveTo(backGoal, 16, speed);
 		}
 		else {
 			DebugPrint("Can't cross an actor as a goal!\n");
@@ -486,11 +468,7 @@ void CWootBot::GoalActionThink() {
 		FTraceResults tr;
 		TraceAhead(shootRange, FVector3(0, 0, m_pPlayer->viewheight), false, &tr);
 		if (tr.Line && (tr.Line - lines) == goal.lineid) {
-			// wait a bit in case the gun needs to reload
-			if (level.time - m_lastAttack > 35) {
-				Attack();
-				PopGoal();
-			}
+			Attack();
 		}
 		break;
 	}
@@ -856,7 +834,8 @@ bool CWootBot::MoveTo(FVector3 pos, int radius, int speed) {
 	// jump over short walls and open doors
 	FTraceResults tr;
 	if (TraceAhead(32, FVector3(0, 0, STEP_HEIGHT << FRACBITS), true, &tr)) {
-		m_lButtons |= BT_JUMP | BT_USE;
+		m_lButtons |= BT_JUMP;
+		Use();
 	}
 
 	// combine desired vector with avoidance vectors
@@ -1328,7 +1307,42 @@ void CWootBot::RouteToGoal() {
 	}
 }
 
+void CWootBot::Use(int ticsBetweenUses) {
+	if (level.time - m_lastUse < ticsBetweenUses) {
+		m_lButtons &= ~BT_USE;
+	}
+
+	m_lButtons |= BT_USE;
+	m_lastUse = level.time;
+}
+
 void CWootBot::Attack() {
 	m_lButtons |= BT_ATTACK;
 	m_lastAttack = level.time;
+}
+
+void CWootBot::HandleLineActivation(line_t* line) {
+	int lineid = line - lines;
+
+	int popIdx = -1;
+	for (int i = 0; i < m_goals.size(); i++) {
+		if (m_goals[i].lineid == lineid) {
+			popIdx = i;
+			break;
+		}
+	}
+
+	if (popIdx != -1) {
+		// pop all subgoals that were for activating this line
+		int numSubPop = (m_goals.size() - popIdx) - 1;
+
+		if (numSubPop > 0)
+			DebugPrint(VarArgs("Something activated line %d! Popping %d subgoals\n", lineid, numSubPop));
+
+		while (numSubPop--) {
+			m_goals.pop_back();
+		}
+
+		PopGoal(); // only final pop does rerouting logic
+	}
 }

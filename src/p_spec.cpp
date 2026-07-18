@@ -89,6 +89,7 @@
 #include "unlagged.h"
 #include "network_enums.h"
 #include "st_hud.h"
+#include "wbot/wutil.h"
 
 static FRandom pr_playerinspecialsector ("PlayerInSpecialSector");
 void P_SetupPortals();
@@ -368,6 +369,9 @@ bool P_ActivateLine (line_t *line, AActor *mo, int side, int activationType)
 	{
 		Printf ("Line special %d activated on line %i\n", special, int(line - lines));
 	}
+
+	wbot_handle_line_activation(line);
+
 	return true;
 }
 

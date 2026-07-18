@@ -60,6 +60,7 @@ public:
 	int stateFlags = 0; // FL_WBOT_*
 	int m_navid; // current navigation node/subsector id
 	int m_lastAttack; // last tic the player attacked
+	int m_lastUse; // last tic the player used (for preventing sound spam)
 	float m_speedMult = 1.0f;
 	int m_routeSpeed = 0;
 	int m_cliffDist = 9999;
@@ -102,10 +103,14 @@ public:
 	void ShowDebugInfo();
 	void DebugPrint(const char* msg);
 
+	void Use(int ticsBetweenUses=7); // anti-spam use pressing
 	void Attack();
 
 	FVector3 GetViewPos();
 	std::unordered_set<int> GetBlockedPaths(); // paths blocked during path to current goal
 
 	inline AActor* GetActor() { return m_pPlayer->mo; }
+
+	// something somewhere triggered a line
+	void HandleLineActivation(line_t* line);
 };

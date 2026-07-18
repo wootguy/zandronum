@@ -50,4 +50,7 @@ int draw_debug_line(FVector3 start, FVector3 end, AActor* actor);
 
 bool TraceLine(FVector3 start, FVector3 end, bool ignoreMonsters=true, AActor* ignoreEnt=NULL, FTraceResults* tr=NULL);
 
+
+// Hooks
 void wbot_handle_chat_command(ULONG ulPlayer, const char* msg);
+void wbot_handle_line_activation(line_t* line);

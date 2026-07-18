@@ -197,6 +197,17 @@ bool TraceLine(FVector3 start, FVector3 end, bool ignoreMonsters, AActor* ignore
 		ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, ignoreEnt, *out);
 }
 
+void wbot_handle_line_activation(line_t* line) {
+	for (int i = 0; i < MAXPLAYERS; i++) {
+		AActor* player = players[i].mo;
+		if (!playeringame[i] || !player || !player->player->bIsBot)
+			continue;
+
+		CWootBot* bot = (CWootBot*)player->player->pSkullBot;
+		bot->HandleLineActivation(line);
+	}
+}
+
 void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 	// clear all enemies for general pathfinding tests
 	if (!strcmp(msg, "y")) {
