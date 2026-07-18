@@ -84,12 +84,12 @@ int getLineLength(line_t* line) {
 
 fixed_t DistanceToLine(const FVector2& p, const FVector2& a, const FVector2& b) {
 	FVector2 ab = b - a;
-	FVector2 ap = p - a;
+    FVector2 ap = p - a;
+    return (ab.X * ap.Y - ab.Y * ap.X) / ab.Length();
+}
 
-	float area2 = fabs(ab.X * ap.Y - ab.Y * ap.X); // 2D cross product magnitude
-	float len = ab.Length();
-
-	return area2 / len;
+fixed_t DistanceToLine(const FVector2& p, line_t* line) {
+	return DistanceToLine(p, FVector2(line->v1->x, line->v1->y), FVector2(line->v2->x, line->v2->y));
 }
 
 void ExtendSegment(FVector2& a, FVector2& b, float amount) {

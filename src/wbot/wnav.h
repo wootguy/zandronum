@@ -76,6 +76,7 @@ class SectorNavMesh {
 public:
 	std::vector<NavSector> nav_sectors;
 	std::unordered_map<int, int> line_subsectors; // maps a linedef to the subsector in front of it
+	std::unordered_set<int> stair_sectors; // sectors that move as part of a stair builder
 
 	int pathTests; // number of blocked path checks
 	bool verbose;
@@ -96,6 +97,12 @@ private:
 	float path_cost(NavSectorLink& link);
 	LinkSeg get_neighbor_subsector(subsector_t* ignoreSector, seg_t* borderSeg);
 
+	void find_stair_sectors();
+	void find_linedef_sectors();
+	void calc_nav_centers();
+	void add_sector_trigger_goals();
+	void add_jump_links();
+	bool is_link_bordered_by_walls(subsector_t& sub, int segIdx, int& leftSubId, int& rightSubId);
 	bool can_cross_seg_now(seg_t* seg);
 	bool can_sector_move(sector_t* sec);
 	bool does_linedef_move_tag(line_t* line, short tag); // true if this linedef moves the given sector tag

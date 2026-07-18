@@ -29,6 +29,8 @@ int getLineLength(line_t* line);
 
 fixed_t DistanceToLine(const FVector2& p, const FVector2& a, const FVector2& b);
 
+fixed_t DistanceToLine(const FVector2& p, line_t* line);
+
 // true if the point is in front of or behind the segment, not to the side
 bool PointAlignedSegment(const FVector2& p, const FVector2& a, const FVector2& b);
 

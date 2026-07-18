@@ -250,6 +250,9 @@ bool SectorNavMesh::can_cross_seg_now(seg_t* seg)
 }
 
 bool SectorNavMesh::can_sector_move(sector_t* sec) {
+	if (stair_sectors.count(sec - sectors))
+		return true;
+
 	if (sec->tag) {
 		for (int k = 0; k < numlines; k++) {
 			line_t& line = lines[k];
@@ -495,126 +498,113 @@ bool SectorNavMesh::create_jump_link(NavSector& fromNav, NavSectorLink& fromLink
 	return true;
 }
 
-void SectorNavMesh::generate_node_graph() {
-	uint64_t genStart = getEpochMillis();
+void SectorNavMesh::find_stair_sectors() {
+	for (int s = 0; s < numlines; s++) {
+		line_t& line = lines[s];
 
-	nav_sectors.clear();
-	nav_sectors.resize(numsubsectors);
-	line_subsectors.clear();
-	g_total_links = 0;
+		bool isStairBuilder = false;
+		int usespecials = 0;
+		bool igntxt = false;
 
-	// link sectors as a nav mesh
-	for (int i = 0; i < numsubsectors; i++) {
-		subsector_t& sub = subsectors[i];
-		NavSector& nav = nav_sectors[i];
-
-		int subId = &sub - subsectors;
-		int subCenterX = 0;
-		int subCenterY = 0;
-
-		nav.doesDamage = subsector_does_damage(&sub);
-
-		for (int k = 0; k < sub.numlines; k++) {
-			seg_t& seg = sub.firstline[k];
-
-			subCenterX += seg.v1->x >> FRACBITS;
-			subCenterY += seg.v1->y >> FRACBITS;
-
-			if (!is_seg_potentially_crossable(&seg)) {
-				continue;
-			}
-
-			LinkSeg linkseg = get_neighbor_subsector(&sub, &seg);
-
-			if (linkseg.otherSub < 0)
-				continue;
-
-			fixed_t cx = (linkseg.x1 + linkseg.x2) / 2;
-			fixed_t cy = (linkseg.y1 + linkseg.y2) / 2;
-			float z = sub.sector->floorplane.ZatPoint(cx, cy);
-
-			NavSectorLink link;
-			link.target = linkseg.otherSub;
-			link.overlapCenter = FVector3(cx, cy, z);
-			link.seg = &seg;
-			link.id = g_total_links++;
-			link.parent = i;
-			link.linkWidth = (int)linkseg.length() >> FRACBITS;
-			link.isJump = false;
-
-			//if (i == 661 && link.target == 662) {
-				//Printf("");
-			//}
-
-			subsector_t& neighbor = subsectors[linkseg.otherSub];
-
-			// check if other side of link is too narrow
-			{
-				int leftIdx = (linkseg.idx + neighbor.numlines - 1) % neighbor.numlines;
-				int rightIdx = (linkseg.idx + 1) % neighbor.numlines;
-				LinkSeg leftSector = get_neighbor_subsector(&neighbor, &neighbor.firstline[leftIdx]);
-				LinkSeg rightSector = get_neighbor_subsector(&neighbor, &neighbor.firstline[rightIdx]);
-				link.leftSector = leftSector.otherSub;
-				link.rightSector = rightSector.otherSub;
-
-				if (link.linkWidth <= PLAYER_WIDTH) {
-					bool leftSubIsWall = link.leftSector == -1 || !is_seg_potentially_crossable(&neighbor.firstline[leftIdx]);
-					bool rightSubIsWall = link.rightSector == -1 || !is_seg_potentially_crossable(&neighbor.firstline[rightIdx]);
-
-					if (leftSubIsWall && rightSubIsWall) {
-						// link is too narrow to enter and both sides of it are impassable walls
-						continue;
-					}
-				}
-			}
-
-			// check if near side of link is too narrow
-			{
-				int leftIdx = (k + sub.numlines - 1) % sub.numlines;
-				int rightIdx = (k + 1) % sub.numlines;
-				LinkSeg leftSector = get_neighbor_subsector(&sub, &sub.firstline[leftIdx]);
-				LinkSeg rightSector = get_neighbor_subsector(&sub, &sub.firstline[rightIdx]);
-				int leftSub = leftSector.otherSub;
-				int rightSub = rightSector.otherSub;
-
-				if (link.linkWidth <= PLAYER_WIDTH) {
-					bool leftSubIsWall = leftSub == -1 || !is_seg_potentially_crossable(&sub.firstline[leftIdx]);
-					bool rightSubIsWall = rightSub == -1 || !is_seg_potentially_crossable(&sub.firstline[rightIdx]);
-
-					if (leftSubIsWall && rightSubIsWall) {
-						// link is too narrow to enter and both sides of it are impassable walls
-						continue;
-					}
-				}
-			}
-
-			link.isCliff = sub.sector->floorplane.ZatPoint(cx, cy)
-				- neighbor.sector->floorplane.ZatPoint(cx, cy) > (JUMP_HEIGHT << FRACBITS);
-
-			if (link.isCliff)
-				nav.hasCliffs = true;
-
-			// redirect target sector if this is a teleport
-			link.isTeleport = false;
-			line_t* line = seg.linedef;
-			if (line && line->special == Teleport && seg.linedef->frontsector == sub.sector) {
-				AActor* dest = SelectTeleDest(line->args[0], line->args[1]);
-				if (dest) {
-					subsector_t* destSub = R_PointInSubsector(dest->x, dest->y);
-					link.target = destSub - subsectors;
-					link.isTeleport = true;
-				}
-			}
-
-			nav.links.push_back(link);
+		switch (line.special) {
+		case Stairs_BuildDown:
+		case Stairs_BuildUp:
+			usespecials = 1;
+			isStairBuilder = true;
+			break;
+		case Stairs_BuildDownSync:
+		case Stairs_BuildUpSync:
+			usespecials = 2;
+			isStairBuilder = true;
+			break;
+		case Stairs_BuildUpDoom:
+			isStairBuilder = true;
+			break;
+		case Generic_Stairs:
+			isStairBuilder = true;
+			igntxt = line.args[3] & 2;
+			break;
 		}
 
-		nav.id = i;
-		nav.x = subCenterX / (int)sub.numlines;
-		nav.y = subCenterY / (int)sub.numlines;
-		nav.z = sub.sector->floorplane.ZatPoint(nav.x << FRACBITS, nav.y << FRACBITS) >> FRACBITS;
-	}
+		if (!isStairBuilder)
+			continue;
 
+		int tag = line.args[0];
+		if (tag == 0)
+			continue; // only back sector moves
+
+		int i_compatflags = 0;
+		int (*FindSector) (int tag, int start) =
+			(i_compatflags & COMPATF_STAIRINDEX) ? P_FindSectorFromTagLinear : P_FindSectorFromTag;
+
+		// The compatibility mode doesn't work with a hashing algorithm.
+		// It needs the original linear search method. This was broken in Boom.
+
+		int secnum = -1;
+		int newsecnum = -1;
+		sector_t* prev = NULL;
+		while ((secnum = FindSector(tag, secnum)) >= 0) {
+			sector_t* sec = &sectors[secnum];
+
+			// Find next sector to raise
+			// 1. Find 2-sided line with same sector side[0] (lowest numbered)
+			// 2. Other side is the next sector to raise
+			// 3. Unless already moving, or different texture, then stop building
+			bool ok;
+			do
+			{
+				ok = false;
+				sector_t* tsec = NULL;
+
+				if (usespecials)
+				{
+					// [RH] Find the next sector by scanning for Stairs_Special?
+					tsec = sec->NextSpecialSector(
+						(sec->special & 0xff) == Stairs_Special1 ?
+						Stairs_Special2 : Stairs_Special1, prev);
+
+					ok = (tsec != NULL);
+					newsecnum = (int)(tsec - sectors);
+				}
+				else
+				{
+					for (int i = 0; i < sec->linecount; i++)
+					{
+						if (!((sec->lines[i])->flags & ML_TWOSIDED))
+							continue;
+
+						tsec = (sec->lines[i])->frontsector;
+						newsecnum = (int)(tsec - sectors);
+
+						if (secnum != newsecnum)
+							continue;
+
+						tsec = (sec->lines[i])->backsector;
+						if (!tsec) continue;	//jff 5/7/98 if no backside, continue
+						newsecnum = (int)(tsec - sectors);
+
+						FTextureID texture = sec->GetTexture(sector_t::floor);
+
+						if (!igntxt && tsec->GetTexture(sector_t::floor) != texture)
+							continue;
+
+						ok = true;
+						break;
+					}
+				}
+
+				if (ok) {
+					prev = sec;
+					sec = tsec;
+					secnum = newsecnum;
+					stair_sectors.insert(tsec - sectors);
+				}
+			} while (ok);
+		}
+	}
+}
+
+void SectorNavMesh::find_linedef_sectors() {
 	// create linedef sector mapping
 	for (int i = 0; i < numlines; i++) {
 		line_t& line = lines[i];
@@ -648,36 +638,9 @@ void SectorNavMesh::generate_node_graph() {
 			}
 		}
 	}
+}
 
-	// add jump links between cliff segments
-	for (int i = 0; i < numsubsectors; i++) {
-		NavSector& nav = nav_sectors[i];
-		for (int k = 0; k < nav.links.size(); k++) {
-			NavSectorLink& link = nav.links[k];
-
-			if (!link.isCliff || link.isJump)
-				continue;
-
-			// find other other cliff segments to try linking to
-			for (int j = 0; j < numsubsectors; j++) {
-				NavSector& otherNav = nav_sectors[j];
-
-				if (j == i)
-					continue;
-
-				for (int x = 0; x < otherNav.links.size(); x++) {
-					NavSectorLink& otherLink = otherNav.links[x];
-					if (!otherLink.isCliff || otherLink.isJump)
-						continue;
-
-					if (create_jump_link(nav, nav.links[k], otherNav, otherLink)) {
-						break;
-					}
-				}
-			}
-		}
-	}
-
+void SectorNavMesh::add_sector_trigger_goals() {
 	// add sector triggers
 	for (int i = 0; i < numsubsectors; i++) {
 		subsector_t& sub = subsectors[i];
@@ -719,9 +682,162 @@ void SectorNavMesh::generate_node_graph() {
 
 			std::sort(nav.triggers.begin(), nav.triggers.end(), [](const BotGoal& a, const BotGoal& b) {
 				return a.dist < b.dist;
-			});
+				});
 		}
 	}
+}
+
+bool SectorNavMesh::is_link_bordered_by_walls(subsector_t& sub, int segIdx, int& leftSubId, int& rightSubId) {
+	int leftIdx = (segIdx + sub.numlines - 1) % sub.numlines;
+	int rightIdx = (segIdx + 1) % sub.numlines;
+	LinkSeg leftSector = get_neighbor_subsector(&sub, &sub.firstline[leftIdx]);
+	LinkSeg rightSector = get_neighbor_subsector(&sub, &sub.firstline[rightIdx]);
+	int leftSub = leftSector.otherSub;
+	int rightSub = rightSector.otherSub;
+
+	bool leftSubIsWall = leftSub == -1 || !is_seg_potentially_crossable(&sub.firstline[leftIdx]);
+	bool rightSubIsWall = rightSub == -1 || !is_seg_potentially_crossable(&sub.firstline[rightIdx]);
+
+	leftSubId = leftSub;
+	rightSubId = rightSub;
+
+	return leftSubIsWall && rightSubIsWall;
+}
+
+void SectorNavMesh::add_jump_links() {
+	// add jump links between cliff segments
+	for (int i = 0; i < numsubsectors; i++) {
+		NavSector& nav = nav_sectors[i];
+		for (int k = 0; k < nav.links.size(); k++) {
+			NavSectorLink& link = nav.links[k];
+
+			if (!link.isCliff || link.isJump)
+				continue;
+
+			// find other other cliff segments to try linking to
+			for (int j = 0; j < numsubsectors; j++) {
+				NavSector& otherNav = nav_sectors[j];
+
+				if (j == i)
+					continue;
+
+				for (int x = 0; x < otherNav.links.size(); x++) {
+					NavSectorLink& otherLink = otherNav.links[x];
+					if (!otherLink.isCliff || otherLink.isJump)
+						continue;
+
+					if (create_jump_link(nav, nav.links[k], otherNav, otherLink)) {
+						break;
+					}
+				}
+			}
+		}
+	}
+}
+
+void SectorNavMesh::calc_nav_centers() {
+	for (int i = 0; i < numsubsectors; i++) {
+		subsector_t& sub = subsectors[i];
+		NavSector& nav = nav_sectors[i];
+
+		int subCenterX = 0;
+		int subCenterY = 0;
+
+		for (int k = 0; k < sub.numlines; k++) {
+			seg_t& seg = sub.firstline[k];
+			subCenterX += seg.v1->x >> FRACBITS;
+			subCenterY += seg.v1->y >> FRACBITS;
+		}
+
+		nav.x = subCenterX / (int)sub.numlines;
+		nav.y = subCenterY / (int)sub.numlines;
+		nav.z = sub.sector->floorplane.ZatPoint(nav.x << FRACBITS, nav.y << FRACBITS) >> FRACBITS;
+	}
+}
+
+void SectorNavMesh::generate_node_graph() {
+	uint64_t genStart = getEpochMillis();
+
+	nav_sectors.clear();
+	nav_sectors.resize(numsubsectors);
+	line_subsectors.clear();
+	stair_sectors.clear();
+	g_total_links = 0;
+
+	find_stair_sectors();
+	find_linedef_sectors();
+	calc_nav_centers();
+
+	// link sectors as a nav mesh
+	for (int i = 0; i < numsubsectors; i++) {
+		subsector_t& sub = subsectors[i];
+		NavSector& nav = nav_sectors[i];
+		
+		nav.id = i;
+		nav.doesDamage = subsector_does_damage(&sub);
+
+		for (int k = 0; k < sub.numlines; k++) {
+			seg_t& seg = sub.firstline[k];
+
+			if (!is_seg_potentially_crossable(&seg)) {
+				continue;
+			}
+
+			LinkSeg linkseg = get_neighbor_subsector(&sub, &seg);
+
+			if (linkseg.otherSub < 0)
+				continue;
+
+			fixed_t cx = (linkseg.x1 + linkseg.x2) / 2;
+			fixed_t cy = (linkseg.y1 + linkseg.y2) / 2;
+			float z = sub.sector->floorplane.ZatPoint(cx, cy);
+
+			NavSectorLink link;
+			link.target = linkseg.otherSub;
+			link.overlapCenter = FVector3(cx, cy, z);
+			link.seg = &seg;
+			link.id = g_total_links++;
+			link.parent = i;
+			link.linkWidth = (int)linkseg.length() >> FRACBITS;
+			link.isJump = false;
+			link.isTeleport = false;
+			link.leftSector = -1;
+			link.rightSector = -1;
+
+			subsector_t& neighbor = subsectors[linkseg.otherSub];
+
+			if (link.linkWidth <= PLAYER_WIDTH) {
+				int dummy;
+				if (is_link_bordered_by_walls(sub, k, dummy, dummy))
+					continue; // link is too narrow to enter and both sides of it are impassable walls
+				if (is_link_bordered_by_walls(neighbor, linkseg.idx, link.leftSector, link.rightSector))
+					continue; // link is too narrow to leave and both sides of it are impassable walls
+			}
+
+			link.isCliff = sub.sector->floorplane.ZatPoint(cx, cy)
+				- neighbor.sector->floorplane.ZatPoint(cx, cy) > (JUMP_HEIGHT << FRACBITS);
+
+			if (link.isCliff)
+				nav.hasCliffs = true;
+
+			// redirect target sector if this is the front side of a teleport
+			line_t* line = seg.linedef;
+			bool isPlayerTele = line && line->special == Teleport && (line->activation & SPAC_Cross);
+			if (isPlayerTele && DistanceToLine(nav.pos(), line) < 0) {
+				AActor* dest = SelectTeleDest(line->args[0], line->args[1]);
+				if (dest) {
+					subsector_t* destSub = R_PointInSubsector(dest->x, dest->y);
+					link.target = destSub - subsectors;
+					link.isTeleport = true;
+				}
+			}
+
+			nav.links.push_back(link);
+		}
+	}
+
+	add_jump_links();
+	add_sector_trigger_goals();
 
 	Printf("Generated %d nodes, %d links in %d ms\n", (int)nav_sectors.size(), g_total_links, (int)(getEpochMillis() - genStart));
 }

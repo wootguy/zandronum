@@ -865,7 +865,7 @@ bool EV_FloorCrushStop (int tag)
 //
 //==========================================================================
 
-static int P_FindSectorFromTagLinear (int tag, int start)
+int P_FindSectorFromTagLinear (int tag, int start)
 {
     for (int i=start+1;i<numsectors;i++)
 	{
