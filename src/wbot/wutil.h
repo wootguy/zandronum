@@ -3,6 +3,8 @@
 #include <unordered_map>
 #include <string>
 
+struct FTraceResults;
+
 struct WeaponInfo {
 	int priority;
 	int minRange;
@@ -41,5 +43,7 @@ float DotProduct(const FVector2& a, const FVector2& b);
 uint64_t getEpochMillis();
 
 int draw_debug_line(FVector3 start, FVector3 end, AActor* actor);
+
+bool TraceLine(FVector3 start, FVector3 end, bool ignoreMonsters=true, AActor* ignoreEnt=NULL, FTraceResults* tr=NULL);
 
 void wbot_handle_chat_command(ULONG ulPlayer, const char* msg);

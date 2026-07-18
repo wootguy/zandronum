@@ -5,7 +5,7 @@
 #include <unordered_set>
 
 #define STEP_HEIGHT 24
-#define JUMP_HEIGHT 48
+#define JUMP_HEIGHT 56
 #define STAND_HEIGHT 56
 #define DUCK_HEIGHT 28
 #define PLAYER_WIDTH 32
@@ -49,7 +49,8 @@ struct NavSectorLink {
 struct NavSector {
 	int x, y, z; // center point of the sector
 	int id; // also index into nav array
-	bool hasCliffs; // bot should be careful here
+	bool hasCliffs = false; // bot should be careful here
+	bool doesDamage = false; // bot should try to route around this
 	std::vector<BotGoal> triggers; // things which can trigger this sector to move up/down
 	std::vector<NavSectorLink> links;
 
@@ -86,6 +87,7 @@ public:
 	int get_nav_id(AActor* actor);
 	bool get_key_goals_for_line(AActor* actor, line_t* linedef, std::vector<BotGoal>& keyGoals, std::unordered_set<int>* blockedPaths); // get key required to use the linedef. Returns false if keys don't exist anywhere in the map.
 	std::vector<int> GetTouchedSubsectors(AActor* actor);
+	int get_route_distance(std::vector<int>& route);
 
 private:
 	LinkSeg GetSegmentOverlap(seg_t* a, seg_t* b);
@@ -98,6 +100,7 @@ private:
 	bool can_sector_move(sector_t* sec);
 	bool does_linedef_move_tag(line_t* line, short tag); // true if this linedef moves the given sector tag
 	int get_linedef_goal_action(line_t* line);
+	bool subsector_does_damage(subsector_t* sec);
 	bool create_jump_link(NavSector& fromNav, NavSectorLink& fromLink, NavSector& toNav, NavSectorLink& toLink);
 };
 

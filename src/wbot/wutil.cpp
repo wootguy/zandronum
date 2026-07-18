@@ -7,6 +7,7 @@
 #include "m_cheat.h"
 #include "network.h"
 #include "sv_commands.h"
+#include "p_trace.h"
 
 #include <chrono>
 
@@ -176,6 +177,22 @@ int draw_debug_line(FVector3 start, FVector3 end, AActor* actor) {
 	return i;
 }
 
+bool TraceLine(FVector3 start, FVector3 end, bool ignoreMonsters, AActor* ignoreEnt, FTraceResults* tr) {
+	FVector3 delta = end - start;
+	fixed_t dist = delta.Length();
+	delta.MakeUnit();
+	delta *= 1 << FRACBITS;
+
+	sector_t* sector = P_PointInSector(start.X, start.Y);
+
+	static FTraceResults dummy;
+	FTraceResults* out = tr ? tr : &dummy;
+
+	return Trace((fixed_t)start.X, (fixed_t)start.Y, (fixed_t)start.Z, sector,
+		(fixed_t)delta.X, (fixed_t)delta.Y, (fixed_t)delta.Z, dist, ignoreMonsters ? 0 : 0xffffffff,
+		ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, ignoreEnt, *out);
+}
+
 void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 	// clear all enemies for general pathfinding tests
 	if (!strcmp(msg, "y")) {
@@ -224,14 +241,8 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 			if (!playeringame[i] || !player)
 				continue;
 
-			//if (player->player->bIsBot)	set_ori(player, -714, -2209, ANGLE_1 * 0);
-			//else						set_ori(player, -760, -3000, ANGLE_1 * 90);
-
-			//if (player->player->bIsBot)	set_ori(player, -1135, -1351, ANGLE_1 * 0);
-			//else						set_ori(player, -1964, -1261, ANGLE_1 * 47);
-
-			if (player->player->bIsBot)	set_ori(player, -2572, -136, ANGLE_1 * 0);
-			else						set_ori(player, -2800, -340, ANGLE_1 * 90);
+			if (player->player->bIsBot)	set_ori(player, 1022, 1237, ANGLE_1 * 0);
+			else						set_ori(player, 1565, 1433, ANGLE_1 * 110);
 
 			if (player->player->bIsBot) {
 				CWootBot* bot = (CWootBot*)player->player->pSkullBot;

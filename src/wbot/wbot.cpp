@@ -215,23 +215,16 @@ void CWootBot::ShowDebugInfo() {
 	if (pretendRouteSector >= 0) {
 		routeStr += " (pretend " + to_string(pretendRouteSector) + " )";
 	}
-	int totalDist = 0;
 	routeStr += " -> ";
 	for (int i = 0; i < m_route.size() && i < 4; i++) {
 		if (i != 0)
 			routeStr += " ";
-		if (i > 0 && i % 10 == 0) {
-			routeStr += "\n                     ";
-		}
 		routeStr += to_string(m_route[i]);
-		
-		if (i > 0)
-			totalDist += (int)(g_wbot_nav.nav_sectors[i].pos() - g_wbot_nav.nav_sectors[i-1].pos()).Length() >> FRACBITS;
 	}
 	if (m_route.size() > 4) {
 		routeStr += " (+" + to_string(m_route.size() - 4) + ")";
 	}
-	routeStr += "\n                     " + to_string(totalDist) + " units";
+	routeStr += "\n                     " + to_string(g_wbot_nav.get_route_distance(m_route)) + " units";
 	routeStr += "\nSpeed: " + to_string(m_routeSpeed);
 	if (m_speedMult != 1.0f)
 		routeStr += " * " + to_string((int)m_speedMult) + "." + to_string((int)(m_speedMult * 10) % 10);
@@ -536,22 +529,6 @@ void CWootBot::RouteThink() {
 		m_navid = pretendRouteSector;
 	}
 
-	if (m_navid != m_route[0]) {
-		// update route if slipped off into an adjacent sector
-		NavSector& curNav = g_wbot_nav.nav_sectors[m_navid];
-
-		if (m_route.size() > 1 && curNav.getLink(m_route[1])) {
-			NavSectorLink* link = curNav.getLink(m_route[1]);
-			if (link && link->walkable())
-				m_route[0] = m_navid;
-		}
-		else {
-			NavSectorLink* link = curNav.getLink(m_route[0]);
-			if (link && link->walkable())
-				m_route.insert(m_route.begin(), m_navid);
-		}
-	}
-
 	NavSector& idealNav = g_wbot_nav.nav_sectors[m_route[0]];
 	NavSector& curNav = g_wbot_nav.nav_sectors[m_navid];
 	NavSector& targetNav = g_wbot_nav.nav_sectors[m_route.size() > 1 ? m_route[1] : m_route[0]];
@@ -576,9 +553,33 @@ void CWootBot::RouteThink() {
 		}
 	}
 
+	if (m_navid != m_route[0]) {
+		// update route if slipped off into a sector adjacent to a target
+		NavSector& curNav = g_wbot_nav.nav_sectors[m_navid];
+
+		if (m_route.size() > 1 && curNav.getLink(m_route[1])) {
+			NavSectorLink* link = curNav.getLink(m_route[1]);
+			if (link && link->walkable()) {
+				m_route[0] = m_navid;
+			}
+		}
+	}
+
 	if ((stateFlags & FL_WBOT_JUMPING) && m_route.size() > 1) {
 		// just try to land in the right spot
 		MoveTo(targetNav.pos(), 0, m_routeSpeed);
+
+		NavSectorLink* link = idealNav.getLink(m_route[1]);
+		FVector2 target = targetNav.pos();
+		fixed_t jumpDist = (target - FVector2(m_pPlayer->mo->x, m_pPlayer->mo->y)).Length();
+		bool bigJump = jumpDist > 100 << FRACBITS;
+		if (targetNav.getFloorZ() > idealNav.getFloorZ() + (STEP_HEIGHT << FRACBITS))
+			bigJump = true;
+
+		if (bigJump && (stateFlags & FL_WBOT_FLYING)) {
+			// bot is off a ledge now, start the jump
+			m_lButtons |= BT_JUMP;
+		}
 	}
 	else if (m_route.size() > 1) {
 		NavSectorLink* link = idealNav.getLink(m_route[1]);
@@ -590,7 +591,10 @@ void CWootBot::RouteThink() {
 
 		if (onTrack) {
 			sector_t* thisSector = subsectors[m_navid].sector;
-			if (thisSector && thisSector->floordata) {
+			sector_t* nextSector = subsectors[m_route[1]].sector;
+			bool onElevator = thisSector && thisSector->floordata;
+			bool nextOnElevator = nextSector && nextSector->floordata;
+			if (onElevator) {
 				// on an elevator that is about to move or is moving
 				// wait for it to raise/lower the bot to a height close enough to the target sector
 				int zDelta = ((fixed_t)targetNav.pos().Z - m_pPlayer->mo->z) >> FRACBITS;
@@ -609,6 +613,14 @@ void CWootBot::RouteThink() {
 			if (link->blocked(m_pPlayer->mo)) {
 				BlockedPathThink(link);
 				return;
+			} else if (!nextOnElevator && m_route.size() > 2 && targetNav.touches(m_pPlayer->mo)) {
+				// if we're touching the next sector and the next path is blocked, also do block
+				// handling. Helps in case of doors with tiny sectors in front of them.
+				NavSectorLink* nextLink = g_wbot_nav.nav_sectors[link->target].getLink(m_route[2]);
+				if (nextLink && nextLink->blocked(m_pPlayer->mo)) {
+					BlockedPathThink(nextLink);
+					return;
+				}
 			}
 
 			// duck if unable to fit while standing
@@ -644,6 +656,17 @@ void CWootBot::RouteThink() {
 				return;
 			}
 
+			if (m_navid != m_route[0]) {
+				// update route if slipped off into a sector adjacent to the previous
+				// not done earlier for a reason i forgot on doom2 map24 tightrope area.
+				NavSector& curNav = g_wbot_nav.nav_sectors[m_navid];
+				NavSectorLink* link = curNav.getLink(m_route[0]);
+				if (link && link->walkable()) {
+					m_route.insert(m_route.begin(), m_navid);
+					return;
+				}
+			}
+
 			DebugPrint(VarArgs("Fell off the route (expected %d but got %d)\n", m_route[0], m_navid));
 			CancelRoute();
 		}
@@ -655,6 +678,17 @@ void CWootBot::RouteThink() {
 			stuckPath = -1;
 			stateFlags &= ~FL_WBOT_JUMPING;
 			DebugPrint("Finished route\n");
+		}
+	}
+
+	FTraceResults tr;
+	if (m_goals.size() && TraceAhead(32, FVector3(0, 0, STEP_HEIGHT << FRACBITS), true, &tr)) {
+		BotGoal& curGoal = m_goals[m_goals.size() - 1];
+		int lineid = tr.Line - lines;
+		if (lineid == curGoal.lineid && curGoal.action == WBOT_GOAL_ACTION_USE) {
+			// accidentally completed the goal
+			PopGoal();
+			return;
 		}
 	}
 
@@ -674,7 +708,7 @@ void CWootBot::BlockedPathThink(NavSectorLink* link) {
 	link->blocked(m_pPlayer->mo); // debug here
 
 	// if the blocker is moving, be patient
-	sector_t* thisSector = subsectors[m_navid].sector;
+	sector_t* thisSector = subsectors[link->parent].sector;
 	sector_t* targetSector = subsectors[link->target].sector;
 	if (targetSector && (targetSector->floordata || targetSector->ceilingdata)) {
 		stateFlags |= FL_WBOT_WAIT_DOOR;
@@ -716,7 +750,7 @@ void CWootBot::BlockedPathThink(NavSectorLink* link) {
 			continue;
 		int subid = goal.getNavId();
 
-		if (subid == m_navid || RouteToSector(subid).size()) {
+		if (subid == link->parent || RouteToSector(subid).size()) {
 			DebugPrint(VarArgs("%s Adding unblock subgoal.\n", blockMsg.c_str()));
 			if (PushGoal(goal)) {
 				return;
@@ -725,13 +759,13 @@ void CWootBot::BlockedPathThink(NavSectorLink* link) {
 	}
 
 	// if we're on an elevator, try triggering it.
-	NavSector& thisNav = g_wbot_nav.nav_sectors[m_navid];
+	NavSector& thisNav = g_wbot_nav.nav_sectors[link->parent];
 	for (BotGoal& goal : thisNav.triggers) {
 		if (!goal.valid())
 			continue;
 		int subid = goal.getNavId();
 
-		if (subid == m_navid || RouteToSector(subid).size()) {
+		if (subid == link->parent || RouteToSector(subid).size()) {
 			DebugPrint(VarArgs("%s Adding unblock subgoal.\n", blockMsg.c_str()));
 			if (PushGoal(goal)) {
 				return;
@@ -747,7 +781,7 @@ void CWootBot::BlockedPathThink(NavSectorLink* link) {
 	}
 
 	// clearing previous blocked links and try again, maybe paths got unblocked
-	if (curGoal.blockers.size()) {
+	if (curGoal.blockers.size() > 1 || !curGoal.blockers.count(link->id)) {
 		curGoal.blockers.clear();
 		m_route = RouteToSector(curGoal.getNavId());
 		if (m_route.size()) {
@@ -1171,8 +1205,15 @@ bool CWootBot::PushGoal(BotGoal& goal) {
 		BotGoal& lastGoal = m_goals[m_goals.size() - 1];
 		if (lastGoal.matches(goal)) {
 			// can happen when hugging the wall of a triggerable sectors
-			DebugPrint(VarArgs("Skipping duplicate goal push: %s\n", goal.desc().c_str()));
+			DebugPrint(VarArgs("Skipping duplicate goal: %s\n", goal.desc().c_str()));
 			return false;
+		}
+		if (goal.purposeSector != -1 && lastGoal.purposeSector == goal.purposeSector) {
+			// don't route to multiple goals that activate the same thing, if unblocked
+			if (lastGoal.blockers.empty()) {
+				DebugPrint(VarArgs("Skipping redundant goal: %s\n", goal.desc().c_str()));
+				return false;
+			}
 		}
 	}
 
@@ -1244,6 +1285,20 @@ void CWootBot::RouteToGoal() {
 	}
 
 	if (m_route.size()) {
+		if (goal.action == WBOT_GOAL_ACTION_CROSS) {
+			// add the back sector of the cross line to the route, in case its part of an elevator
+			// this way unblocking logic works (doom2 map06 gold key).
+			line_t& line = lines[goal.lineid];
+			NavSector& goalSector = g_wbot_nav.nav_sectors[m_route[m_route.size() - 1]];
+			for (int i = 0; i < goalSector.links.size(); i++) {
+				NavSectorLink& link = goalSector.links[i];
+				if (link.seg->linedef == &line) {
+					m_route.push_back(link.target);
+					break;
+				}
+			}
+		}
+
 		DebugPrint(VarArgs("Routing to goal: %s\n", goal.desc().c_str()));
 	}
 	else {

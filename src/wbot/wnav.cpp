@@ -394,6 +394,19 @@ int SectorNavMesh::get_linedef_goal_action(line_t* line) {
 	return WBOT_GOAL_ACTION_USE;
 }
 
+bool SectorNavMesh::subsector_does_damage(subsector_t* sub) {
+	switch (sub->sector->special) {
+	case dDamage_Hellslime:
+	case dDamage_LavaHefty:
+	case dDamage_LavaWimpy:
+	case dDamage_Nukage:
+	case dDamage_SuperHellslime:
+		return true;
+	}
+
+	return sub->sector->damage > 0;
+}
+
 bool SectorNavMesh::create_jump_link(NavSector& fromNav, NavSectorLink& fromLink, NavSector& toNav, NavSectorLink& toLink) {
 	fixed_t fromHeight = fromNav.getFloorZ();
 	fixed_t toHeight = toNav.getFloorZ();
@@ -404,8 +417,8 @@ bool SectorNavMesh::create_jump_link(NavSector& fromNav, NavSectorLink& fromLink
 	}
 
 	// increase link distance for drops, decrease for jumps
-	int maxDist = 100 << FRACBITS;
-	maxDist += dropHeight / 2;
+	int maxDist = 200 << FRACBITS;
+	maxDist += dropHeight;
 
 	fixed_t linkDist = (fromLink.pos() - toLink.pos()).Length();
 	if (linkDist > maxDist) {
@@ -439,6 +452,24 @@ bool SectorNavMesh::create_jump_link(NavSector& fromNav, NavSectorLink& fromLink
 
 	if (fromNav.getLink(toNav.id)) {
 		return false; // already have a link to this sector
+	}
+
+	// check that the path is clear
+	{
+		FVector3 start = fromLink.pos() + FVector3(0, 0, 56 << FRACBITS);
+		FVector3 end = toNav.pos() + FVector3(0, 0, 56 << FRACBITS);
+
+		FVector2 delta = end - start;
+		delta.MakeUnit();
+		FVector3 rightDir(delta.Y, -delta.X, 0);
+		int radius = PLAYER_WIDTH / 2;
+		fixed_t rightStep = (radius / 2) << FRACBITS;
+
+		for (int i = -2; i <= 2; i++) {
+			if (TraceLine(start + rightDir * i * rightStep, end + rightDir * i * rightStep)) {
+				return false;
+			}
+		}
 	}
 
 	NavSectorLink link;
@@ -481,6 +512,8 @@ void SectorNavMesh::generate_node_graph() {
 		int subCenterX = 0;
 		int subCenterY = 0;
 
+		nav.doesDamage = subsector_does_damage(&sub);
+
 		for (int k = 0; k < sub.numlines; k++) {
 			seg_t& seg = sub.firstline[k];
 
@@ -514,20 +547,49 @@ void SectorNavMesh::generate_node_graph() {
 			//}
 
 			subsector_t& neighbor = subsectors[linkseg.otherSub];
-			int leftIdx = (linkseg.idx + neighbor.numlines - 1) % neighbor.numlines;
-			int rightIdx = (linkseg.idx + 1) % neighbor.numlines;
-			LinkSeg leftSector = get_neighbor_subsector(&neighbor, &neighbor.firstline[leftIdx]);
-			LinkSeg rightSector = get_neighbor_subsector(&neighbor, &neighbor.firstline[rightIdx]);
-			link.leftSector = leftSector.otherSub;
-			link.rightSector = rightSector.otherSub;
+
+			// check if other side of link is too narrow
+			{
+				int leftIdx = (linkseg.idx + neighbor.numlines - 1) % neighbor.numlines;
+				int rightIdx = (linkseg.idx + 1) % neighbor.numlines;
+				LinkSeg leftSector = get_neighbor_subsector(&neighbor, &neighbor.firstline[leftIdx]);
+				LinkSeg rightSector = get_neighbor_subsector(&neighbor, &neighbor.firstline[rightIdx]);
+				link.leftSector = leftSector.otherSub;
+				link.rightSector = rightSector.otherSub;
+
+				if (link.linkWidth <= PLAYER_WIDTH) {
+					bool leftSubIsWall = link.leftSector == -1 || !is_seg_potentially_crossable(&neighbor.firstline[leftIdx]);
+					bool rightSubIsWall = link.rightSector == -1 || !is_seg_potentially_crossable(&neighbor.firstline[rightIdx]);
+
+					if (leftSubIsWall && rightSubIsWall) {
+						// link is too narrow to enter and both sides of it are impassable walls
+						continue;
+					}
+				}
+			}
+
+			// check if near side of link is too narrow
+			{
+				int leftIdx = (k + sub.numlines - 1) % sub.numlines;
+				int rightIdx = (k + 1) % sub.numlines;
+				LinkSeg leftSector = get_neighbor_subsector(&sub, &sub.firstline[leftIdx]);
+				LinkSeg rightSector = get_neighbor_subsector(&sub, &sub.firstline[rightIdx]);
+				int leftSub = leftSector.otherSub;
+				int rightSub = rightSector.otherSub;
+
+				if (link.linkWidth <= PLAYER_WIDTH) {
+					bool leftSubIsWall = leftSub == -1 || !is_seg_potentially_crossable(&sub.firstline[leftIdx]);
+					bool rightSubIsWall = rightSub == -1 || !is_seg_potentially_crossable(&sub.firstline[rightIdx]);
+
+					if (leftSubIsWall && rightSubIsWall) {
+						// link is too narrow to enter and both sides of it are impassable walls
+						continue;
+					}
+				}
+			}
 
 			link.isCliff = sub.sector->floorplane.ZatPoint(cx, cy)
 				- neighbor.sector->floorplane.ZatPoint(cx, cy) > (JUMP_HEIGHT << FRACBITS);
-
-			if (link.linkWidth < PLAYER_WIDTH && link.leftSector == -1 && link.rightSector == -1) {
-				// link is too narrow to enter and both sides of it are impassable walls
-				continue;
-			}
 
 			if (link.isCliff)
 				nav.hasCliffs = true;
@@ -535,7 +597,7 @@ void SectorNavMesh::generate_node_graph() {
 			// redirect target sector if this is a teleport
 			link.isTeleport = false;
 			line_t* line = seg.linedef;
-			if (line && line->special == Teleport && seg.frontsector == sub.sector) {
+			if (line && line->special == Teleport && seg.linedef->frontsector == sub.sector) {
 				AActor* dest = SelectTeleDest(line->args[0], line->args[1]);
 				if (dest) {
 					subsector_t* destSub = R_PointInSubsector(dest->x, dest->y);
@@ -587,34 +649,6 @@ void SectorNavMesh::generate_node_graph() {
 		}
 	}
 
-	// add sector triggers
-	for (int i = 0; i < numsubsectors; i++) {
-		subsector_t& sub = subsectors[i];
-		sector_t* sec = sub.sector;
-		NavSector& nav = nav_sectors[i];
-
-		if (sec->tag) {
-			// any line with this sector's tag can move the sector
-			for (int k = 0; k < numlines; k++) {
-				line_t& line = lines[k];
-
-				if (does_linedef_move_tag(&line, sec->tag)) {
-					nav.triggers.push_back(BotGoal(get_linedef_goal_action(&line), k));
-				}
-			}
-		}
-		else {
-			// surrounding lines can move the sector if untagged
-			for (int k = 0; k < sec->linecount; k++) {
-				line_t* line = sec->lines[k];
-
-				if (line->backsector == sec && does_linedef_move_tag(line, 0)) {
-					nav.triggers.push_back(BotGoal(get_linedef_goal_action(line), line - lines));
-				}
-			}
-		}
-	}
-
 	// add jump links between cliff segments
 	for (int i = 0; i < numsubsectors; i++) {
 		NavSector& nav = nav_sectors[i];
@@ -644,7 +678,60 @@ void SectorNavMesh::generate_node_graph() {
 		}
 	}
 
+	// add sector triggers
+	for (int i = 0; i < numsubsectors; i++) {
+		subsector_t& sub = subsectors[i];
+		sector_t* sec = sub.sector;
+		NavSector& nav = nav_sectors[i];
+
+		if (sec->tag) {
+			// any line with this sector's tag can move the sector
+			for (int k = 0; k < numlines; k++) {
+				line_t& line = lines[k];
+
+				if (does_linedef_move_tag(&line, sec->tag)) {
+					nav.triggers.push_back(BotGoal(get_linedef_goal_action(&line), k));
+				}
+			}
+		}
+		else {
+			// surrounding lines can move the sector if untagged
+			for (int k = 0; k < sec->linecount; k++) {
+				line_t* line = sec->lines[k];
+
+				if (line->backsector == sec && does_linedef_move_tag(line, 0)) {
+					nav.triggers.push_back(BotGoal(get_linedef_goal_action(line), line - lines));
+				}
+			}
+		}
+
+		// try closest goals first
+		if (nav.triggers.size()) {
+			for (int k = 0; k < nav.triggers.size(); k++) {
+				BotGoal& goal = nav.triggers[k];
+				goal.purposeSector = i;
+
+				int goalNav = goal.getNavId();
+				if (goalNav != -1) {
+					goal.dist = get_route_distance(get_astar_route(goalNav, i));
+				}
+			}
+
+			std::sort(nav.triggers.begin(), nav.triggers.end(), [](const BotGoal& a, const BotGoal& b) {
+				return a.dist < b.dist;
+			});
+		}
+	}
+
 	Printf("Generated %d nodes, %d links in %d ms\n", (int)nav_sectors.size(), g_total_links, (int)(getEpochMillis() - genStart));
+}
+
+int SectorNavMesh::get_route_distance(std::vector<int>& route) {
+	int totalDist = 0;
+	for (int i = 1; i < route.size(); i++) {
+		totalDist += (int)(nav_sectors[i].pos() - nav_sectors[i - 1].pos()).Length() >> FRACBITS;
+	}
+	return totalDist;
 }
 
 void SectorNavMesh::draw_nodes(AActor* actor) {
@@ -676,8 +763,20 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 			if (!link.blocked(player)) {
 				FVector3 linkPos = link.pos();
 				linkPos.Z = nav.getFloorZ();
-				spritesDrawn += draw_debug_line(nav.pos(), linkPos, actor);
-				spritesDrawn += draw_debug_line(linkPos, linkNav.pos(), actor);
+
+				if (link.isJump) {
+					FVector3 jumpPos = linkPos + FVector3(0, 0, 56 << FRACBITS);
+					FVector3 landPos = linkNav.pos() + FVector3(0, 0, 56 << FRACBITS);
+
+					spritesDrawn += draw_debug_line(nav.pos(), linkPos, actor);
+					spritesDrawn += draw_debug_line(linkPos, jumpPos, actor);
+					spritesDrawn += draw_debug_line(jumpPos, landPos, actor);
+					spritesDrawn += draw_debug_line(landPos, linkNav.pos(), actor);
+				}
+				else {
+					spritesDrawn += draw_debug_line(nav.pos(), linkPos, actor);
+					spritesDrawn += draw_debug_line(linkPos, linkNav.pos(), actor);
+				}
 			}
 		}
 
@@ -734,6 +833,10 @@ float SectorNavMesh::path_cost(NavSectorLink& link) {
 	if (link.linkWidth < PLAYER_WIDTH) {
 		// try to avoid tiny links. They gets the bot stuck on corners.
 		cost += 200 << FRACBITS;
+	}
+
+	if (target.doesDamage) {
+		cost += 4000 << FRACBITS; // avoid damage sectors
 	}
 
 	if (link.isJump) {
@@ -908,7 +1011,7 @@ bool SectorNavMesh::get_key_goals_for_line(AActor* actor, line_t* line, vector<B
 
 		KeyRoute keyRoute;
 		keyRoute.key = mapKey;
-		keyRoute.routeSize = get_astar_route(actorNavId, keyNavId, blockedPaths).size();
+		keyRoute.routeSize = get_route_distance(get_astar_route(actorNavId, keyNavId, blockedPaths));
 
 		mapKeys[mapKey->GetClass()] = keyRoute;
 	}
@@ -958,7 +1061,9 @@ bool SectorNavMesh::get_key_goals_for_line(AActor* actor, line_t* line, vector<B
 			return false;
 		}
 
-		keyGoals.push_back(BotGoal(WBOT_GOAL_ACTION_TOUCH, bestKey));
+		BotGoal goal = BotGoal(WBOT_GOAL_ACTION_TOUCH, bestKey);
+		goal.dist = bestKeyDist;
+		keyGoals.push_back(goal);
 	}
 
 	return true;
