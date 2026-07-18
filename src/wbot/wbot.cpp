@@ -297,6 +297,7 @@ void CWootBot::ShowDebugInfo() {
 	if (stateFlags & FL_WBOT_WAIT_DOOR) { stateStr += " WAIT_DOOR"; }
 	if (stateFlags & FL_WBOT_JUMPING) { stateStr += " JUMP"; }
 	if (stateFlags & FL_WBOT_FLYING) { stateStr += " FLY"; }
+	if (stateFlags & FL_WBOT_RUSHING) { stateStr += " RUSH"; }
 	if (m_pPlayer->cheats & (CF_FROZEN | CF_TOTALLYFROZEN)) { stateStr += " FROZEN"; }
 
 	string btnStr = "Buttons: ";
@@ -715,8 +716,13 @@ void CWootBot::BlockedPathThink(NavSectorLink* link) {
 	sector_t* thisSector = subsectors[link->parent].sector;
 	sector_t* targetSector = subsectors[link->target].sector;
 	if (targetSector->floordata || targetSector->ceilingdata) {
-		stateFlags |= FL_WBOT_WAIT_DOOR;
-		return; // wait until the door/elevator is done moving
+		if (link->isJump && !targetSector->floordata && !link->isJumpHeightValid()) {
+			// a door opening isn't going to make the jump doable if the floor is too high
+		}
+		else {
+			stateFlags |= FL_WBOT_WAIT_DOOR;
+			return; // wait until the door/elevator is done moving
+		}
 	}
 
 	string blockMsg = VarArgs("Link %d blocked!", link->id);
@@ -1238,6 +1244,15 @@ void CWootBot::PopGoal() {
 	}
 
 	BotGoal& goal = m_goals[m_goals.size() - 1];
+
+	stateFlags &= ~FL_WBOT_RUSHING;
+
+	NavSector* purposeNav = goal.purposeSector != -1 ? &g_wbot_nav.nav_sectors[goal.purposeSector] : NULL;
+	if (purposeNav && (purposeNav->getMoveFlags() & FL_SECTOR_MOVE_TIMED)) {
+		// the purpose of this goal was to move a timed sector. Better hurry before that sector resets!
+		stateFlags |= FL_WBOT_RUSHING;
+	}
+
 	DebugPrint(VarArgs("Finished goal: %s\n", goal.desc().c_str()));
 	m_goals.pop_back();
 
@@ -1260,7 +1275,7 @@ std::vector<int> CWootBot::RouteToSector(int subid) {
 		stuckPath = -1;
 	}
 
-	return g_wbot_nav.get_astar_route(m_navid, subid, &allBlockedPaths);
+	return g_wbot_nav.get_astar_route(m_navid, subid, &allBlockedPaths, stateFlags & FL_WBOT_RUSHING);
 }
 
 void CWootBot::RouteToGoal() {

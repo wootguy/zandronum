@@ -16,6 +16,7 @@
 #define FL_SECTOR_MOVE_FLOOR_UP		2
 #define FL_SECTOR_MOVE_FLOOR_ANY	4
 #define FL_SECTOR_MOVE_CEIL_UP		8
+#define FL_SECTOR_MOVE_TIMED		16	// sector resets to its old position shortly after being activated
 
 struct NavSector;
 
@@ -97,7 +98,11 @@ public:
 
 	void generate_node_graph();
 	void draw_nodes(AActor* actor);
-	std::vector<int> get_astar_route(int startSubSectorId, int endSubSectorId, std::unordered_set<int>* blockedPaths=NULL);
+
+	// set timeSensitive=true if the most direct route should be preferred, even if the bot has
+	// to walk through lava or jump somewhere
+	std::vector<int> get_astar_route(int startSubSectorId, int endSubSectorId, std::unordered_set<int>* blockedPaths=NULL, bool timeSensitive=false);
+	
 	int get_nav_id(fixed_t x, fixed_t y);
 	int get_nav_id(AActor* actor);
 	bool get_key_goals_for_line(AActor* actor, line_t* linedef, std::vector<BotGoal>& keyGoals, std::unordered_set<int>* blockedPaths); // get key required to use the linedef. Returns false if keys don't exist anywhere in the map.
@@ -108,7 +113,7 @@ private:
 	LinkSeg GetSegmentOverlap(seg_t* a, seg_t* b);
 	bool is_seg_potentially_crossable(seg_t* seg);
 	float path_cost(int a, int b);
-	float path_cost(NavSectorLink& link);
+	float path_cost(NavSectorLink& link, bool timeSensitive);
 	LinkSeg get_neighbor_subsector(subsector_t* ignoreSector, seg_t* borderSeg);
 
 	void add_stair_sector_move_flags();

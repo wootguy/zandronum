@@ -335,6 +335,20 @@ LinkSeg SectorNavMesh::get_neighbor_subsector(subsector_t* ignoreSector, seg_t* 
 }
 
 int SectorNavMesh::get_linedef_move_flag(line_t* line) {
+	int timingFlag = 0;
+
+	switch (line->special) {
+	case Plat_UpWaitDownStay:
+	case Plat_UpNearestWaitDownStay:
+	case Plat_DownWaitUpStay:
+	case Plat_DownWaitUpStayLip:
+	case Ceiling_CrushRaiseAndStayA:
+	case Ceiling_CrushAndRaiseA:
+	case Ceiling_CrushAndRaiseSilentA:
+		timingFlag = FL_SECTOR_MOVE_TIMED;
+		break;
+	}
+
 	// only add specials here that could be potentially helpful for unblocking a path.
 	// For instance, raising a door or elevator. A ceiling or door coming down lower 
 	// will not help a bot pass the sector
@@ -350,7 +364,7 @@ int SectorNavMesh::get_linedef_move_flag(line_t* line) {
 	case Ceiling_RaiseByValueTimes8:
 	case Generic_Ceiling: // TODO: check if really does move up
 	case Generic_Door:
-		return FL_SECTOR_MOVE_CEIL_UP;
+		return timingFlag | FL_SECTOR_MOVE_CEIL_UP;
 
 	case Plat_PerpetualRaise:
 	case Plat_UpWaitDownStay:
@@ -367,7 +381,7 @@ int SectorNavMesh::get_linedef_move_flag(line_t* line) {
 	case Stairs_BuildUp:
 	case Stairs_BuildUpSync:
 	case Stairs_BuildUpDoom:
-		return FL_SECTOR_MOVE_FLOOR_UP;
+		return timingFlag | FL_SECTOR_MOVE_FLOOR_UP;
 
 	case Plat_DownWaitUpStay:
 	case Plat_DownByValue:
@@ -379,13 +393,13 @@ int SectorNavMesh::get_linedef_move_flag(line_t* line) {
 	case Elevator_LowerToNearest:
 	case Stairs_BuildDown:
 	case Stairs_BuildDownSync:
-		return FL_SECTOR_MOVE_FLOOR_DOWN;
+		return timingFlag | FL_SECTOR_MOVE_FLOOR_DOWN;
 	
 	case Generic_Floor:
 	case Elevator_MoveToFloor:
 	case Generic_Lift:
 	case Generic_Stairs:
-		return FL_SECTOR_MOVE_FLOOR_UP | FL_SECTOR_MOVE_FLOOR_DOWN; // TODO: can do both dirs?	
+		return timingFlag | FL_SECTOR_MOVE_FLOOR_UP | FL_SECTOR_MOVE_FLOOR_DOWN; // TODO: can do both dirs?	
 
 	case Ceiling_LowerToHighestFloor:
 	case Ceiling_LowerInstant:
@@ -1060,7 +1074,7 @@ float SectorNavMesh::path_cost(int a, int b) {
 	return delta.Length();
 }
 
-float SectorNavMesh::path_cost(NavSectorLink& link) {
+float SectorNavMesh::path_cost(NavSectorLink& link, bool timeSensitive) {
 	NavSector& parent = nav_sectors[link.parent];
 	NavSector& target = nav_sectors[link.target];
 	float cost = 0;
@@ -1075,17 +1089,21 @@ float SectorNavMesh::path_cost(NavSectorLink& link) {
 		cost += 200 << FRACBITS;
 	}
 
-	if (target.doesDamage) {
-		cost += 4000 << FRACBITS; // avoid damage sectors
-	}
+	if (!timeSensitive) {
+		// avoid things that are hard to navigate if speed isn't important
 
-	if (link.isJump) {
-		// jumps are error-prone
-		cost += 1000 << FRACBITS;
+		if (target.doesDamage) {
+			cost += 4000 << FRACBITS; // avoid damage sectors
+		}
 
-		if (!link.isJumpHeightValid()) {
-			// jumps that can't be made yet are even more error prone
-			cost += 4000 << FRACBITS;
+		if (link.isJump) {
+			// jumps are error-prone
+			cost += 1000 << FRACBITS;
+
+			if (!link.isJumpHeightValid()) {
+				// jumps that can't be made yet are even more error prone
+				cost += 4000 << FRACBITS;
+			}
 		}
 	}
 
@@ -1097,7 +1115,7 @@ float SectorNavMesh::path_cost(NavSectorLink& link) {
 	return cost;
 }
 
-vector<int> SectorNavMesh::get_astar_route(int startSubSectorId, int endSubSectorId, unordered_set<int>* blockedPaths)
+vector<int> SectorNavMesh::get_astar_route(int startSubSectorId, int endSubSectorId, unordered_set<int>* blockedPaths, bool timeSensitive)
 {
 	unordered_set<int> closedSet;
 	unordered_set<int> openSet;
@@ -1202,7 +1220,7 @@ vector<int> SectorNavMesh::get_astar_route(int startSubSectorId, int endSubSecto
 			NavSector& neighborNode = nav_sectors[neighbor];
 
 			float tentative_gScore = gScore[current];
-			tentative_gScore += path_cost(link);
+			tentative_gScore += path_cost(link, timeSensitive);
 
 			if (link.linkWidth < PLAYER_WIDTH) {
 				// try to avoid tiny links. They gets the bot stuck on corners.

@@ -19,7 +19,7 @@ struct BotGoal {
 	int lineid = -1; // lindef id to interact with
 	std::unordered_set<int> blockers; // path IDs that block A* from reaching routing to this goal
 	int dist = 0; // distance from the goal to the purpose sector
-	int purposeSector = -1; // sector this goal is intended to activate
+	int purposeSector = -1; // subsector this goal is intended to activate
 	TObjPtr<AActor> actor = NULL; // actor to interact with
 
 	BotGoal(int action, int lineid) : action(action), lineid(lineid) {}
@@ -42,6 +42,7 @@ struct BotGoal {
 #define FL_WBOT_WAIT_DOOR	2 // bot is waiting for a door or platform to move out of the way
 #define FL_WBOT_JUMPING		4 // bot is jumping across a gap
 #define FL_WBOT_FLYING		8 // bot is jumping, falling, or above a gap in the floor
+#define FL_WBOT_RUSHING		16 // bot is hurrying to reach a sector before a timed event ends
 
 class CWootBot : public CSkullBot {
 public:
