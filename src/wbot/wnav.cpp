@@ -36,6 +36,22 @@ bool NavSectorLink::blocked(AActor* actor, bool recurse) {
 
 		return true;
 	}
+
+	// check if jumps are valid for dynamic links that depend on from/to sector states
+	if (isJump) {
+		if (!isJumpHeightValid()) {
+			return true;
+		}
+
+		NavSector* target = getTarget();
+		FVector3 start = pos() + FVector3(0, 0, 56 << FRACBITS);
+		FVector3 end = target->pos() + FVector3(0, 0, 56 << FRACBITS);
+
+		FTraceResults tr;
+		if (TraceLine(start, end, true, NULL, &tr)) {
+			return true;
+		}
+	}
 	
 	if (recurse && linkWidth <= PLAYER_WIDTH) {
 		// too narrow to move thru unless the neighbor sectors are passable
@@ -79,6 +95,23 @@ bool NavSectorLink::walkable() {
 	return g_wbot_nav.can_cross_seg_now(seg);
 }
 
+bool NavSectorLink::isJumpHeightValid() {
+	NavSector* parent = getParent();
+	NavSector* target = getTarget();
+
+	fixed_t jumpHeight = target->getFloorZ() - parent->getFloorZ();
+
+	return jumpHeight < (JUMP_HEIGHT << FRACBITS);
+}
+
+NavSector* NavSectorLink::getParent() {
+	return &g_wbot_nav.nav_sectors[parent];
+}
+
+NavSector* NavSectorLink::getTarget() {
+	return &g_wbot_nav.nav_sectors[target];
+}
+
 NavSectorLink* NavSector::getLink(int subSectorId) {
 	if (subSectorId < 0)
 		return NULL;
@@ -117,6 +150,14 @@ bool NavSector::touches(AActor* actor) {
 	return false;
 }
 
+int NavSector::getMoveFlags() {
+	return g_wbot_nav.sector_move_flags[subsectors[id].sector - sectors];
+}
+
+sector_t* NavSector::sector() {
+	return subsectors[id].sector;
+}
+
 fixed_t NavSector::getHeight() {
 	fixed_t fx = x << FRACBITS;
 	fixed_t fy = y << FRACBITS;
@@ -137,70 +178,62 @@ LinkSeg SectorNavMesh::GetSegmentOverlap(seg_t* a, seg_t* b)
 {
 	LinkSeg result = { 0 };
 
-	int64_t ax1 = a->v1->x;
-	int64_t ay1 = a->v1->y;
-	int64_t ax2 = a->v2->x;
-	int64_t ay2 = a->v2->y;
+	FVector2 a1(a->v1->x, a->v1->y);
+	FVector2 a2(a->v2->x, a->v2->y);
+	FVector2 b1(b->v1->x, b->v1->y);
+	FVector2 b2(b->v2->x, b->v2->y);
 
-	int64_t bx1 = b->v1->x;
-	int64_t by1 = b->v1->y;
-	int64_t bx2 = b->v2->x;
-	int64_t by2 = b->v2->y;
+	const fixed_t distEpsilon = 1 << FRACBITS;
 
-	const int64_t EPS = 16;
-
-	int64_t cross1 =
-		(ax2 - ax1) * (by1 - ay1) -
-		(ay2 - ay1) * (bx1 - ax1);
-
-	int64_t cross2 =
-		(ax2 - ax1) * (by2 - ay1) -
-		(ay2 - ay1) * (bx2 - ax1);
-
-	if (llabs(cross1) > EPS || llabs(cross2) > EPS)
+	// colinear tests
+	if (abs(DistanceToLine(a1, b1, b2)) > distEpsilon || abs(DistanceToLine(a2, b1, b2)) > distEpsilon) {
 		return result;
+	}
+	if (abs(DistanceToLine(b1, a1, a2)) > distEpsilon || abs(DistanceToLine(b2, a1, a2)) > distEpsilon) {
+		return result;
+	}
 
-	if (llabs(ax2 - ax1) >= llabs(ay2 - ay1))
+	if (fabs(a2.X - a1.X) >= fabs(a2.Y - a1.Y))
 	{
-		bool aForward = ax1 < ax2;
-		bool bForward = bx1 < bx2;
+		bool aForward = a1.X < a2.X;
+		bool bForward = b1.X < b2.X;
 
-		int64_t start = std::max(std::min(ax1, ax2), std::min(bx1, bx2));
-		int64_t end = std::min(std::max(ax1, ax2), std::max(bx1, bx2));
+		float start = std::max(std::min(a1.X, a2.X), std::min(b1.X, b2.X));
+		float end = std::min(std::max(a1.X, a2.X), std::max(b1.X, b2.X));
 
 		if (end - start < (8 << FRACBITS))
 			return result;
 
-		double dx = double(ax2 - ax1);
-		double dy = double(ay2 - ay1);
+		float dx = a2.X - a1.X;
+		float dy = a2.Y - a1.Y;
 
-		double t1 = (start - ax1) / dx;
-		double t2 = (end - ax1) / dx;
+		float t1 = (start - a1.X) / dx;
+		float t2 = (end - a1.X) / dx;
 
 		result.x1 = (fixed_t)start;
-		result.y1 = (fixed_t)(ay1 + t1 * dy);
+		result.y1 = (fixed_t)(a1.Y + t1 * dy);
 
 		result.x2 = (fixed_t)end;
-		result.y2 = (fixed_t)(ay1 + t2 * dy);
+		result.y2 = (fixed_t)(a1.Y + t2 * dy);
 	}
 	else
 	{
-		int64_t start = std::max(std::min(ay1, ay2), std::min(by1, by2));
-		int64_t end = std::min(std::max(ay1, ay2), std::max(by1, by2));
+		float start = std::max(std::min(a1.Y, a2.Y), std::min(b1.Y, b2.Y));
+		float end = std::min(std::max(a1.Y, a2.Y), std::max(b1.Y, b2.Y));
 
 		if (end - start < (8 << FRACBITS))
 			return result;
 
-		double dx = double(ax2 - ax1);
-		double dy = double(ay2 - ay1);
+		float dx = a2.X - a1.X;
+		float dy = a2.Y - a1.Y;
 
-		double t1 = (start - ay1) / dy;
-		double t2 = (end - ay1) / dy;
+		float t1 = (start - a1.Y) / dy;
+		float t2 = (end - a1.Y) / dy;
 
-		result.x1 = (fixed_t)(ax1 + t1 * dx);
+		result.x1 = (fixed_t)(a1.X + t1 * dx);
 		result.y1 = (fixed_t)start;
 
-		result.x2 = (fixed_t)(ax1 + t2 * dx);
+		result.x2 = (fixed_t)(a1.X + t2 * dx);
 		result.y2 = (fixed_t)end;
 	}
 
@@ -214,12 +247,31 @@ bool SectorNavMesh::is_seg_potentially_crossable(seg_t* seg) {
 	if (seg->linedef && (seg->linedef->flags & ML_BLOCKING))
 		return false; // impassable
 
-	if (!can_cross_seg_now(seg)) {
-		int frontSecId = seg->frontsector - sectors;
-		int backSecId = seg->backsector - sectors;
-		if (!sector_move_flags[frontSecId] && !sector_move_flags[backSecId]) {
-			return false;
-		}
+	int frontMovement = sector_move_flags[seg->frontsector - sectors];
+	int backMovement = sector_move_flags[seg->backsector - sectors];
+
+	fixed_t x = (seg->v1->x + seg->v2->x) / 2;
+	fixed_t y = (seg->v1->y + seg->v2->y) / 2;
+
+	fixed_t frontFloor = seg->frontsector->floorplane.ZatPoint(x, y);
+	fixed_t backFloor = seg->backsector->floorplane.ZatPoint(x, y);
+
+	const bool canJump = true;
+	int jumpHeight = (canJump ? JUMP_HEIGHT : STEP_HEIGHT) << FRACBITS;
+
+	if (backFloor - frontFloor > jumpHeight) {
+		// too high to jump
+		if (!(backMovement & FL_SECTOR_MOVE_FLOOR_DOWN) && !(frontMovement & FL_SECTOR_MOVE_FLOOR_UP))
+			return false; // and neither of the sectors move in a way that would make the jump possible
+	}
+
+	fixed_t backCeil = seg->backsector->ceilingplane.ZatPoint(x, y);
+	fixed_t fduckHeight = DUCK_HEIGHT << FRACBITS;
+
+	if (backCeil - backFloor < fduckHeight || backCeil - frontFloor < fduckHeight) {
+		// too low of a ceil in the target sector to duck thru from the starting floor
+		if (!(backMovement & FL_SECTOR_MOVE_CEIL_UP) && !(frontMovement & FL_SECTOR_MOVE_FLOOR_DOWN))
+			return false; // and the sectors don't move in a way that would make the duck possible
 	}
 
 	return true;
@@ -404,7 +456,9 @@ bool SectorNavMesh::create_jump_link(NavSector& fromNav, NavSectorLink& fromLink
 	fixed_t dropHeight = fromHeight - toHeight;
 
 	if (dropHeight < -(JUMP_HEIGHT << FRACBITS)) {
-		return false; // too high to jump to
+		// too high to jump to
+		if (!(fromNav.getMoveFlags() & FL_SECTOR_MOVE_FLOOR_UP) && !(toNav.getMoveFlags() & FL_SECTOR_MOVE_FLOOR_DOWN))
+			return false; // and neither sector moves in a way that would make the jump possible later
 	}
 
 	// increase link distance for drops, decrease for jumps
@@ -459,7 +513,14 @@ bool SectorNavMesh::create_jump_link(NavSector& fromNav, NavSectorLink& fromLink
 		for (int i = -2; i <= 2; i++) {
 			FTraceResults tr;
 			if (TraceLine(start + rightDir * i * rightStep, end + rightDir * i * rightStep, true, NULL, &tr)) {
-				return false;
+				if (tr.Line && tr.Line->backsector) {
+					int moveFlags = sector_move_flags[tr.Line->backsector - sectors];
+					if (moveFlags) {
+						continue; // wall may move out of the way in the future
+					}
+				}
+
+				return false; // hit an immovable wall
 			}
 		}
 	}
@@ -491,10 +552,15 @@ void SectorNavMesh::add_jump_links() {
 	// add jump links between cliff segments
 	for (int i = 0; i < numsubsectors; i++) {
 		NavSector& nav = nav_sectors[i];
+		bool allLinksCanBeCliffsLater = nav.getMoveFlags() & FL_SECTOR_MOVE_FLOOR_UP;
+
 		for (int k = 0; k < nav.links.size(); k++) {
 			NavSectorLink& link = nav.links[k];
 
-			if (!link.isCliff || link.isJump)
+			if (link.isJump)
+				continue;
+
+			if (!link.isCliff && !allLinksCanBeCliffsLater)
 				continue;
 
 			// find other other cliff segments to try linking to
@@ -1016,6 +1082,11 @@ float SectorNavMesh::path_cost(NavSectorLink& link) {
 	if (link.isJump) {
 		// jumps are error-prone
 		cost += 1000 << FRACBITS;
+
+		if (!link.isJumpHeightValid()) {
+			// jumps that can't be made yet are even more error prone
+			cost += 4000 << FRACBITS;
+		}
 	}
 
 	if (!can_cross_seg_now(link.seg)) {

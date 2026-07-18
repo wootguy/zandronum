@@ -62,6 +62,7 @@ public:
 	float m_speedMult = 1.0f;
 	int m_routeSpeed = 0;
 	int m_cliffDist = 9999;
+	int m_nextThink; // for cooling down failures
 	bool m_freezeOnRouteChange = false; // set to true to stop moving when the route changes. For debugging
 	FVector2 lastPos;
 

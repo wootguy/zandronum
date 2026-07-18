@@ -42,6 +42,8 @@ void MakeVectors(angle_t angle, FVector3& forward, FVector3& right);
 
 float DotProduct(const FVector2& a, const FVector2& b);
 
+float CrossProduct(const FVector2& a, const FVector2& b);
+
 uint64_t getEpochMillis();
 
 int draw_debug_line(FVector3 start, FVector3 end, AActor* actor);

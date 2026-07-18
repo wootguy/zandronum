@@ -85,7 +85,7 @@ int getLineLength(line_t* line) {
 fixed_t DistanceToLine(const FVector2& p, const FVector2& a, const FVector2& b) {
 	FVector2 ab = b - a;
     FVector2 ap = p - a;
-    return (ab.X * ap.Y - ab.Y * ap.X) / ab.Length();
+    return CrossProduct(ab, ap) / ab.Length();
 }
 
 fixed_t DistanceToLine(const FVector2& p, line_t* line) {
@@ -140,6 +140,10 @@ void MakeVectors(angle_t angle, FVector3& forward, FVector3& right) {
 float DotProduct(const FVector2& a, const FVector2& b)
 {
 	return a.X * b.X + a.Y * b.Y;
+}
+
+float CrossProduct(const FVector2& a, const FVector2& b) {
+	return a.X * b.Y - a.Y * b.X;
 }
 
 uint64_t getEpochMillis() {

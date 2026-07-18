@@ -158,6 +158,9 @@ void CWootBot::ParseScript() {
 		return;
 	}
 
+	if (level.time < m_nextThink)
+		return;
+
 	if (m_pPlayer->health <= 0) {
 		DeadThink();
 		return;
@@ -204,6 +207,7 @@ void CWootBot::Reset() {
 	m_pPlayer->mo->target = NULL;
 	m_forwardMove = 0;
 	m_sideMove = 0;
+	m_nextThink = 0;
 }
 
 void CWootBot::ShowDebugInfo() {
@@ -710,9 +714,9 @@ void CWootBot::BlockedPathThink(NavSectorLink* link) {
 	// if the blocker is moving, be patient
 	sector_t* thisSector = subsectors[link->parent].sector;
 	sector_t* targetSector = subsectors[link->target].sector;
-	if (targetSector && (targetSector->floordata || targetSector->ceilingdata)) {
+	if (targetSector->floordata || targetSector->ceilingdata) {
 		stateFlags |= FL_WBOT_WAIT_DOOR;
-		return; // wait until the blocker is done moving
+		return; // wait until the door/elevator is done moving
 	}
 
 	string blockMsg = VarArgs("Link %d blocked!", link->id);
@@ -792,6 +796,8 @@ void CWootBot::BlockedPathThink(NavSectorLink* link) {
 
 	DebugPrint(VarArgs("%s Route aborted. No way to reach the goal.\n", blockMsg.c_str()));
 	CancelRoute();
+
+	m_nextThink = level.time + 10;
 }
 
 bool CWootBot::StuckThink(int maxStuck) {

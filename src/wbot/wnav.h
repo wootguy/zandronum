@@ -17,6 +17,8 @@
 #define FL_SECTOR_MOVE_FLOOR_ANY	4
 #define FL_SECTOR_MOVE_CEIL_UP		8
 
+struct NavSector;
+
 struct LinkSeg {
 	fixed_t x1, y1;
 	fixed_t x2, y2;
@@ -47,8 +49,11 @@ struct NavSectorLink {
 	
 	// true if this link can be moved thru, else it is too high or blocked.
 	bool blocked(AActor* actor, bool recurse=true);
-
 	bool walkable();
+	bool isJumpHeightValid(); // checks if jump height is valid currently
+
+	NavSector* getParent();
+	NavSector* getTarget();
 };
 
 struct NavSector {
@@ -67,6 +72,10 @@ struct NavSector {
 	NavSectorLink* getLink(int subSectorId);
 
 	bool touches(AActor* actor);
+
+	int getMoveFlags();
+
+	sector_t* sector();
 
 	// get vertical space between the floor and ceiling at the center point of the subsector
 	fixed_t getHeight();
