@@ -78,12 +78,12 @@ int BotGoal::getNavId() {
 		return g_wbot_nav.get_nav_id(actor);
 	}
 	else if (lineid >= 0) {
-		auto subs = g_wbot_nav.line_subsectors.find(lineid);
-		if (subs != g_wbot_nav.line_subsectors.end()) {
-			return subs->second;
-		}
+		int ret = g_wbot_nav.line_subsectors[lineid];
 
-		Printf("Failed to find subsector for line %d\n", lineid);
+		if (ret == -1)
+			Printf("Failed to find subsector for line %d\n", lineid);
+
+		return ret;
 	}
 	else {
 		Printf("Routing not implemented for this type of goal\n");

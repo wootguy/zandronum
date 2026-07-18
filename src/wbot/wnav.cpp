@@ -4,6 +4,7 @@
 #include "sv_commands.h"
 #include "p_local.h"
 #include "p_lnspec.h"
+#include "p_trace.h"
 #include "a_keys.h"
 #include "wutil.h"
 
@@ -23,7 +24,7 @@ bool NavSectorLink::blocked(AActor* actor, bool recurse) {
 	if (!g_wbot_nav.can_cross_seg_now(seg)) {
 		line_t* line = seg->linedef;
 
-		if (line && g_wbot_nav.does_linedef_move_tag(line, 0)) {
+		if (line && line->args[0] == 0 && g_wbot_nav.get_linedef_move_flag(line)) {
 			if (line->special == Door_LockedRaise && !P_CheckKeys(actor, line->args[3], false)) {
 				return true; // don't have the keys required to use this
 			}
@@ -214,7 +215,9 @@ bool SectorNavMesh::is_seg_potentially_crossable(seg_t* seg) {
 		return false; // impassable
 
 	if (!can_cross_seg_now(seg)) {
-		if (!can_sector_move(seg->frontsector) && !can_sector_move(seg->backsector)) {
+		int frontSecId = seg->frontsector - sectors;
+		int backSecId = seg->backsector - sectors;
+		if (!sector_move_flags[frontSecId] && !sector_move_flags[backSecId]) {
 			return false;
 		}
 	}
@@ -249,29 +252,6 @@ bool SectorNavMesh::can_cross_seg_now(seg_t* seg)
 	return true;
 }
 
-bool SectorNavMesh::can_sector_move(sector_t* sec) {
-	if (stair_sectors.count(sec - sectors))
-		return true;
-
-	if (sec->tag) {
-		for (int k = 0; k < numlines; k++) {
-			line_t& line = lines[k];
-
-			if (does_linedef_move_tag(&line, sec->tag)) {
-				return true;
-			}
-		}
-	}
-
-	for (int i = 0; i < sec->linecount; i++) {
-		if (sec->lines[i]->backsector == sec && does_linedef_move_tag(sec->lines[i], 0)) {
-			return true;
-		}
-	}
-
-	return false;
-}
-
 LinkSeg SectorNavMesh::get_neighbor_subsector(subsector_t* ignoreSector, seg_t* borderSeg) {
 	const fixed_t epsilonWidth = 2 << FRACBITS;
 	LinkSeg ret;
@@ -302,50 +282,58 @@ LinkSeg SectorNavMesh::get_neighbor_subsector(subsector_t* ignoreSector, seg_t* 
 	return ret;
 }
 
-bool SectorNavMesh::does_linedef_move_tag(line_t* line, short tag) {
+int SectorNavMesh::get_linedef_move_flag(line_t* line) {
 	// only add specials here that could be potentially helpful for unblocking a path.
 	// For instance, raising a door or elevator. A ceiling or door coming down lower 
 	// will not help a bot pass the sector
 	switch (line->special) {
+	case 0:
+		return 0;
 	case Door_Open:
 	case Door_Raise:
 	case Door_LockedRaise:
+	case Ceiling_RaiseByValue:
+	case Ceiling_RaiseToNearest:
+	case Ceiling_RaiseInstant:
+	case Ceiling_RaiseByValueTimes8:
+	case Generic_Ceiling: // TODO: check if really does move up
+	case Generic_Door:
+		return FL_SECTOR_MOVE_CEIL_UP;
+
 	case Plat_PerpetualRaise:
-	case Plat_DownWaitUpStay:
-	case Plat_DownByValue:
 	case Plat_UpWaitDownStay:
 	case Plat_UpByValue:
 	case Plat_UpNearestWaitDownStay:
-	case Plat_DownWaitUpStayLip:
 	case Plat_PerpetualRaiseLip:
 	case Plat_RaiseAndStayTx0:
 	case Plat_UpByValueStayTx:
-	case Floor_LowerToLowest:
-	case Floor_LowerToNearest:
-	case Floor_LowerToHighest:
 	case Floor_RaiseToHighest:
 	case Floor_RaiseToNearest:
 	case Floor_RaiseByValueTxTy:
-	case Floor_LowerToLowestTxTy:
 	case Floor_RaiseToLowestCeiling:
 	case Elevator_RaiseToNearest:
-	case Elevator_MoveToFloor:
-	case Elevator_LowerToNearest:
-	case Ceiling_RaiseByValue:
-	case Ceiling_RaiseToNearest:
-	case Generic_Floor:
-	case Generic_Ceiling:
-	case Generic_Door:
-	case Generic_Lift:
-	case Generic_Stairs:
-	case Stairs_BuildDown:
 	case Stairs_BuildUp:
-	case Stairs_BuildDownSync:
 	case Stairs_BuildUpSync:
 	case Stairs_BuildUpDoom:
-	case Ceiling_RaiseInstant:
-	case Ceiling_RaiseByValueTimes8:
-		return line->args[0] == tag;
+		return FL_SECTOR_MOVE_FLOOR_UP;
+
+	case Plat_DownWaitUpStay:
+	case Plat_DownByValue:
+	case Plat_DownWaitUpStayLip:
+	case Floor_LowerToLowest:
+	case Floor_LowerToNearest:
+	case Floor_LowerToHighest:
+	case Floor_LowerToLowestTxTy:
+	case Elevator_LowerToNearest:
+	case Stairs_BuildDown:
+	case Stairs_BuildDownSync:
+		return FL_SECTOR_MOVE_FLOOR_DOWN;
+	
+	case Generic_Floor:
+	case Elevator_MoveToFloor:
+	case Generic_Lift:
+	case Generic_Stairs:
+		return FL_SECTOR_MOVE_FLOOR_UP | FL_SECTOR_MOVE_FLOOR_DOWN; // TODO: can do both dirs?	
 
 	case Ceiling_LowerToHighestFloor:
 	case Ceiling_LowerInstant:
@@ -353,7 +341,7 @@ bool SectorNavMesh::does_linedef_move_tag(line_t* line, short tag) {
 	case Ceiling_CrushAndRaiseA:
 	case Ceiling_CrushAndRaiseSilentA:
 	case Ceiling_LowerByValueTimes8:
-		return false; // a ceiling getting lower is not helpful
+		return 0; // a ceiling getting lower is not helpful
 
 	case Scroll_Texture_Left:
 	case Scroll_Texture_Right:
@@ -368,14 +356,14 @@ bool SectorNavMesh::does_linedef_move_tag(line_t* line, short tag) {
 	case Light_Flicker:
 	case Light_Strobe:
 	case Light_Stop:
-		return false; // visual-only specials
+		return 0; // visual-only specials
+
+	case Teleport:
+		return 0; // does not move sectors
 
 	default:
-		if (tag != 0 && line->args[0] == tag) {
-			Printf("Line %d targets tag %d but don't know what special %d is\n", line - lines, tag, line->special);
-		}
-
-		return false;
+		Printf("Unknown special %d for line %d\n", line->special, line - lines);
+		return 0;
 	}
 }
 
@@ -469,7 +457,8 @@ bool SectorNavMesh::create_jump_link(NavSector& fromNav, NavSectorLink& fromLink
 		fixed_t rightStep = (radius / 2) << FRACBITS;
 
 		for (int i = -2; i <= 2; i++) {
-			if (TraceLine(start + rightDir * i * rightStep, end + rightDir * i * rightStep)) {
+			FTraceResults tr;
+			if (TraceLine(start + rightDir * i * rightStep, end + rightDir * i * rightStep, true, NULL, &tr)) {
 				return false;
 			}
 		}
@@ -498,13 +487,45 @@ bool SectorNavMesh::create_jump_link(NavSector& fromNav, NavSectorLink& fromLink
 	return true;
 }
 
-void SectorNavMesh::find_stair_sectors() {
+void SectorNavMesh::add_jump_links() {
+	// add jump links between cliff segments
+	for (int i = 0; i < numsubsectors; i++) {
+		NavSector& nav = nav_sectors[i];
+		for (int k = 0; k < nav.links.size(); k++) {
+			NavSectorLink& link = nav.links[k];
+
+			if (!link.isCliff || link.isJump)
+				continue;
+
+			// find other other cliff segments to try linking to
+			for (int j = 0; j < numsubsectors; j++) {
+				NavSector& otherNav = nav_sectors[j];
+
+				if (j == i)
+					continue;
+
+				for (int x = 0; x < otherNav.links.size(); x++) {
+					NavSectorLink& otherLink = otherNav.links[x];
+					if (!otherLink.isCliff || otherLink.isJump)
+						continue;
+
+					if (create_jump_link(nav, nav.links[k], otherNav, otherLink)) {
+						break;
+					}
+				}
+			}
+		}
+	}
+}
+
+void SectorNavMesh::add_stair_sector_move_flags() {
 	for (int s = 0; s < numlines; s++) {
 		line_t& line = lines[s];
 
 		bool isStairBuilder = false;
 		int usespecials = 0;
 		bool igntxt = false;
+		int moveFlags = 0;
 
 		switch (line.special) {
 		case Stairs_BuildDown:
@@ -523,6 +544,19 @@ void SectorNavMesh::find_stair_sectors() {
 		case Generic_Stairs:
 			isStairBuilder = true;
 			igntxt = line.args[3] & 2;
+			break;
+		}
+
+		switch (line.special) {
+		case Stairs_BuildDown:
+		case Stairs_BuildDownSync:
+			moveFlags |= FL_SECTOR_MOVE_FLOOR_DOWN;
+			break;
+		case Stairs_BuildUp:
+		case Stairs_BuildUpSync:
+		case Stairs_BuildUpDoom:
+		case Generic_Stairs:
+			moveFlags |= FL_SECTOR_MOVE_FLOOR_UP;
 			break;
 		}
 
@@ -597,7 +631,7 @@ void SectorNavMesh::find_stair_sectors() {
 					prev = sec;
 					sec = tsec;
 					secnum = newsecnum;
-					stair_sectors.insert(tsec - sectors);
+					sector_move_flags[tsec - sectors] |= moveFlags;
 				}
 			} while (ok);
 		}
@@ -640,6 +674,38 @@ void SectorNavMesh::find_linedef_sectors() {
 	}
 }
 
+void SectorNavMesh::add_sector_move_flags() {
+	for (int i = 0; i < numsectors; i++) {
+		sector_t& sec = sectors[i];
+
+		int& flags = sector_move_flags[i];
+
+		// add flags for lines that trigger this sector by tag
+		if (sec.tag) {
+			for (int k = 0; k < numlines; k++) {
+				line_t& line = lines[k];
+
+				if (line.args[0] != sec.tag)
+					continue;
+
+				flags |= get_linedef_move_flag(&line);
+			}
+		}
+
+		// lines that have this sector as a backsector also trigger it, if no tag
+		for (int i = 0; i < sec.linecount; i++) {
+			line_t* line = sec.lines[i];
+
+			if (line->args[0] != sec.tag || line->backsector != &sec)
+				continue;
+
+			flags |= get_linedef_move_flag(line);
+		}
+	}
+
+	add_stair_sector_move_flags();
+}
+
 void SectorNavMesh::add_sector_trigger_goals() {
 	// add sector triggers
 	for (int i = 0; i < numsubsectors; i++) {
@@ -652,7 +718,10 @@ void SectorNavMesh::add_sector_trigger_goals() {
 			for (int k = 0; k < numlines; k++) {
 				line_t& line = lines[k];
 
-				if (does_linedef_move_tag(&line, sec->tag)) {
+				if (line.args[0] != sec->tag)
+					continue;
+
+				if (get_linedef_move_flag(&line)) {
 					nav.triggers.push_back(BotGoal(get_linedef_goal_action(&line), k));
 				}
 			}
@@ -662,7 +731,10 @@ void SectorNavMesh::add_sector_trigger_goals() {
 			for (int k = 0; k < sec->linecount; k++) {
 				line_t* line = sec->lines[k];
 
-				if (line->backsector == sec && does_linedef_move_tag(line, 0)) {
+				if (line->args[0] != 0)
+					continue;
+
+				if (line->backsector == sec && get_linedef_move_flag(line)) {
 					nav.triggers.push_back(BotGoal(get_linedef_goal_action(line), line - lines));
 				}
 			}
@@ -704,37 +776,6 @@ bool SectorNavMesh::is_link_bordered_by_walls(subsector_t& sub, int segIdx, int&
 	return leftSubIsWall && rightSubIsWall;
 }
 
-void SectorNavMesh::add_jump_links() {
-	// add jump links between cliff segments
-	for (int i = 0; i < numsubsectors; i++) {
-		NavSector& nav = nav_sectors[i];
-		for (int k = 0; k < nav.links.size(); k++) {
-			NavSectorLink& link = nav.links[k];
-
-			if (!link.isCliff || link.isJump)
-				continue;
-
-			// find other other cliff segments to try linking to
-			for (int j = 0; j < numsubsectors; j++) {
-				NavSector& otherNav = nav_sectors[j];
-
-				if (j == i)
-					continue;
-
-				for (int x = 0; x < otherNav.links.size(); x++) {
-					NavSectorLink& otherLink = otherNav.links[x];
-					if (!otherLink.isCliff || otherLink.isJump)
-						continue;
-
-					if (create_jump_link(nav, nav.links[k], otherNav, otherLink)) {
-						break;
-					}
-				}
-			}
-		}
-	}
-}
-
 void SectorNavMesh::calc_nav_centers() {
 	for (int i = 0; i < numsubsectors; i++) {
 		subsector_t& sub = subsectors[i];
@@ -757,16 +798,33 @@ void SectorNavMesh::calc_nav_centers() {
 
 void SectorNavMesh::generate_node_graph() {
 	uint64_t genStart = getEpochMillis();
+	
+	if (nav_sectors) {
+		delete[] nav_sectors;
+		nav_sectors = NULL;
+	}
+	if (sector_move_flags) {
+		delete[] sector_move_flags;
+		sector_move_flags = NULL;
+	}
+	if (line_subsectors) {
+		delete[] line_subsectors;
+		line_subsectors = NULL;
+	}
 
-	nav_sectors.clear();
-	nav_sectors.resize(numsubsectors);
-	line_subsectors.clear();
-	stair_sectors.clear();
+	nav_sectors = new NavSector[numsubsectors];
+
+	sector_move_flags = new int[numsectors];
+	memset(sector_move_flags, 0, sizeof(int) * numsectors);
+
+	line_subsectors = new int[numlines];
+	memset(line_subsectors, -1, sizeof(int) * numlines);
+
 	g_total_links = 0;
 
-	find_stair_sectors();
 	find_linedef_sectors();
 	calc_nav_centers();
+	add_sector_move_flags();
 
 	// link sectors as a nav mesh
 	for (int i = 0; i < numsubsectors; i++) {
@@ -839,7 +897,7 @@ void SectorNavMesh::generate_node_graph() {
 	add_jump_links();
 	add_sector_trigger_goals();
 
-	Printf("Generated %d nodes, %d links in %d ms\n", (int)nav_sectors.size(), g_total_links, (int)(getEpochMillis() - genStart));
+	Printf("Generated %d nodes, %d links in %d ms\n", (int)numsubsectors, g_total_links, (int)(getEpochMillis() - genStart));
 }
 
 int SectorNavMesh::get_route_distance(std::vector<int>& route) {
@@ -866,7 +924,7 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 	subsector_t* sub = R_PointInSubsector(player->x, player->y);
 	int subId = sub - subsectors;
 
-	if (sub && subId < nav_sectors.size()) {
+	if (sub && subId < numsubsectors) {
 		NavSector& nav = nav_sectors[subId];
 		FVector3 pos(nav.x << FRACBITS, nav.y << FRACBITS, nav.z << FRACBITS);
 		int spritesDrawn = 0;
@@ -910,7 +968,7 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 		}
 	}
 
-	for (int i = 0; i < nav_sectors.size(); i++) {
+	for (int i = 0; i < numsubsectors; i++) {
 		NavSector& node = nav_sectors[i];
 
 		if (P_AproxDistance((node.x << FRACBITS) - player->x, (node.y << FRACBITS) - player->y) > (1000 << FRACBITS)) {
@@ -983,7 +1041,7 @@ vector<int> SectorNavMesh::get_astar_route(int startSubSectorId, int endSubSecto
 		Printf("START route from %d to %d\n", startSubSectorId, endSubSectorId);
 	}
 
-	if (startSubSectorId < 0 || endSubSectorId < 0 || startSubSectorId > nav_sectors.size() || endSubSectorId > nav_sectors.size()) {
+	if (startSubSectorId < 0 || endSubSectorId < 0 || startSubSectorId >= numsubsectors || endSubSectorId >= numsubsectors) {
 		Printf("AStarRoute: invalid start/end nodes\n");
 		return emptyRoute;
 	}
@@ -1057,7 +1115,7 @@ vector<int> SectorNavMesh::get_astar_route(int startSubSectorId, int endSubSecto
 			}
 
 			int neighbor = link.target;
-			if (neighbor < 0 || neighbor >= nav_sectors.size())
+			if (neighbor < 0 || neighbor >= numsubsectors)
 				continue;
 
 			if (closedSet.count(neighbor))

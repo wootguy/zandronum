@@ -12,6 +12,11 @@
 #define PLAYER_RADIUS 16
 #define SAFE_CLIFF_DIST 80 // don't reduce movement speed when this far away from any cliff
 
+#define FL_SECTOR_MOVE_FLOOR_DOWN	1
+#define FL_SECTOR_MOVE_FLOOR_UP		2
+#define FL_SECTOR_MOVE_FLOOR_ANY	4
+#define FL_SECTOR_MOVE_CEIL_UP		8
+
 struct LinkSeg {
 	fixed_t x1, y1;
 	fixed_t x2, y2;
@@ -48,7 +53,7 @@ struct NavSectorLink {
 
 struct NavSector {
 	int x, y, z; // center point of the sector
-	int id; // also index into nav array
+	int id = -1; // also index into nav array
 	bool hasCliffs = false; // bot should be careful here
 	bool doesDamage = false; // bot should try to route around this
 	std::vector<BotGoal> triggers; // things which can trigger this sector to move up/down
@@ -74,9 +79,9 @@ class SectorNavMesh {
 	friend class NavSectorLink;
 
 public:
-	std::vector<NavSector> nav_sectors;
-	std::unordered_map<int, int> line_subsectors; // maps a linedef to the subsector in front of it
-	std::unordered_set<int> stair_sectors; // sectors that move as part of a stair builder
+	NavSector* nav_sectors = NULL;
+	int* line_subsectors = NULL; // maps a linedef to the subsector in front of it
+	int* sector_move_flags = NULL;
 
 	int pathTests; // number of blocked path checks
 	bool verbose;
@@ -97,15 +102,15 @@ private:
 	float path_cost(NavSectorLink& link);
 	LinkSeg get_neighbor_subsector(subsector_t* ignoreSector, seg_t* borderSeg);
 
-	void find_stair_sectors();
+	void add_stair_sector_move_flags();
 	void find_linedef_sectors();
+	void add_sector_move_flags();
 	void calc_nav_centers();
 	void add_sector_trigger_goals();
 	void add_jump_links();
 	bool is_link_bordered_by_walls(subsector_t& sub, int segIdx, int& leftSubId, int& rightSubId);
 	bool can_cross_seg_now(seg_t* seg);
-	bool can_sector_move(sector_t* sec);
-	bool does_linedef_move_tag(line_t* line, short tag); // true if this linedef moves the given sector tag
+	int get_linedef_move_flag(line_t* line); // returns SectorMoveMode
 	int get_linedef_goal_action(line_t* line);
 	bool subsector_does_damage(subsector_t* sec);
 	bool create_jump_link(NavSector& fromNav, NavSectorLink& fromLink, NavSector& toNav, NavSectorLink& toLink);
