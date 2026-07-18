@@ -10,6 +10,7 @@
 #define DUCK_HEIGHT 28
 #define PLAYER_WIDTH 32
 #define PLAYER_RADIUS 16
+#define SAFE_CLIFF_DIST 80 // don't reduce movement speed when this far away from any cliff
 
 struct LinkSeg {
 	fixed_t x1, y1;
@@ -41,16 +42,14 @@ struct NavSectorLink {
 	
 	// true if this link can be moved thru, else it is too high or blocked.
 	bool blocked(AActor* actor, bool recurse=true);
-};
 
-struct TagTriggerGoal {
-	bool canTrigger = false;
-	BotGoal goal;
+	bool walkable();
 };
 
 struct NavSector {
 	int x, y, z; // center point of the sector
 	int id; // also index into nav array
+	bool hasCliffs; // bot should be careful here
 	std::vector<BotGoal> triggers; // things which can trigger this sector to move up/down
 	std::vector<NavSectorLink> links;
 
@@ -89,10 +88,10 @@ public:
 	std::vector<int> GetTouchedSubsectors(AActor* actor);
 
 private:
-	int draw_debug_line(FVector3 start, FVector3 end, AActor* actor); // returns number of sprites drawn
 	LinkSeg GetSegmentOverlap(seg_t* a, seg_t* b);
 	bool is_seg_potentially_crossable(seg_t* seg);
 	float path_cost(int a, int b);
+	float path_cost(NavSectorLink& link);
 	LinkSeg get_neighbor_subsector(subsector_t* ignoreSector, seg_t* borderSeg);
 
 	bool can_cross_seg_now(seg_t* seg);

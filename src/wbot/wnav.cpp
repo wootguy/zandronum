@@ -5,27 +5,17 @@
 #include "p_local.h"
 #include "p_lnspec.h"
 #include "a_keys.h"
+#include "wutil.h"
 
 #include <algorithm>
 #include <unordered_set>
 #include <unordered_map>
 #include <vector>
-#include <chrono>
 
 using namespace std;
-using namespace std::chrono;
 
 SectorNavMesh g_wbot_nav;
 int g_total_links;
-
-float DotProduct(const FVector2& a, const FVector2& b)
-{
-	return a.X * b.X + a.Y * b.Y;
-}
-
-uint64_t getEpochMillis() {
-	return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
-}
 
 bool NavSectorLink::blocked(AActor* actor, bool recurse) {
 	g_wbot_nav.pathTests++;
@@ -84,6 +74,10 @@ bool NavSectorLink::blocked(AActor* actor, bool recurse) {
 	return false;
 }
 
+bool NavSectorLink::walkable() {
+	return g_wbot_nav.can_cross_seg_now(seg);
+}
+
 NavSectorLink* NavSector::getLink(int subSectorId) {
 	if (subSectorId < 0)
 		return NULL;
@@ -102,14 +96,24 @@ bool NavSector::touches(AActor* actor) {
 	if (!actor)
 		return false;
 
-	FVector2 center = pos();
 	FVector2 actorPos = FVector2(actor->x, actor->y);
-	FVector2 dir = FVector2(center.X - actor->x, center.Y - actor->y);
-	dir.MakeUnit();
 
-	FVector2 nearestPoint = actorPos + dir * actor->radius;
-	int subid = R_PointInSubsector(nearestPoint.X, nearestPoint.Y) - subsectors;
-	return subid == id;
+	int subid = R_PointInSubsector(actorPos.X, actorPos.Y) - subsectors;
+	if (subid == id)
+		return true;
+
+	subsector_t& sub = subsectors[id];
+	for (int i = 0; i < sub.numlines; i++) {
+		seg_t& seg = sub.firstline[i];
+		FVector2 v1(seg.v1->x, seg.v1->y);
+		FVector2 v2(seg.v2->x, seg.v2->y);
+
+		if (CircleIntersectsSegment(actorPos, actor->radius, v1, v2)) {
+			return true;
+		}
+	}
+	
+	return false;
 }
 
 fixed_t NavSector::getHeight() {
@@ -117,38 +121,15 @@ fixed_t NavSector::getHeight() {
 	fixed_t fy = y << FRACBITS;
 
 	sector_t* sec = subsectors[id].sector;
-	if (!sec) {
-		Printf("Nav %d has no sector!\n", id);
-		return 0;
-	}
-
 	return sec->ceilingplane.ZatPoint(fx, fy) - sec->floorplane.ZatPoint(fx, fy);
 }
 
 fixed_t NavSector::getFloorZ() {
-	fixed_t fx = x << FRACBITS;
-	fixed_t fy = y << FRACBITS;
-
-	sector_t* sec = subsectors[id].sector;
-	if (!sec) {
-		Printf("Nav %d has no sector!\n", id);
-		return 0;
-	}
-
-	return sec->floorplane.ZatPoint(fx, fy);
+	return subsectors[id].sector->floorplane.ZatPoint(x << FRACBITS, y << FRACBITS);
 }
 
 fixed_t NavSector::getCeilZ() {
-	fixed_t fx = x << FRACBITS;
-	fixed_t fy = y << FRACBITS;
-
-	sector_t* sec = subsectors[id].sector;
-	if (!sec) {
-		Printf("Nav %d has no sector!\n", id);
-		return 0;
-	}
-
-	return sec->ceilingplane.ZatPoint(fx, fy);
+	return subsectors[id].sector->ceilingplane.ZatPoint(x << FRACBITS, y << FRACBITS);
 }
 
 LinkSeg SectorNavMesh::GetSegmentOverlap(seg_t* a, seg_t* b)
@@ -289,7 +270,7 @@ bool SectorNavMesh::can_sector_move(sector_t* sec) {
 }
 
 LinkSeg SectorNavMesh::get_neighbor_subsector(subsector_t* ignoreSector, seg_t* borderSeg) {
-	const fixed_t epsilonWidth = 1 << FRACBITS;
+	const fixed_t epsilonWidth = 2 << FRACBITS;
 	LinkSeg ret;
 	memset(&ret, 0, sizeof(ret));
 
@@ -442,16 +423,22 @@ bool SectorNavMesh::create_jump_link(NavSector& fromNav, NavSectorLink& fromLink
 	edge1.MakeUnit();
 	edge2.MakeUnit();
 
-	//if (fromLink.id == 403 && toLink.id == 417) {
-	//	Printf("");
-	//}
-
 	FVector2 normalA(edge1.Y, -edge1.X);
 	FVector2 normalB(edge2.Y, -edge2.X);
 
 	float dot = DotProduct(normalA, normalB);
 	if (dot > -0.5f) {
 		return false; // edges not facing each other enough
+	}
+
+	FVector2 delta = fromLink.pos() - toLink.pos();
+	float planeDist = DotProduct(normalA, delta);
+	if (planeDist < 0) {
+		return false; // not in front of the segment
+	}
+
+	if (fromNav.getLink(toNav.id)) {
+		return false; // already have a link to this sector
 	}
 
 	NavSectorLink link;
@@ -467,6 +454,10 @@ bool SectorNavMesh::create_jump_link(NavSector& fromNav, NavSectorLink& fromLink
 	link.target = toNav.id;
 	link.id = g_total_links++;
 	link.isJump = true;
+
+	//if (link.id == 2673 && toNav.id == 673) {
+		//Printf("");
+	//}
 
 	fromNav.links.push_back(link);
 
@@ -518,6 +509,10 @@ void SectorNavMesh::generate_node_graph() {
 			link.linkWidth = (int)linkseg.length() >> FRACBITS;
 			link.isJump = false;
 
+			//if (i == 661 && link.target == 662) {
+				//Printf("");
+			//}
+
 			subsector_t& neighbor = subsectors[linkseg.otherSub];
 			int leftIdx = (linkseg.idx + neighbor.numlines - 1) % neighbor.numlines;
 			int rightIdx = (linkseg.idx + 1) % neighbor.numlines;
@@ -533,6 +528,9 @@ void SectorNavMesh::generate_node_graph() {
 				// link is too narrow to enter and both sides of it are impassable walls
 				continue;
 			}
+
+			if (link.isCliff)
+				nav.hasCliffs = true;
 
 			// redirect target sector if this is a teleport
 			link.isTeleport = false;
@@ -708,37 +706,6 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 	}
 }
 
-int SectorNavMesh::draw_debug_line(FVector3 start, FVector3 end, AActor* actor) {
-	// this sucks and the railgun effect crashes the client so can't use that
-	
-	FVector3 delta = end - start;
-	float len = delta.Length();
-	int ilen = (int)len >> FRACBITS;
-	int spacing = 4;
-	
-	if (ilen > 1600)
-		spacing = 64;
-	else if (ilen > 800)
-		spacing = 32;
-	else if (ilen > 400)
-		spacing = 16;
-	else if (ilen > 200)
-		spacing = 8;
-
-	FVector3 dir = delta.Resize(spacing << FRACBITS);
-	int spawns = len / (spacing << FRACBITS);
-	int i = 0;
-	for (i = 0; i < spawns; i++) {
-		FVector3 pos = start + (dir * i);
-		if (i == spawns - 1) {
-			pos = end;
-		}
-		SERVERCOMMANDS_SpawnBlood((fixed_t)pos.X, (fixed_t)pos.Y, (fixed_t)pos.Z, 0, 1, actor);
-	}
-
-	return i;
-}
-
 int SectorNavMesh::get_nav_id(fixed_t x, fixed_t y) {
 	return R_PointInSubsector(x, y) - subsectors;
 }
@@ -752,6 +719,34 @@ float SectorNavMesh::path_cost(int a, int b) {
 	NavSector& nodeb = nav_sectors[b];
 	FVector3 delta = nodea.pos() - nodeb.pos();
 	return delta.Length();
+}
+
+float SectorNavMesh::path_cost(NavSectorLink& link) {
+	NavSector& parent = nav_sectors[link.parent];
+	NavSector& target = nav_sectors[link.target];
+	float cost = 0;
+
+	if (link.isTeleport)
+		cost += (link.pos() - parent.pos()).Length();
+	else
+		cost += (parent.pos() - target.pos()).Length();
+
+	if (link.linkWidth < PLAYER_WIDTH) {
+		// try to avoid tiny links. They gets the bot stuck on corners.
+		cost += 200 << FRACBITS;
+	}
+
+	if (link.isJump) {
+		// jumps are error-prone
+		cost += 1000 << FRACBITS;
+	}
+
+	if (!can_cross_seg_now(link.seg)) {
+		if (target.getFloorZ() > parent.getFloorZ() + (JUMP_HEIGHT << FRACBITS))
+			cost += 4000 << FRACBITS; // avoid elevators
+	}
+
+	return cost;
 }
 
 vector<int> SectorNavMesh::get_astar_route(int startSubSectorId, int endSubSectorId, unordered_set<int>* blockedPaths)
@@ -859,11 +854,7 @@ vector<int> SectorNavMesh::get_astar_route(int startSubSectorId, int endSubSecto
 			NavSector& neighborNode = nav_sectors[neighbor];
 
 			float tentative_gScore = gScore[current];
-			
-			if (link.isTeleport)
-				tentative_gScore += (link.pos() - currentNode.pos()).Length();
-			else
-				tentative_gScore += path_cost(currentNode.id, neighborNode.id);
+			tentative_gScore += path_cost(link);
 
 			if (link.linkWidth < PLAYER_WIDTH) {
 				// try to avoid tiny links. They gets the bot stuck on corners.

@@ -1,0 +1,45 @@
+#pragma once
+#include "bots.h"
+#include <unordered_map>
+#include <string>
+
+struct WeaponInfo {
+	int priority;
+	int minRange;
+	int idealRange;
+	int maxRange;
+};
+
+extern std::unordered_map<std::string, WeaponInfo> g_wbot_weapon_info;
+
+char* VarArgs(const char* format, ...);
+
+AActor* getAnyPlayer();
+
+// get direction pointing behind the given linedef
+FVector3 getLineBackDir(line_t* line);
+
+FVector3 getLineCenter(line_t* line);
+
+void set_ori(AActor* actor, int x, int y, angle_t angle);
+
+int getLineLength(line_t* line);
+
+fixed_t DistanceToLine(const FVector2& p, const FVector2& a, const FVector2& b);
+
+// true if the point is in front of or behind the segment, not to the side
+bool PointAlignedSegment(const FVector2& p, const FVector2& a, const FVector2& b);
+
+bool CircleIntersectsSegment(const FVector2& center, float radius, const FVector2& a, const FVector2& b);
+
+void ExtendSegment(FVector2& a, FVector2& b, float amount);
+
+void MakeVectors(angle_t angle, FVector3& forward, FVector3& right);
+
+float DotProduct(const FVector2& a, const FVector2& b);
+
+uint64_t getEpochMillis();
+
+int draw_debug_line(FVector3 start, FVector3 end, AActor* actor);
+
+void wbot_handle_chat_command(ULONG ulPlayer, const char* msg);

@@ -7,7 +7,7 @@ struct NavSectorLink;
 class AActor;
 
 enum BotGoalAction {
-	WBOT_GOAL_ACTION_MOVE_TO,	// move to the goal and do nothing
+	WBOT_GOAL_ACTION_MOVE_TO,	// move to the goal sector and do nothing
 	WBOT_GOAL_ACTION_USE,		// use the given linedef
 	WBOT_GOAL_ACTION_TOUCH,		// touch the given actor
 	WBOT_GOAL_ACTION_CROSS,		// cross the given line
@@ -38,8 +38,8 @@ struct BotGoal {
 
 #define FL_WBOT_WAIT_ELEV	1 // bot is waiting for an elevator to lift/descend
 #define FL_WBOT_WAIT_DOOR	2 // bot is waiting for a door or platform to move out of the way
-#define FL_WBOT_JUMPING		4 // bot is jumping across multiple sectors
-#define FL_WBOT_FLYING		8 // bot is jumping or above a gap in the floor
+#define FL_WBOT_JUMPING		4 // bot is jumping across a gap
+#define FL_WBOT_FLYING		8 // bot is jumping, falling, or above a gap in the floor
 
 class CWootBot : public CSkullBot {
 public:
@@ -58,11 +58,13 @@ public:
 	int m_navid; // current navigation node/subsector id
 	int m_lastAttack; // last tic the player attacked
 	float m_speedMult = 1.0f;
+	int m_routeSpeed = 0;
+	int m_cliffDist = 9999;
 	bool m_freezeOnRouteChange = false; // set to true to stop moving when the route changes. For debugging
 	FVector2 lastPos;
 
 	CWootBot(const char* pszName, const char* pszTeamName, ULONG ulPlayerNum);
-	~CWootBot();
+	~CWootBot() {}
 
 	// all thinking logic happens here
 	void ParseScript(void) override;
@@ -77,6 +79,8 @@ public:
 	AActor* BestEnemy();
 	void AimAtPos(FVector3 pos);
 	bool MoveTo(FVector3 pos, int radius=32, int speed=100);
+	FVector2 AvoidCornersVector(FVector2 wantDir); // direction to move to avoid hitting corners
+	FVector2 AvoidLedges(AActor* actor, int& cliffDist); // direction to move to avoid falling off a ledge
 	
 	void DeadThink();	// dead
 	void IdleThink();	// nothing to do
@@ -101,6 +105,3 @@ public:
 
 	inline AActor* GetActor() { return m_pPlayer->mo; }
 };
-
-AActor* getAnyPlayer();
-void wbot_handle_chat_command(ULONG ulPlayer, const char* msg);

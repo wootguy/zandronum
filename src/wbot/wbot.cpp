@@ -13,6 +13,7 @@
 #include "a_keys.h"
 #include "actor.h"
 #include "m_cheat.h"
+#include "wutil.h"
 
 #include <stdlib.h>
 #include <time.h>
@@ -23,44 +24,6 @@
 using namespace std;
 
 #define RUN_SPEED 100 // max move speed allowed before the server kicks you
-#define MAX_NODE_LINKS 16
-
-extern FRandom g_RandomBotAimSeed;
-
-struct WeaponInfo {
-	int priority;
-	int minRange;
-	int idealRange;
-	int maxRange;
-};
-
-unordered_map<string, WeaponInfo> g_wbot_weapon_info = {
-	{"Fist",			{0,  0,   0,   64}},
-	{"Chainsaw",		{1,  0,   0,   64}},
-	{"Pistol",			{2,  0,   200, 4000}},
-	{"Shotgun",			{3,  0,   200, 2000}},
-	{"Chaingun",		{4,  0,   400, 4000}},
-	{"Minigun",			{4,  0,   400, 4000}},
-	{"GrenadeLauncher",	{5,  200, 400, 2000}},
-	{"RocketLauncher",	{5,  200, 500, 4000}},
-	{"SuperShotgun",	{6,  0,   200, 2000}},
-	{"PlasmaRifle",		{7,  0,   400, 4000}},
-	{"Railgun",			{7,	 0,   400, 4000}},
-	{"BFG9000",			{8,  0,   200, 2000}},
-	{"BFG10K",			{8,  0,   200, 2000}},
-};
-
-char* VarArgs(const char* format, ...)
-{
-	va_list		argptr;
-	static char		string[1024];
-
-	va_start(argptr, format);
-	vsnprintf(string, 1024, format, argptr);
-	va_end(argptr);
-
-	return string;
-}
 
 void init_wootbots() {
 	static int lastInit;
@@ -73,53 +36,6 @@ void init_wootbots() {
 
 		g_wbot_nav.generate_node_graph();
 	}
-}
-
-AActor* getAnyPlayer() {
-	AActor* player = NULL;
-	for (int i = 0; i < MAXPLAYERS; i++)
-	{
-		if (!playeringame[i])
-			continue;
-
-		AActor* actor = players[i].mo;
-		if (!actor || actor->player->bIsBot)
-			continue;
-		
-		return actor;
-	}
-
-	return NULL;
-}
-
-// get direction pointing behind the given linedef
-FVector3 getLineBackDir(line_t* line) {
-	fixed_t dx = line->v2->x - line->v1->x;
-	fixed_t dy = line->v2->y - line->v1->y;
-	double len = sqrt((double)dx * dx + (double)dy * dy);
-	return FVector3(-(double)dy / len, (double)dx / len, 0);
-}
-
-FVector3 getLineCenter(line_t* line) {
-	return FVector3((line->v1->x + line->v2->x) * 0.5, (line->v1->y + line->v2->y) * 0.5, 0);
-}
-
-void set_ori(AActor* actor, int x, int y, angle_t angle) {
-	fixed_t fx = x << FRACBITS;
-	fixed_t fy = y << FRACBITS;
-	fixed_t z = R_PointInSubsector(fx, fy)->sector->floorplane.ZatPoint(fx, fy);
-	P_Teleport(actor, fx, fy, ONFLOORZ, angle, false, false, false, true, false);
-}
-
-int getLineLength(line_t* line) {
-	return (int)(FVector2(line->v1->x, line->v1->y) - FVector2(line->v2->x, line->v2->y)).Length() >> FRACBITS;
-}
-
-void MakeVectors(angle_t angle, FVector3& forward, FVector3& right) {
-	fixed_t fsine = finesine[angle >> ANGLETOFINESHIFT];
-	fixed_t fcosine = finecosine[angle >> ANGLETOFINESHIFT];
-	forward = FVector3(fcosine, fsine, 0);
-	right = FVector3(fsine, -fcosine, 0);
 }
 
 std::string BotGoal::desc() {
@@ -216,7 +132,6 @@ CWootBot::CWootBot(const char* pszName, const char* pszTeamName, ULONG ulPlayerN
 	m_bSideMovePersist = true;
 	m_debug = true;
 }
-CWootBot::~CWootBot() {}
 
 void CWootBot::ParseScript() {
 	init_wootbots();
@@ -300,15 +215,26 @@ void CWootBot::ShowDebugInfo() {
 	if (pretendRouteSector >= 0) {
 		routeStr += " (pretend " + to_string(pretendRouteSector) + " )";
 	}
+	int totalDist = 0;
 	routeStr += " -> ";
-	for (int i = 0; i < m_route.size(); i++) {
+	for (int i = 0; i < m_route.size() && i < 4; i++) {
 		if (i != 0)
 			routeStr += " ";
 		if (i > 0 && i % 10 == 0) {
 			routeStr += "\n                     ";
 		}
 		routeStr += to_string(m_route[i]);
+		
+		if (i > 0)
+			totalDist += (int)(g_wbot_nav.nav_sectors[i].pos() - g_wbot_nav.nav_sectors[i-1].pos()).Length() >> FRACBITS;
 	}
+	if (m_route.size() > 4) {
+		routeStr += " (+" + to_string(m_route.size() - 4) + ")";
+	}
+	routeStr += "\n                     " + to_string(totalDist) + " units";
+	routeStr += "\nSpeed: " + to_string(m_routeSpeed);
+	if (m_speedMult != 1.0f)
+		routeStr += " * " + to_string((int)m_speedMult) + "." + to_string((int)(m_speedMult * 10) % 10);
 	
 	AActor* player = getAnyPlayer();
 	if (!player)
@@ -319,6 +245,9 @@ void CWootBot::ShowDebugInfo() {
 		int plrnavid = g_wbot_nav.get_nav_id(player);
 		navInfo = "Sector " + to_string(plrnavid) + ":";
 		NavSector& nav = g_wbot_nav.nav_sectors[plrnavid];
+
+		//int temp;
+		//AvoidLedges(player, temp);
 
 		navInfo += "\n   Triggers:";
 		for (int i = 0; i < nav.triggers.size(); i++) {
@@ -359,7 +288,7 @@ void CWootBot::ShowDebugInfo() {
 		}
 
 		navInfo += "\nOrigin: " + to_string(player->x >> FRACBITS) + " " + to_string(player->y >> FRACBITS)
-			+ " " + to_string(nav.getFloorZ() >> FRACBITS);
+			+ " " + to_string(player->z >> FRACBITS);
 
 		int yaw = (int)((uint64_t)player->angle * 360 / 0x100000000ULL);
 		int pitch = (int)((uint64_t)player->pitch * 360 / 0x100000000ULL);
@@ -438,6 +367,8 @@ void CWootBot::DeadThink() {
 	m_lForwardMove = 0;
 	m_lSideMove = 0;
 	m_lButtons ^= BT_ATTACK;
+
+	Reset();
 }
 
 void CWootBot::IdleThink() {
@@ -462,6 +393,7 @@ void CWootBot::CancelRoute() {
 	m_route.clear();
 	pretendRouteSector = -1;
 	stuckCounter = 0;
+	stateFlags &= ~FL_WBOT_JUMPING;
 }
 
 void CWootBot::GoalActionThink() {
@@ -572,7 +504,8 @@ void CWootBot::GoalActionThink() {
 }
 
 void CWootBot::RouteThink() {
-	const int routeSpeed = 100;
+	m_routeSpeed = RUN_SPEED;
+	const int cliffSafeDist = SAFE_CLIFF_DIST - 16;
 
 	m_forwardMove = 0;
 	m_sideMove = 0;
@@ -603,15 +536,57 @@ void CWootBot::RouteThink() {
 		m_navid = pretendRouteSector;
 	}
 
+	if (m_navid != m_route[0]) {
+		// update route if slipped off into an adjacent sector
+		NavSector& curNav = g_wbot_nav.nav_sectors[m_navid];
+
+		if (m_route.size() > 1 && curNav.getLink(m_route[1])) {
+			NavSectorLink* link = curNav.getLink(m_route[1]);
+			if (link && link->walkable())
+				m_route[0] = m_navid;
+		}
+		else {
+			NavSectorLink* link = curNav.getLink(m_route[0]);
+			if (link && link->walkable())
+				m_route.insert(m_route.begin(), m_navid);
+		}
+	}
+
 	NavSector& idealNav = g_wbot_nav.nav_sectors[m_route[0]];
 	NavSector& curNav = g_wbot_nav.nav_sectors[m_navid];
+	NavSector& targetNav = g_wbot_nav.nav_sectors[m_route.size() > 1 ? m_route[1] : m_route[0]];
 
-	if (m_route.size() > 1) {
-		NavSector& targetNav = g_wbot_nav.nav_sectors[m_route[1]];
+	int nodeTouchDist = 32;
+
+	// be careful near cliffs
+	if (!(stateFlags & FL_WBOT_JUMPING)) {
+		bool headingTowardsCliff = false;
+		if (m_route.size() > 1) {
+			NavSectorLink* link = idealNav.getLink(m_route[1]);
+			headingTowardsCliff = targetNav.hasCliffs && link->linkWidth < 32;
+		}
+
+		if (m_cliffDist < SAFE_CLIFF_DIST * 0.5f || headingTowardsCliff) {
+			m_routeSpeed *= 0.5f;
+			nodeTouchDist = 8;
+		}
+		else if (m_cliffDist < SAFE_CLIFF_DIST * 0.75f) {
+			m_routeSpeed *= 0.75f;
+			nodeTouchDist = 16;
+		}
+	}
+
+	if ((stateFlags & FL_WBOT_JUMPING) && m_route.size() > 1) {
+		// just try to land in the right spot
+		MoveTo(targetNav.pos(), 0, m_routeSpeed);
+	}
+	else if (m_route.size() > 1) {
 		NavSectorLink* link = idealNav.getLink(m_route[1]);
 
 		// allow slipping off the route into adjacent sectors while heading towards the target sector
-		bool onTrack = m_navid == m_route[0] || curNav.getLink(m_route[1]) || curNav.getLink(m_route[0]);
+		bool onTrack = m_navid == m_route[0]
+			|| curNav.getLink(m_route[1]) || curNav.getLink(m_route[0])
+			|| idealNav.touches(m_pPlayer->mo) || targetNav.touches(m_pPlayer->mo);		
 
 		if (onTrack) {
 			sector_t* thisSector = subsectors[m_navid].sector;
@@ -643,33 +618,31 @@ void CWootBot::RouteThink() {
 			}
 
 			// move to the next link
-			if (MoveTo(link->pos(), 32, routeSpeed)) {
+			if (MoveTo(link->pos(), nodeTouchDist, m_routeSpeed)) {
 				// close enough to the link edge				
 				if (link->isTeleport && link->seg->linedef) {
 					// move behind the teleporter line edge.
 					// The target sector may be in a completely different direction.
 					FVector3 backDir = getLineBackDir(link->seg->linedef);
 					FVector3 teleGoal = link->pos() + backDir * 200;
-					MoveTo(teleGoal, 0, routeSpeed);
+					MoveTo(teleGoal, 0, m_routeSpeed);
 				}
 				else if (link->isJump) {
 					stateFlags |= FL_WBOT_JUMPING;
-					MoveTo(targetNav.pos(), 16, routeSpeed);
+					MoveTo(targetNav.pos(), 0, m_routeSpeed);
 				}
 				else {
 					// move towards the target sector until we end up inside it
-					MoveTo(targetNav.pos(), 16, routeSpeed);
+					MoveTo(targetNav.pos(), 0, m_routeSpeed);
 				}
 			}
 		}
 		else { // fell off the route
 			if ((stateFlags & FL_WBOT_JUMPING) && (stateFlags & FL_WBOT_FLYING)) {
 				// don't abort the route until the jump is complete
-				MoveTo(targetNav.pos(), 16, routeSpeed);
+				MoveTo(targetNav.pos(), 0, m_routeSpeed);
 				return;
 			}
-
-			stateFlags &= ~FL_WBOT_JUMPING;
 
 			DebugPrint(VarArgs("Fell off the route (expected %d but got %d)\n", m_route[0], m_navid));
 			CancelRoute();
@@ -677,9 +650,10 @@ void CWootBot::RouteThink() {
 	}
 	else if (m_route.size() == 1) {
 		FVector3 centerGoal = idealNav.pos();
-		if (MoveTo(centerGoal, 32, routeSpeed)) {
+		if (MoveTo(centerGoal, nodeTouchDist, m_routeSpeed)) {
 			m_route.clear(); // don't reset pretendsector in case a goal is inside it
 			stuckPath = -1;
+			stateFlags &= ~FL_WBOT_JUMPING;
 			DebugPrint("Finished route\n");
 		}
 	}
@@ -721,6 +695,8 @@ void CWootBot::BlockedPathThink(NavSectorLink* link) {
 		vector<BotGoal> keyGoals;
 		g_wbot_nav.get_key_goals_for_line(m_pPlayer->mo, line, keyGoals, &allBlockedPaths);
 
+		DebugPrint(VarArgs("%s Adding locked door subgoals.\n", blockMsg.c_str()));
+
 		bool allGoalsPushed = true;
 		for (BotGoal& keyGoal : keyGoals) {
 			if (!PushGoal(keyGoal)) {
@@ -729,7 +705,6 @@ void CWootBot::BlockedPathThink(NavSectorLink* link) {
 		}
 
 		if (allGoalsPushed) {
-			DebugPrint(VarArgs("%s Added locked door subgoals.\n", blockMsg.c_str()));
 			return;
 		}
 	}
@@ -742,8 +717,8 @@ void CWootBot::BlockedPathThink(NavSectorLink* link) {
 		int subid = goal.getNavId();
 
 		if (subid == m_navid || RouteToSector(subid).size()) {
+			DebugPrint(VarArgs("%s Adding unblock subgoal.\n", blockMsg.c_str()));
 			if (PushGoal(goal)) {
-				DebugPrint(VarArgs("%s Added unblock subgoal.\n", blockMsg.c_str()));
 				return;
 			}
 		}
@@ -757,8 +732,8 @@ void CWootBot::BlockedPathThink(NavSectorLink* link) {
 		int subid = goal.getNavId();
 
 		if (subid == m_navid || RouteToSector(subid).size()) {
+			DebugPrint(VarArgs("%s Adding unblock subgoal.\n", blockMsg.c_str()));
 			if (PushGoal(goal)) {
-				DebugPrint(VarArgs("%s Added unblock subgoal.\n", blockMsg.c_str()));
 				return;
 			}
 		}
@@ -819,18 +794,18 @@ bool CWootBot::TraceAhead(int dist, FVector3 offset, bool ignoreMonsters, FTrace
 	MakeVectors(m_pPlayer->mo->angle, forward, right);
 	FVector3 start = FVector3(m_pPlayer->mo->x, m_pPlayer->mo->y, m_pPlayer->mo->z) + offset;
 	fixed_t testDist = dist << FRACBITS;
-	sector_t* sector = R_PointInSubsector((fixed_t)start.X, (fixed_t)start.Y)->sector;
 
-	return Trace((fixed_t)start.X, (fixed_t)start.Y, (fixed_t)start.Z, sector,
+	return Trace((fixed_t)start.X, (fixed_t)start.Y, (fixed_t)start.Z, m_pPlayer->mo->Sector,
 		(fixed_t)forward.X, (fixed_t)forward.Y, 0, testDist, ignoreMonsters ? 0 : 0xffffffff,
 		ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, m_pPlayer->mo, *tr);
 }
 
 bool CWootBot::MoveTo(FVector3 pos, int radius, int speed) {
-	m_forwardMove = speed;
-	m_sideMove = 0;
 	pos.Z = (float)(m_pPlayer->mo->z + m_pPlayer->viewheight);
 	AimAtPos(pos);
+
+	FVector2 wantDir = pos - FVector2(m_pPlayer->mo->x, m_pPlayer->mo->y);
+	wantDir.MakeUnit();
 
 	// jump over short walls and open doors
 	FTraceResults tr;
@@ -838,19 +813,151 @@ bool CWootBot::MoveTo(FVector3 pos, int radius, int speed) {
 		m_lButtons |= BT_JUMP | BT_USE;
 	}
 
-	// strafe around objects/walls partially blocking the way
+	// combine desired vector with avoidance vectors
+	FVector2 avoidCornersDir = AvoidCornersVector(wantDir);
+	FVector2 avoidLedgeDir = AvoidLedges(m_pPlayer->mo, m_cliffDist);
+	FVector2 moveDir = wantDir + avoidCornersDir;
+
+	if (!(stateFlags & FL_WBOT_JUMPING)) {
+		if (m_cliffDist < 0) {
+			// do whatever it takes to get back on solid ground.
+			// For best results, speed should be 0.5 or less, so correction force can recover from any velocity
+			moveDir = avoidLedgeDir;
+			speed = std::min(RUN_SPEED, speed * 2);
+		}
+		else {
+			moveDir += avoidLedgeDir * 0.5f;
+		}
+	}
+
+	moveDir.MakeUnit();
+	moveDir *= speed;
+
+	// convert directinal vectors to forward/strafe movents relative to the look direction
 	FVector3 forward, right;
 	MakeVectors(m_pPlayer->mo->angle, forward, right);
-	FVector3 viewOffset = FVector3(0, 0, m_pPlayer->viewheight);
-	FTraceResults trLeft, trRight;
-	TraceAhead(32, viewOffset + right * 16, false, &trRight);
-	TraceAhead(32, viewOffset + right * -16, false, &trLeft);
-	if (trLeft.Fraction != trRight.Fraction) {
-		m_sideMove = trRight.Fraction < trLeft.Fraction ? -speed : speed;
-	}
+	forward.MakeUnit();
+	right.MakeUnit();
+	m_forwardMove = DotProduct(moveDir, forward);
+	m_sideMove = DotProduct(moveDir, right);
 
 	fixed_t dist = P_AproxDistance(m_pPlayer->mo->x - (fixed_t)pos.X, m_pPlayer->mo->y - (fixed_t)pos.Y);
 	return dist < (radius << FRACBITS);
+}
+
+FVector2 CWootBot::AvoidCornersVector(FVector2 wantDir) {
+	// strafe around objects/walls partially blocking the way
+	FVector3 wantDirf(wantDir.X * (1 << FRACBITS), wantDir.Y * (1 << FRACBITS), 0);
+	FVector3 viewPos = FVector3(m_pPlayer->mo->x, m_pPlayer->mo->y, m_pPlayer->mo->z + m_pPlayer->viewheight);
+	fixed_t testDist = 32 << FRACBITS;
+	fixed_t rightOfs = 16 << FRACBITS;
+	FVector3 rightDir(wantDir.Y, -wantDir.X, 0);
+	FVector3 rightPos = viewPos + rightDir * rightOfs;
+	FVector3 leftPos = viewPos + rightDir * -rightOfs;
+	FTraceResults trLeft, trRight;
+
+	Trace(rightPos.X, rightPos.Y, rightPos.Z, m_pPlayer->mo->Sector,
+		wantDirf.X, wantDirf.Y, 0, testDist, 0xffffffff,
+		ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, m_pPlayer->mo, trRight);
+
+	Trace(leftPos.X, leftPos.Y, leftPos.Z, m_pPlayer->mo->Sector,
+		wantDirf.X, wantDirf.Y, 0, testDist, 0xffffffff,
+		ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, m_pPlayer->mo, trLeft);
+
+	//draw_debug_line(rightPos, rightPos + wantDirf * 32, m_pPlayer->mo);
+	//draw_debug_line(leftPos, leftPos + wantDirf * 32, m_pPlayer->mo);
+
+	if (trLeft.Fraction != trRight.Fraction) {
+		return trRight.Fraction < trLeft.Fraction ? -rightDir : rightDir;
+	}
+
+	return FVector2(0, 0);
+}
+
+FVector2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
+	//NavSector& nav = g_wbot_nav.nav_sectors[m_navid];
+	//FVector2 plrPos(m_pPlayer->mo->x, m_pPlayer->mo->y);
+	int subid = R_PointInSubsector(actor->x, actor->y) - subsectors;
+	NavSector* nav = &g_wbot_nav.nav_sectors[subid];
+	FVector2 plrPos(actor->x, actor->y);
+
+	int targetNav = -1;
+	int idealNav = -1;
+	if (m_route.size() > 0) {
+		idealNav = m_route[0];
+		nav = &g_wbot_nav.nav_sectors[idealNav];
+	}
+	if (m_route.size() > 1) {
+		targetNav = m_route[1];
+	}
+
+	// get nearby sectors in case nearest ledge is at the corner of the current
+	std::vector<NavSector*> sectors;
+	if (nav->hasCliffs)
+		sectors.push_back(nav);
+	for (NavSectorLink& link : nav->links) {
+		if (link.isCliff || link.isTeleport)
+			continue;
+
+		NavSector& target = g_wbot_nav.nav_sectors[link.target];
+		if (target.hasCliffs) {
+			sectors.push_back(&target);
+		}
+	}
+
+	FVector2 worstNormal(0,0);
+	int worstDist = INT_MAX;
+	int worsetSec = -1;
+	int worstLink = -1;
+
+	for (NavSector* testSec : sectors) {
+		for (NavSectorLink& link : testSec->links) {
+			if (!link.isCliff)
+				continue;
+
+			if (link.target == targetNav || link.target == idealNav)
+				continue; // don't back off from segments that must be crossed
+
+			seg_t* seg = link.seg;
+			FVector2 v1(seg->v1->x, seg->v1->y);
+			FVector2 v2(seg->v2->x, seg->v2->y);
+			FVector2 edge = v2 - v1;
+			FVector2 normal(edge.Y, -edge.X);
+			normal.MakeUnit();
+
+			// distance to axis
+			int dist = (int)DotProduct(plrPos - v1, normal) >> FRACBITS;
+			
+			if (dist < 0 && testSec != nav)
+				continue; // can't have fallen off a cliff in a neighbor sector
+
+			ExtendSegment(v1, v2, actor->radius);
+			if (!PointAlignedSegment(plrPos, v1, v2))
+				continue; // off to the side of this segment
+
+			if (dist < worstDist) {
+				worstDist = dist;
+				worstNormal = normal;
+				worsetSec = testSec->id;
+				worstLink = link.id;
+			}
+		}
+	}
+
+	FVector2 avoidForce(0, 0);
+
+	cliffDist = worstDist;
+
+	if (worstDist < SAFE_CLIFF_DIST) {
+		avoidForce = worstNormal;
+	}
+
+	//FVector3 headPos = FVector3(plrPos.X, plrPos.Y, m_pPlayer->mo->z + (56 << FRACBITS));
+	//FVector3 dir = FVector3(avoidForce.X, avoidForce.Y, 0);
+	//fixed_t scale = 200 << FRACBITS;
+	//draw_debug_line(headPos, headPos + dir * scale, m_pPlayer->mo);
+
+	return avoidForce;
 }
 
 void CWootBot::CombatThink() {
@@ -958,6 +1065,18 @@ void CWootBot::SelectBestWeapon() {
 	}
 }
 
+FVector3 CWootBot::GetViewPos() {
+	return FVector3(m_pPlayer->mo->x, m_pPlayer->mo->y, m_pPlayer->mo->z + m_pPlayer->mo->ViewHeight);
+}
+
+std::unordered_set<int> CWootBot::GetBlockedPaths() {
+	unordered_set<int> allBlockedPaths;
+	for (BotGoal& goal : m_goals) {
+		allBlockedPaths.insert(goal.blockers.begin(), goal.blockers.end());
+	}
+	return allBlockedPaths;
+}
+
 AActor* wbot_LookForEnemiesInBlock(AActor* lookee, int index, void* extparam)
 {
 	FBlockNode* block;
@@ -1016,18 +1135,6 @@ AActor* wbot_LookForEnemiesInBlock(AActor* lookee, int index, void* extparam)
 	}
 
 	return NULL;
-}
-
-FVector3 CWootBot::GetViewPos() {
-	return FVector3(m_pPlayer->mo->x, m_pPlayer->mo->y, m_pPlayer->mo->z + m_pPlayer->mo->ViewHeight);
-}
-
-std::unordered_set<int> CWootBot::GetBlockedPaths() {
-	unordered_set<int> allBlockedPaths;
-	for (BotGoal& goal : m_goals) {
-		allBlockedPaths.insert(goal.blockers.begin(), goal.blockers.end());
-	}
-	return allBlockedPaths;
 }
 
 AActor* CWootBot::BestEnemy() {
@@ -1148,100 +1255,4 @@ void CWootBot::RouteToGoal() {
 void CWootBot::Attack() {
 	m_lButtons |= BT_ATTACK;
 	m_lastAttack = level.time;
-}
-
-CCMD(addbotw)
-{
-	if (gamestate != GS_LEVEL)
-		return;
-
-	// Don't allow bots in network mode, unless we're the host.
-	if (NETWORK_InClientMode())
-	{
-		Printf("Only the host can add bots!\n");
-		return;
-	}
-
-	ULONG ulPlayerIdx = BOTS_FindFreePlayerSlot();
-	if (ulPlayerIdx == MAXPLAYERS)
-	{
-		Printf("The maximum number of players/bots has been reached.\n");
-		return;
-	}
-
-	new CWootBot(NULL, NULL, ulPlayerIdx);
-}
-
-void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
-	// clear all enemies for general pathfinding tests
-	if (!strcmp(msg, "y")) {
-		TThinkerIterator<AActor> it;
-		AActor* actor;
-		while ((actor = it.Next())) {
-			if (actor->flags3 & MF3_ISMONSTER) {
-				P_DamageMobj(actor, actor, actor, actor->health * 2, FName());
-			}
-		}
-
-		for (int i = 0; i < MAXPLAYERS; i++) {
-			AActor* player = players[i].mo;
-			if (!playeringame[i] || !player)
-				continue;
-		}
-	}
-
-	// give weapons/ammo for combat testing
-	if (!strcmp(msg, "x")) {
-		for (int i = 0; i < MAXPLAYERS; i++) {
-			AActor* player = players[i].mo;
-			if (!playeringame[i] || !player)
-				continue;
-
-			cht_Give(player->player, "backpack");
-			cht_Give(player->player, "weapons");
-			cht_Give(player->player, "ammo");
-			cht_Give(player->player, "keys");
-			cht_Give(player->player, "armor");
-		}
-	}
-	
-	// test a specific route
-	if (!strcmp(msg, "r")) {
-		TThinkerIterator<AActor> it;
-		AActor* actor;
-		while ((actor = it.Next())) {
-			if (actor->flags3 & MF3_ISMONSTER) {
-				P_DamageMobj(actor, actor, actor, actor->health * 2, FName());
-			}
-		}
-
-		for (int i = 0; i < MAXPLAYERS; i++) {
-			AActor* player = players[i].mo;
-			if (!playeringame[i] || !player)
-				continue;
-
-			if (player->player->bIsBot)	set_ori(player, 933, 120, ANGLE_1 * 90);
-			else						set_ori(player, 922, 445, ANGLE_1 * 270);
-
-			if (player->player->bIsBot) {
-				CWootBot* bot = (CWootBot*)player->player->pSkullBot;
-				bot->Reset();
-				player->player->cheats &= ~CF_FROZEN;
-				//bot->m_freezeOnRouteChange = true;
-			}
-		}
-	}
-
-	// slowmotion bots
-	if (!strcmp(msg, "f") || !strcmp(msg, "s")) {
-		bool slowMotion = !strcmp(msg, "s");
-		for (int i = 0; i < MAXPLAYERS; i++) {
-			AActor* player = players[i].mo;
-			if (!playeringame[i] || !player || !player->player->bIsBot)
-				continue;
-
-			CWootBot* bot = (CWootBot*)player->player->pSkullBot;
-			bot->m_speedMult = slowMotion ? 0.1f : 1.0f;
-		}
-	}
 }
