@@ -19,7 +19,7 @@ struct BotGoal {
 	int lineid = -1; // lindef id to interact with
 	std::unordered_set<int> blockers; // path IDs that block A* from reaching routing to this goal
 	int dist = 0; // distance from the goal to the purpose sector
-	int purposeSector = -1; // subsector this goal is intended to activate
+	NavSectorLink* purposeLink = NULL; // link this goal is meant to unblock
 	TObjPtr<AActor> actor = NULL; // actor to interact with
 
 	BotGoal(int action, int lineid) : action(action), lineid(lineid) {}
@@ -77,7 +77,7 @@ public:
 	void Reset(); // clear all memory and restart the bot
 
 	bool FindGoal(); // find something to do in the map
-	bool PushGoal(BotGoal& goal); // returns false if this is already the current goal
+	bool PushGoal(BotGoal& goal, NavSectorLink* purposeLink); // returns false if this is already the current goal
 	void PopGoal();
 	void RouteToGoal();
 	std::vector<int> RouteToSector(int subid);

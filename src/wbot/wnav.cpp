@@ -842,7 +842,6 @@ void SectorNavMesh::add_sector_trigger_goals() {
 		if (nav.triggers.size()) {
 			for (int k = 0; k < nav.triggers.size(); k++) {
 				BotGoal& goal = nav.triggers[k];
-				goal.purposeSector = i;
 
 				int goalNav = goal.getNavId();
 				if (goalNav != -1) {
@@ -852,7 +851,7 @@ void SectorNavMesh::add_sector_trigger_goals() {
 
 			std::sort(nav.triggers.begin(), nav.triggers.end(), [](const BotGoal& a, const BotGoal& b) {
 				return a.dist < b.dist;
-				});
+			});
 		}
 	}
 }

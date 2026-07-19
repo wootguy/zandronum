@@ -552,12 +552,20 @@ void CWootBot::RouteThink() {
 		// just try to land in the right spot
 		MoveTo(targetNav.pos(), 0, m_routeSpeed);
 
+		NavSectorLink* link = idealNav.getLink(m_route[1]);
+
 		if (targetNav.getFloorZ() > m_pPlayer->mo->z + (JUMP_HEIGHT << FRACBITS)) {
 			stateFlags &= ~FL_WBOT_JUMPING; // missed the jump
+			if (m_goals.size()) {
+				// don't try the jump again, there are probably other ones to try
+				// and many jumps just don't work
+				BotGoal& curgoal = m_goals[m_goals.size() - 1];
+				curgoal.blockers.insert(link->id);
+			}
+			
 			return;
 		}
-
-		NavSectorLink* link = idealNav.getLink(m_route[1]);
+		
 		FVector2 target = targetNav.pos();
 		fixed_t jumpDist = (target - FVector2(m_pPlayer->mo->x, m_pPlayer->mo->y)).Length();
 		bool bigJump = jumpDist > 100 << FRACBITS;
@@ -726,7 +734,7 @@ void CWootBot::BlockedPathThink(NavSectorLink* link) {
 
 		bool allGoalsPushed = true;
 		for (BotGoal& keyGoal : keyGoals) {
-			if (!PushGoal(keyGoal)) {
+			if (!PushGoal(keyGoal, link)) {
 				allGoalsPushed = false;
 			}
 		}
@@ -745,7 +753,7 @@ void CWootBot::BlockedPathThink(NavSectorLink* link) {
 
 		if (subid == link->parent || RouteToSector(subid).size()) {
 			DebugPrint(VarArgs("%s Adding unblock subgoal.\n", blockMsg.c_str()));
-			if (PushGoal(goal)) {
+			if (PushGoal(goal, link)) {
 				return;
 			}
 		}
@@ -760,7 +768,7 @@ void CWootBot::BlockedPathThink(NavSectorLink* link) {
 
 		if (subid == link->parent || RouteToSector(subid).size()) {
 			DebugPrint(VarArgs("%s Adding unblock subgoal.\n", blockMsg.c_str()));
-			if (PushGoal(goal)) {
+			if (PushGoal(goal, link)) {
 				return;
 			}
 		}
@@ -783,8 +791,9 @@ void CWootBot::BlockedPathThink(NavSectorLink* link) {
 		}
 	}
 
-	DebugPrint(VarArgs("%s Route aborted. No way to reach the goal.\n", blockMsg.c_str()));
+	DebugPrint(VarArgs("%s Goals aborted. Failed to reach a subgoal.\n", blockMsg.c_str()));
 	CancelRoute();
+	m_goals.clear();
 
 	m_nextThink = level.time + 10;
 }
@@ -1188,13 +1197,13 @@ bool CWootBot::FindGoal() {
 		if (thisSubId == g_wbot_nav.get_nav_id(actor))
 			continue; // already with this player
 
-		PushGoal(BotGoal(WBOT_GOAL_ACTION_MOVE_TO, actor));
+		PushGoal(BotGoal(WBOT_GOAL_ACTION_MOVE_TO, actor), NULL);
 	}
 
 	return m_route.size();
 }
 
-bool CWootBot::PushGoal(BotGoal& goal) {
+bool CWootBot::PushGoal(BotGoal& goal, NavSectorLink* purposeLink) {
 	if (!m_goals.empty()) {
 		BotGoal& lastGoal = m_goals[m_goals.size() - 1];
 		if (lastGoal.matches(goal)) {
@@ -1202,7 +1211,7 @@ bool CWootBot::PushGoal(BotGoal& goal) {
 			DebugPrint(VarArgs("Skipping duplicate goal: %s\n", goal.desc().c_str()));
 			return false;
 		}
-		if (goal.purposeSector != -1 && lastGoal.purposeSector == goal.purposeSector) {
+		if (goal.purposeLink && lastGoal.purposeLink == goal.purposeLink) {
 			// don't route to multiple goals that activate the same thing, if unblocked
 			if (lastGoal.blockers.empty()) {
 				DebugPrint(VarArgs("Skipping redundant goal: %s\n", goal.desc().c_str()));
@@ -1213,6 +1222,7 @@ bool CWootBot::PushGoal(BotGoal& goal) {
 
 	DebugPrint(VarArgs("New goal: %s\n", goal.desc().c_str()));
 	m_goals.push_back(goal);
+	m_goals[m_goals.size() - 1].purposeLink = purposeLink;
 	RouteToGoal();
 
 	return true;
@@ -1229,7 +1239,8 @@ void CWootBot::PopGoal() {
 
 	stateFlags &= ~FL_WBOT_RUSHING;
 
-	NavSector* purposeNav = goal.purposeSector != -1 ? &g_wbot_nav.nav_sectors[goal.purposeSector] : NULL;
+	int purposeLinkId = goal.purposeLink ? goal.purposeLink->id : -1;
+	NavSector* purposeNav = goal.purposeLink ? goal.purposeLink->getTarget() : NULL;
 	if (purposeNav && (purposeNav->getMoveFlags() & FL_SECTOR_MOVE_TIMED)) {
 		// the purpose of this goal was to move a timed sector. Better hurry before that sector resets!
 		stateFlags |= FL_WBOT_RUSHING;
@@ -1239,8 +1250,11 @@ void CWootBot::PopGoal() {
 	m_goals.pop_back();
 
 	if (m_goals.size()) {
-		BotGoal& lastGoal = m_goals[m_goals.size() - 1];
-		lastGoal.blockers.clear(); // if subgoals were completed, then paths to this goal are probably unblocked now
+		// unblock the link that the previous goal was for
+		for (int i = 0; i < m_goals.size(); i++) {
+			m_goals[i].blockers.erase(purposeLinkId); 
+		}
+		
 		RouteToGoal();
 	}
 	else
