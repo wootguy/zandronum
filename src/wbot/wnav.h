@@ -66,7 +66,6 @@ struct NavSector {
 	int id = -1; // also index into nav array
 	bool hasCliffs = false; // bot should be careful here
 	bool doesDamage = false; // bot should try to route around this
-	std::vector<BotGoal> triggers; // things which can trigger this sector to move up/down
 	std::vector<NavSectorLink> links;
 
 	FVector2 pos();
@@ -78,6 +77,7 @@ struct NavSector {
 	bool touches(AActor* actor);
 
 	int getMoveFlags();
+	std::vector<BotGoal>& getTriggers();
 
 	sector_t* sector();
 
@@ -87,6 +87,12 @@ struct NavSector {
 	fixed_t getCeilZ();
 };
 
+// extra sector metadata for bots
+struct BotSectorInfo {
+	int moveFlags = 0;
+	std::vector<BotGoal> triggers;
+};
+
 class SectorNavMesh {
 	friend class NavSector;
 	friend class NavSectorLink;
@@ -94,7 +100,7 @@ class SectorNavMesh {
 public:
 	NavSector* nav_sectors = NULL;
 	int* line_subsectors = NULL; // maps a linedef to the subsector in front of it
-	int* sector_move_flags = NULL;
+	BotSectorInfo* sector_info = NULL;
 
 	int pathTests; // number of blocked path checks
 	bool verbose;
@@ -119,11 +125,11 @@ private:
 	float path_cost(NavSectorLink& link, bool timeSensitive);
 	LinkSeg get_neighbor_subsector(subsector_t* ignoreSector, seg_t* borderSeg);
 
-	void add_stair_sector_move_flags();
+	void add_stair_sector_info();
 	void find_linedef_sectors();
-	void add_sector_move_flags();
+	void add_sector_info();
 	void calc_nav_centers();
-	void add_sector_trigger_goals();
+	void sort_sector_trigger_goals();
 	void add_jump_links();
 	bool is_link_bordered_by_walls(subsector_t& sub, int segIdx, int& leftSubId, int& rightSubId);
 	bool can_cross_seg_now(seg_t* seg);

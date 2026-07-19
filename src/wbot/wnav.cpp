@@ -240,7 +240,11 @@ bool NavSector::touches(AActor* actor) {
 }
 
 int NavSector::getMoveFlags() {
-	return g_wbot_nav.sector_move_flags[subsectors[id].sector - sectors];
+	return g_wbot_nav.sector_info[subsectors[id].sector - sectors].moveFlags;
+}
+
+std::vector<BotGoal>& NavSector::getTriggers() {
+	return g_wbot_nav.sector_info[subsectors[id].sector - sectors].triggers;
 }
 
 sector_t* NavSector::sector() {
@@ -334,8 +338,8 @@ bool SectorNavMesh::is_seg_potentially_crossable(seg_t* seg) {
 	if (seg->linedef && (seg->linedef->flags & ML_BLOCKING))
 		return false; // impassable
 
-	int frontMovement = sector_move_flags[seg->frontsector - sectors];
-	int backMovement = sector_move_flags[seg->backsector - sectors];
+	int frontMovement = sector_info[seg->frontsector - sectors].moveFlags;
+	int backMovement = sector_info[seg->backsector - sectors].moveFlags;
 
 	fixed_t x = (seg->v1->x + seg->v2->x) / 2;
 	fixed_t y = (seg->v1->y + seg->v2->y) / 2;
@@ -626,8 +630,7 @@ bool SectorNavMesh::create_jump_link(NavSector& fromNav, NavSectorLink& fromLink
 			
 			if (TraceLine(start + rightDir * i * rightStep, end + rightDir * i * rightStep, true, NULL, &tr)) {
 				if (tr.HitType == TRACE_HitWall && tr.Line && tr.Line->backsector) {
-					int moveFlags = sector_move_flags[tr.Line->backsector - sectors];
-					if (moveFlags) {
+					if (sector_info[tr.Line->backsector - sectors].moveFlags) {
 						continue; // wall may move out of the way in the future
 					}
 				}
@@ -700,7 +703,7 @@ void SectorNavMesh::add_jump_links() {
 	}
 }
 
-void SectorNavMesh::add_stair_sector_move_flags() {
+void SectorNavMesh::add_stair_sector_info() {
 	for (int s = 0; s < numlines; s++) {
 		line_t& line = lines[s];
 
@@ -755,6 +758,8 @@ void SectorNavMesh::add_stair_sector_move_flags() {
 
 		// The compatibility mode doesn't work with a hashing algorithm.
 		// It needs the original linear search method. This was broken in Boom.
+
+		BotGoal stairTrigger = BotGoal(get_linedef_goal_action(&line), s);
 
 		int secnum = -1;
 		int newsecnum = -1;
@@ -813,7 +818,10 @@ void SectorNavMesh::add_stair_sector_move_flags() {
 					prev = sec;
 					sec = tsec;
 					secnum = newsecnum;
-					sector_move_flags[tsec - sectors] |= moveFlags;
+
+					BotSectorInfo& info = sector_info[tsec - sectors];
+					info.moveFlags |= moveFlags;
+					info.triggers.push_back(stairTrigger);
 				}
 			} while (ok);
 		}
@@ -856,11 +864,10 @@ void SectorNavMesh::find_linedef_sectors() {
 	}
 }
 
-void SectorNavMesh::add_sector_move_flags() {
+void SectorNavMesh::add_sector_info() {
 	for (int i = 0; i < numsectors; i++) {
 		sector_t& sec = sectors[i];
-
-		int& flags = sector_move_flags[i];
+		BotSectorInfo& info = sector_info[i];
 
 		// add flags for lines that trigger this sector by tag
 		if (sec.tag) {
@@ -870,61 +877,42 @@ void SectorNavMesh::add_sector_move_flags() {
 				if (line.args[0] != sec.tag)
 					continue;
 
-				flags |= get_linedef_move_flag(&line);
-			}
-		}
+				int flags = get_linedef_move_flag(&line);
 
-		// lines that have this sector as a backsector also trigger it, if no tag
-		for (int i = 0; i < sec.linecount; i++) {
-			line_t* line = sec.lines[i];
-
-			if ((line->args[0] && line->args[0] != sec.tag) || line->backsector != &sec)
-				continue;
-
-			flags |= get_linedef_move_flag(line);
-		}
-	}
-
-	add_stair_sector_move_flags();
-}
-
-void SectorNavMesh::add_sector_trigger_goals() {
-	// add sector triggers
-	for (int i = 0; i < numsubsectors; i++) {
-		subsector_t& sub = subsectors[i];
-		sector_t* sec = sub.sector;
-		NavSector& nav = nav_sectors[i];
-
-		if (sec->tag) {
-			// any line with this sector's tag can move the sector
-			for (int k = 0; k < numlines; k++) {
-				line_t& line = lines[k];
-
-				if (line.args[0] != sec->tag)
-					continue;
-
-				if (get_linedef_move_flag(&line)) {
-					nav.triggers.push_back(BotGoal(get_linedef_goal_action(&line), k));
+				if (flags) {
+					info.moveFlags |= flags;
+					info.triggers.push_back(BotGoal(get_linedef_goal_action(&line), k));
 				}
 			}
 		}
 
-		// surrounding lines can move the sector if untagged
-		for (int k = 0; k < sec->linecount; k++) {
-			line_t* line = sec->lines[k];
+		// lines that have this sector as a backsector also trigger it, if no tag
+		for (int k = 0; k < sec.linecount; k++) {
+			line_t* line = sec.lines[k];
 
-			if (line->args[0] != 0)
+			if ((line->args[0] && line->args[0] != sec.tag) || line->backsector != &sec)
 				continue;
 
-			if (line->backsector == sec && get_linedef_move_flag(line)) {
-				nav.triggers.push_back(BotGoal(get_linedef_goal_action(line), line - lines));
+			int flags = get_linedef_move_flag(line);
+
+			if (flags) {
+				info.moveFlags |= flags;
+				info.triggers.push_back(BotGoal(get_linedef_goal_action(line), line - lines));
 			}
 		}
+	}
+
+	add_stair_sector_info();
+}
+
+void SectorNavMesh::sort_sector_trigger_goals() {
+	for (int i = 0; i < numsectors; i++) {
+		BotSectorInfo& info = sector_info[i];
 
 		// try closest goals first
-		if (nav.triggers.size()) {
-			for (int k = 0; k < nav.triggers.size(); k++) {
-				BotGoal& goal = nav.triggers[k];
+		if (info.triggers.size()) {
+			for (int k = 0; k < info.triggers.size(); k++) {
+				BotGoal& goal = info.triggers[k];
 
 				int goalNav = goal.getNavId();
 				if (goalNav != -1) {
@@ -932,7 +920,7 @@ void SectorNavMesh::add_sector_trigger_goals() {
 				}
 			}
 
-			std::sort(nav.triggers.begin(), nav.triggers.end(), [](const BotGoal& a, const BotGoal& b) {
+			std::sort(info.triggers.begin(), info.triggers.end(), [](const BotGoal& a, const BotGoal& b) {
 				return a.dist < b.dist;
 			});
 		}
@@ -984,9 +972,9 @@ void SectorNavMesh::generate_node_graph() {
 		delete[] nav_sectors;
 		nav_sectors = NULL;
 	}
-	if (sector_move_flags) {
-		delete[] sector_move_flags;
-		sector_move_flags = NULL;
+	if (sector_info) {
+		delete[] sector_info;
+		sector_info = NULL;
 	}
 	if (line_subsectors) {
 		delete[] line_subsectors;
@@ -995,8 +983,7 @@ void SectorNavMesh::generate_node_graph() {
 
 	nav_sectors = new NavSector[numsubsectors];
 
-	sector_move_flags = new int[numsectors];
-	memset(sector_move_flags, 0, sizeof(int) * numsectors);
+	sector_info = new BotSectorInfo[numsectors];
 
 	line_subsectors = new int[numlines];
 	memset(line_subsectors, -1, sizeof(int) * numlines);
@@ -1005,7 +992,7 @@ void SectorNavMesh::generate_node_graph() {
 
 	find_linedef_sectors();
 	calc_nav_centers();
-	add_sector_move_flags();
+	add_sector_info();
 
 	vector<AActor*> propBlockers;
 
@@ -1111,7 +1098,7 @@ void SectorNavMesh::generate_node_graph() {
 	}
 
 	add_jump_links();
-	add_sector_trigger_goals();
+	sort_sector_trigger_goals();
 
 	Printf("Generated %d nodes, %d links in %d ms\n", (int)numsubsectors, g_total_links, (int)(getEpochMillis() - genStart));
 }

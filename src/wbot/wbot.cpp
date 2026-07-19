@@ -257,8 +257,9 @@ void CWootBot::ShowDebugInfo() {
 		//AvoidLedges(player, temp);
 
 		navInfo += "\n   Triggers:";
-		for (int i = 0; i < nav.triggers.size(); i++) {
-			navInfo += "\n      " + nav.triggers[i].desc();
+		vector<BotGoal>& triggers = nav.getTriggers();
+		for (int i = 0; i < triggers.size(); i++) {
+			navInfo += "\n      " + triggers[i].desc();
 		}
 
 		navInfo += "\n   Links:";
@@ -267,8 +268,9 @@ void CWootBot::ShowDebugInfo() {
 			NavSector& targ = g_wbot_nav.nav_sectors[link.target];
 			string arrow = link.blocked(player) ? " -X> " : " --> ";
 			navInfo += "\n      " + to_string(link.id) + arrow + to_string(link.target);
-			if (targ.triggers.size())
-				navInfo += " (" + to_string(targ.triggers.size()) + " T)";
+			vector<BotGoal>& targtriggers = targ.getTriggers();
+			if (targtriggers.size())
+				navInfo += " (" + to_string(targtriggers.size()) + " T)";
 			if (link.isCliff) { navInfo += " C"; }
 			if (link.isTeleport) { navInfo += " T"; }
 			if (link.isJump) { navInfo += " J"; }
@@ -766,7 +768,8 @@ void CWootBot::BlockedPathThink(NavSectorLink* link) {
 
 	// nothing is moving, try unblocking it ourselves.
 	NavSector& targetNav = g_wbot_nav.nav_sectors[link->target];
-	for (BotGoal& goal : targetNav.triggers) {
+	vector<BotGoal>& targTriggers = targetNav.getTriggers();
+	for (BotGoal& goal : targTriggers) {
 		if (!goal.valid())
 			continue;
 		int subid = goal.getNavId();
@@ -781,7 +784,8 @@ void CWootBot::BlockedPathThink(NavSectorLink* link) {
 
 	// if we're on an elevator, try triggering it.
 	NavSector& thisNav = g_wbot_nav.nav_sectors[link->parent];
-	for (BotGoal& goal : thisNav.triggers) {
+	vector<BotGoal>& thisTriggers = thisNav.getTriggers();
+	for (BotGoal& goal : thisTriggers) {
 		if (!goal.valid())
 			continue;
 		int subid = goal.getNavId();
