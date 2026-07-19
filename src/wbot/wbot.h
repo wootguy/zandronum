@@ -1,42 +1,13 @@
 #pragma once
 #include "bots.h"
+#include "wb_route.h"
+#include "wb_goal.h"
 #include <unordered_set>
 
 struct FTraceResults;
+struct NavSector;
 struct NavSectorLink;
 class AActor;
-
-enum BotGoalAction {
-	WBOT_GOAL_ACTION_MOVE_TO,	// move to the goal sector and do nothing
-	WBOT_GOAL_ACTION_USE,		// use the given linedef
-	WBOT_GOAL_ACTION_TOUCH,		// touch the given actor
-	WBOT_GOAL_ACTION_CROSS,		// cross the given line
-	WBOT_GOAL_ACTION_SHOOT,		// shoot the given line
-};
-
-struct BotGoal {
-	int action = -1; // WBOT_GOAL_ACTION_*
-	int lineid = -1; // lindef id to interact with
-	std::unordered_set<int> blockers; // path IDs that block A* from reaching routing to this goal
-	int dist = 0; // distance from the goal to the purpose sector
-	NavSectorLink* purposeLink = NULL; // link this goal is meant to unblock
-	TObjPtr<AActor> actor = NULL; // actor to interact with
-
-	BotGoal(int action, int lineid) : action(action), lineid(lineid) {}
-	BotGoal(int action, AActor* actor) : action(action), actor(actor) {}
-
-	std::string desc();
-	int getNavId();
-	FVector3 pos();
-	int touchDistance(AActor* toucher); // how close the player needs to be to consider this goal as touched
-
-	bool matches(BotGoal& other) {
-		return action == other.action && lineid == other.lineid && actor == other.actor;
-	}
-
-	// false if the actor or lineid are no longer interactable
-	bool valid();
-};
 
 #define FL_WBOT_WAIT_ELEV	1 // bot is waiting for an elevator to lift/descend
 #define FL_WBOT_WAIT_DOOR	2 // bot is waiting for a door or platform to move out of the way
@@ -47,27 +18,26 @@ struct BotGoal {
 
 class CWootBot : public CSkullBot {
 public:
-	int m_forwardMove = 0; // range of +/-100
-	int m_sideMove = 0;
-	int m_targetLastSeenTic = 0; // last tick the current target was visible
-	angle_t m_fov = 0;
-	std::vector<int> m_route; // current route
-	std::vector<BotGoal> m_goals; // stack of goals
-	bool m_debug = false;
-	int pretendRouteSector = -1; // pretend we're in this sector for now
-	int stuckCounter = 0; // increases while trying to move with nothing happening
-	int stuckPath = -1; // path the bot got stuck at
-	int stateFlags = 0; // FL_WBOT_*
-	int m_navid; // current navigation node/subsector id
-	int m_lastAttack; // last tic the player attacked
-	int m_lastUse; // last tic the player used (for preventing sound spam)
-	float m_speedMult = 1.0f;
-	int m_routeSpeed = 0;
+	std::vector<BotGoal> m_goals;	// stack of goals
+	int m_forwardMove = 0;		// range of +/-100
+	int m_sideMove = 0;			// range of +/-100
+	int stateFlags = 0;			// FL_WBOT_*
+	int m_lastUse;				// last tic the player used (for preventing sound spam)
+	int m_nextThink;			// for cooling down failures
+	angle_t m_fov = 0;			// field of view
+	int stuckCounter = 0;				// increases while trying to move with nothing happening
 	int m_cliffDist = 9999;
-	int m_nextThink; // for cooling down failures
-	fixed_t m_lastElevZ; // last height of the elevator we've been standing on
-	bool m_freezeOnRouteChange = false; // set to true to stop moving when the route changes. For debugging
-	FVector2 lastPos;
+	FVector2 lastPos = FVector2(0, 0);	// used to detect being stuck
+
+	// debug state
+	bool m_debug = false;		// print thoughts to chat
+	float m_speedMult = 1.0f;	// scale movement speed
+
+	// combat state
+	int m_targetLastSeenTic = 0;	// last tick the current target was visible
+	int m_lastAttack;				// last tic the player attacked
+
+	CBotRouteController m_routeController;
 
 	CWootBot(const char* pszName, const char* pszTeamName, ULONG ulPlayerNum);
 	~CWootBot() {}
@@ -77,29 +47,30 @@ public:
 
 	void Reset(); // clear all memory and restart the bot
 
+	// goal management
 	bool FindGoal(); // find something to do in the map
 	bool PushGoal(BotGoal& goal, NavSectorLink* purposeLink); // returns false if this is already the current goal
 	void PopGoal();
-	bool RouteToGoal();
-	std::vector<int> RouteToSector(int subid);
+	inline bool HasGoal() { return m_goals.size(); };
+	inline BotGoal* CurrentGoal() { return m_goals.size() ? &m_goals[m_goals.size() - 1] : NULL; }
+	
 	AActor* BestEnemy();
 	void AimAtPos(FVector3 pos);
 	bool MoveTo(FVector2 pos, int radius=32, int speed=100);
 	FVector2 AvoidCornersVector(FVector2 wantDir); // direction to move to avoid hitting corners
 	FVector2 AvoidLedges(AActor* actor, int& cliffDist); // direction to move to avoid falling off a ledge
+	void UpdatePositionFlags();
 
 	void DeadThink();	// dead
-	void IdleThink();	// nothing to do
+	void IdleThink();	// nothing to do	
+	bool StuckThink(int maxStuck=1000);	// true if stuck longer than the given time
 	void GoalActionThink(); // do something with the goal object, after routing to it
-	void RouteThink();	// following a route somewhere
-	void BlockedPathThink(NavSectorLink* link); // a path in the route is blocked
+
+	// Combat logic
 	void CombatThink();	// attacking an enemy
 	void SelectBestWeapon();
-	bool StuckThink(int maxStuck=1000);	// true if stuck longer than the given time
 
 	bool TraceAhead(int dist, FVector3 offset, bool ignoreMonsters, FTraceResults* tr);
-
-	void CancelRoute();
 
 	void ShowDebugInfo();
 	void DebugPrint(const char* msg);
@@ -111,7 +82,6 @@ public:
 	fixed_t GetDistance(FVector2 p);
 	FVector3 GetVelocity();
 	int GetSpeed2D();
-	std::unordered_set<int> GetBlockedPaths(); // paths blocked during path to current goal
 
 	inline AActor* GetActor() { return m_pPlayer->mo; }
 
