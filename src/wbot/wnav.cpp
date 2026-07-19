@@ -270,7 +270,7 @@ bool SectorNavMesh::is_seg_potentially_crossable(seg_t* seg) {
 
 	if (backCeil - backFloor < fduckHeight || backCeil - frontFloor < fduckHeight) {
 		// too low of a ceil in the target sector to duck thru from the starting floor
-		if (!(backMovement & FL_SECTOR_MOVE_CEIL_UP) && !(frontMovement & FL_SECTOR_MOVE_FLOOR_DOWN))
+		if (!(backMovement & (FL_SECTOR_MOVE_CEIL_UP | FL_SECTOR_MOVE_FLOOR_DOWN)) && !(frontMovement & FL_SECTOR_MOVE_FLOOR_DOWN))
 			return false; // and the sectors don't move in a way that would make the duck possible
 	}
 
@@ -776,7 +776,7 @@ void SectorNavMesh::add_sector_move_flags() {
 		for (int i = 0; i < sec.linecount; i++) {
 			line_t* line = sec.lines[i];
 
-			if (line->args[0] != sec.tag || line->backsector != &sec)
+			if ((line->args[0] && line->args[0] != sec.tag) || line->backsector != &sec)
 				continue;
 
 			flags |= get_linedef_move_flag(line);
@@ -906,6 +906,22 @@ void SectorNavMesh::generate_node_graph() {
 	calc_nav_centers();
 	add_sector_move_flags();
 
+	vector<AActor*> propBlockers;
+
+	// find all immovable and invulnerable props
+	TThinkerIterator<AActor> it;
+	AActor* actor;
+	while ((actor = it.Next())) {
+		if (!(actor->flags & (MF_SOLID)))
+			continue;
+
+		if (actor->player || (actor->flags3 & (MF3_ISMONSTER | MF_SHOOTABLE)))
+			continue;
+
+		propBlockers.push_back(actor);
+		//Printf("Prop '%s' %d\n", actor->GetClass()->TypeName.GetChars(), actor->health);
+	}
+
 	// link sectors as a nav mesh
 	for (int i = 0; i < numsubsectors; i++) {
 		subsector_t& sub = subsectors[i];
@@ -968,6 +984,22 @@ void SectorNavMesh::generate_node_graph() {
 					link.target = destSub - subsectors;
 					link.isTeleport = true;
 				}
+			}
+
+			// don't add links that are blocked by immovable props
+			bool propBlocked = false;
+			const fixed_t playerRadius = (PLAYER_WIDTH / 2) << FRACBITS;
+			FVector2 linkPos = link.overlapCenter;
+			for (int i = 0; i < propBlockers.size(); i++) {
+				AActor* actor = propBlockers[i];
+				FVector2 propPos(actor->x, actor->y);
+				if ((propPos - linkPos).Length() < actor->radius + playerRadius) {
+					propBlocked = true;
+					break;
+				}
+			}
+			if (propBlocked) {
+				continue;
 			}
 
 			nav.links.push_back(link);

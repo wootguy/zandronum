@@ -872,8 +872,9 @@ bool CWootBot::MoveTo(FVector3 pos, int radius, int speed) {
 
 FVector2 CWootBot::AvoidCornersVector(FVector2 wantDir) {
 	// strafe around objects/walls partially blocking the way
+	fixed_t zTest = (STEP_HEIGHT + 1) << FRACBITS;
 	FVector3 wantDirf(wantDir.X * (1 << FRACBITS), wantDir.Y * (1 << FRACBITS), 0);
-	FVector3 viewPos = FVector3(m_pPlayer->mo->x, m_pPlayer->mo->y, m_pPlayer->mo->z + m_pPlayer->viewheight);
+	FVector3 viewPos = FVector3(m_pPlayer->mo->x, m_pPlayer->mo->y, m_pPlayer->mo->z + zTest);
 	fixed_t testDist = 32 << FRACBITS;
 	fixed_t rightOfs = 16 << FRACBITS;
 	FVector3 rightDir(wantDir.Y, -wantDir.X, 0);
@@ -883,11 +884,11 @@ FVector2 CWootBot::AvoidCornersVector(FVector2 wantDir) {
 
 	Trace(rightPos.X, rightPos.Y, rightPos.Z, m_pPlayer->mo->Sector,
 		wantDirf.X, wantDirf.Y, 0, testDist, 0xffffffff,
-		ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, m_pPlayer->mo, trRight);
+		ML_BLOCKEVERYTHING, m_pPlayer->mo, trRight);
 
 	Trace(leftPos.X, leftPos.Y, leftPos.Z, m_pPlayer->mo->Sector,
 		wantDirf.X, wantDirf.Y, 0, testDist, 0xffffffff,
-		ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, m_pPlayer->mo, trLeft);
+		ML_BLOCKEVERYTHING, m_pPlayer->mo, trLeft);
 
 	//draw_debug_line(rightPos, rightPos + wantDirf * 32, m_pPlayer->mo);
 	//draw_debug_line(leftPos, leftPos + wantDirf * 32, m_pPlayer->mo);
@@ -1127,9 +1128,6 @@ AActor* wbot_LookForEnemiesInBlock(AActor* lookee, int index, void* extparam)
 
 		if (link->flags2 & MF2_DORMANT)
 			continue;			// don't target dormant things
-
-		if (!(link->flags3 & MF3_ISMONSTER))
-			continue;			// don't target it if it isn't a monster (could be a barrel)
 
 		if (link->flags7 & MF7_NEVERTARGET)
 			continue;
