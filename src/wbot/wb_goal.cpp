@@ -1,5 +1,5 @@
 #include "wb_goal.h"
-#include "wnav.h"
+#include "wb_nav.h"
 #include "r_state.h"
 #include <string>
 

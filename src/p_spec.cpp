@@ -89,7 +89,7 @@
 #include "unlagged.h"
 #include "network_enums.h"
 #include "st_hud.h"
-#include "wbot/wutil.h"
+#include "wbot/wb_util.h"
 
 static FRandom pr_playerinspecialsector ("PlayerInSpecialSector");
 void P_SetupPortals();

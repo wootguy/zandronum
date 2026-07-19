@@ -1,12 +1,12 @@
-#include "wnav.h"
-#include "wbot.h"
+#include "wb_nav.h"
+#include "wb_bot.h"
 #include "r_state.h"
 #include "sv_commands.h"
 #include "p_local.h"
 #include "p_lnspec.h"
 #include "p_trace.h"
 #include "a_keys.h"
-#include "wutil.h"
+#include "wb_util.h"
 
 #include <algorithm>
 #include <unordered_set>

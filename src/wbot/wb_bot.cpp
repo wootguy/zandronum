@@ -1,4 +1,6 @@
-#include "wbot.h"
+#include "wb_bot.h"
+#include "wb_nav.h"
+#include "wb_util.h"
 #include "botcommands.h"
 #include "sv_commands.h"
 #include "c_dispatch.h"
@@ -7,14 +9,11 @@
 #include "p_enemy.h"
 #include "p_local.h"
 #include "po_man.h"
-#include "wnav.h"
 #include "p_trace.h"
 #include "p_lnspec.h"
 #include "a_keys.h"
 #include "actor.h"
 #include "m_cheat.h"
-#include "wutil.h"
-
 #include <stdlib.h>
 #include <time.h>
 #include <unordered_set>

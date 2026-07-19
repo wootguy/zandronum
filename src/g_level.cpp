@@ -109,7 +109,7 @@
 #include "chat.h"
 #include "scoreboard.h"
 #include <set> // [CK] For CCMD listmusic
-#include "wbot/wutil.h"
+#include "wbot/wb_util.h"
 
 #include "g_hub.h"
 

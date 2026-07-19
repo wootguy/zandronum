@@ -1,6 +1,6 @@
 #pragma once
 #include "bots.h"
-#include "wbot.h"
+#include "wb_bot.h"
 #include <unordered_map>
 #include <unordered_set>
 

@@ -1,5 +1,5 @@
-#include "wutil.h"
-#include "wbot.h"
+#include "wb_util.h"
+#include "wb_bot.h"
 #include "r_utility.h"
 #include "p_spec.h"
 #include "p_local.h"
@@ -8,7 +8,7 @@
 #include "network.h"
 #include "sv_commands.h"
 #include "p_trace.h"
-#include "wbot/wnav.h"
+#include "wbot/wb_nav.h"
 
 #include <chrono>
 
@@ -342,8 +342,11 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 			if (!playeringame[i] || !player)
 				continue;
 
-			if (player->player->bIsBot)	set_ori(player, 764, -2150, ANGLE_1 * 0);
-			else						set_ori(player, 389, -2149, ANGLE_1 * 360);
+			if (player->player->bIsBot)	set_ori(player, -352, 592, ANGLE_1 * 0);
+			else						set_ori(player, 953, -4618, ANGLE_1 * 180);
+
+			//if (player->player->bIsBot)	set_ori(player, -190, 286, ANGLE_1 * 0);
+			//else						set_ori(player, 49, 99, ANGLE_1 * 180);
 
 			if (player->player->bIsBot) {
 				CWootBot* bot = (CWootBot*)player->player->pSkullBot;
