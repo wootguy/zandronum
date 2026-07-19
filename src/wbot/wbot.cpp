@@ -671,24 +671,41 @@ void CWootBot::RouteThink() {
 			if (std::min(targetHeight, borderHeight) < STAND_HEIGHT) {
 				m_lButtons |= BT_CROUCH;
 			}
+			
+			if (link->isJump) {
+				FVector2 startPos = link->GetJumpBackupPos();
+				int dist = GetDistance(startPos) >> FRACBITS;
+				m_routeSpeed = RUN_SPEED;
+				int startSpeed = RUN_SPEED * 0.2f;
+				if (dist < 64) {
+					m_routeSpeed = RUN_SPEED * 0.2f;
+				}
+				else if (dist < 256) {
+					m_routeSpeed = RUN_SPEED * 0.5f;
+				}
+				int curSpeed = GetSpeed2D();
 
-			// move to the next link
-			if (MoveTo(link->pos(), nodeTouchDist, m_routeSpeed)) {
-				// close enough to the link edge				
-				if (link->isTeleport && link->seg->linedef) {
-					// move behind the teleporter line edge.
-					// The target sector may be in a completely different direction.
-					FVector2 backDir = getLineBackDir(link->seg->linedef);
-					FVector2 teleGoal = link->pos() + backDir * 200;
-					MoveTo(teleGoal, 0, m_routeSpeed);
-				}
-				else if (link->isJump) {
+				if (MoveTo(startPos, 18, m_routeSpeed) && curSpeed < startSpeed) {
+					// close enough to the link edge				
 					stateFlags |= FL_WBOT_JUMPING;
-					MoveTo(targetNav.pos(), 0, m_routeSpeed);
+					return;
 				}
-				else {
-					// move towards the target sector until we end up inside it
-					MoveTo(targetNav.pos(), 0, m_routeSpeed);
+			}
+			else {
+				// move to the next link
+				if (MoveTo(link->pos(), nodeTouchDist, m_routeSpeed)) {
+					// close enough to the link edge				
+					if (link->isTeleport && link->seg->linedef) {
+						// move behind the teleporter line edge.
+						// The target sector may be in a completely different direction.
+						FVector2 backDir = getLineBackDir(link->seg->linedef);
+						FVector2 teleGoal = link->pos() + backDir * 200;
+						MoveTo(teleGoal, 0, m_routeSpeed);
+					}
+					else {
+						// move towards the target sector until we end up inside it
+						MoveTo(targetNav.pos(), 0, m_routeSpeed);
+					}
 				}
 			}
 		}
@@ -721,17 +738,6 @@ void CWootBot::RouteThink() {
 			stuckPath = -1;
 			stateFlags &= ~FL_WBOT_JUMPING;
 			DebugPrint("Finished route\n");
-		}
-	}
-
-	FTraceResults tr;
-	if (m_goals.size() && TraceAhead(32, FVector3(0, 0, STEP_HEIGHT << FRACBITS), true, &tr)) {
-		BotGoal& curGoal = m_goals[m_goals.size() - 1];
-		int lineid = tr.Line - lines;
-		if (lineid == curGoal.lineid && curGoal.action == WBOT_GOAL_ACTION_USE) {
-			// accidentally completed the goal
-			PopGoal();
-			return;
 		}
 	}
 
@@ -1127,6 +1133,18 @@ void CWootBot::SelectBestWeapon() {
 
 FVector3 CWootBot::GetViewPos() {
 	return FVector3(m_pPlayer->mo->x, m_pPlayer->mo->y, m_pPlayer->mo->z + m_pPlayer->mo->ViewHeight);
+}
+
+fixed_t CWootBot::GetDistance(FVector2 p) {
+	return P_AproxDistance(p.X - m_pPlayer->mo->x, p.Y - m_pPlayer->mo->y);
+}
+
+FVector3 CWootBot::GetVelocity() {
+	return FVector3(m_pPlayer->mo->velx, m_pPlayer->mo->vely, m_pPlayer->mo->velz);
+}
+
+int CWootBot::GetSpeed2D() {
+	return (int)FVector2(m_pPlayer->mo->velx, m_pPlayer->mo->vely).Length() >> FRACBITS;
 }
 
 std::unordered_set<int> CWootBot::GetBlockedPaths() {

@@ -18,6 +18,10 @@ using namespace std;
 SectorNavMesh g_wbot_nav;
 int g_total_links;
 
+FVector2 NavSectorLink::pos() {
+	return overlapCenter;
+}
+
 FVector3 NavSectorLink::pos3D() {
 	NavSector* nav = getParent();
 	return FVector3(overlapCenter.X, overlapCenter.Y, nav->getFloorZ());
@@ -116,6 +120,69 @@ bool NavSectorLink::isJumpHeightValid() {
 	fixed_t jumpHeight = target->getFloorZ() - parent->getFloorZ();
 
 	return jumpHeight < (JUMP_HEIGHT << FRACBITS);
+}
+
+FVector2 NavSectorLink::GetJumpStartPos() {
+	NavSector* targetNav = getTarget();
+	FVector2 a(seg->v1->x, seg->v1->y);
+	FVector2 b(seg->v2->x, seg->v2->y);
+	
+	// bring points inward a bit to avoid getting too close to a cliff or wall
+	FVector2 dir = b - a;
+	dir.MakeUnit();
+	a += dir * (8 << FRACBITS);
+	b -= dir * (8 << FRACBITS);
+
+	return ClosestPointOnSegment(targetNav->pos(), a, b);
+}
+
+FVector2 NavSectorLink::GetJumpBackupPos() {
+	NavSector* targetNav = getTarget();
+	FVector2 startPos = GetJumpStartPos();
+
+	// back up the starting position to get a running start for the jump
+	FVector2 jumpDir = targetNav->pos() - startPos;
+	jumpDir.MakeUnit();
+
+	fixed_t maxBackupDist = 256 << FRACBITS;
+	FVector2 backupStartPos = startPos - (jumpDir * FRACUNIT); // avoid clipping against the backoff line
+	FVector2 backupPos = startPos - jumpDir * maxBackupDist;
+
+	// clip against current sector to prevent slipping into another sector while getting ready
+	subsector_t& sub = subsectors[getParent()->id];
+	float closestDist = FLT_MAX;
+
+	for (int i = 0; i < sub.numlines; i++) {
+		seg_t& seg = sub.firstline[i];
+		FVector2 a1(seg.v1->x, seg.v1->y);
+		FVector2 a2(seg.v2->x, seg.v2->y);
+
+		if (DoLinesIntersect(a1, a2, backupStartPos, backupPos)) {
+			FVector2 isect = LineIntersect(a1, a2, backupStartPos, backupPos);
+			float dist = (isect - backupStartPos).Length();
+			if (dist < closestDist) {
+				closestDist = dist;
+				backupPos.X = isect.X;
+				backupPos.Y = isect.Y;
+			}
+		}
+	}
+
+	// nudge it away from the intersection point a bit in case its against a wall
+	backupPos += jumpDir * FRACUNIT;
+
+	// final test to see if any walls are in the way
+	// TODO: need a better radius trace
+	if (false) {
+		fixed_t z = getParent()->getFloorZ() + (STEP_HEIGHT << FRACUNIT);
+		FVector3 start(startPos.X, startPos.Y, z);
+		FVector3 end(backupPos.X, backupPos.Y, z);
+		FTraceResults tr;
+		TraceRadius(start, end, PLAYER_WIDTH / 2, true, NULL, &tr);
+		backupPos = FVector2(tr.X, tr.Y);
+	}
+
+	return backupPos;
 }
 
 NavSector* NavSectorLink::getParent() {
@@ -1086,13 +1153,22 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 				FVector3 linkPos = link.pos3D();
 
 				if (link.isJump) {
+					FVector2 jumpStart = link.GetJumpStartPos();
+					linkPos.X = jumpStart.X;
+					linkPos.Y = jumpStart.Y;
 					FVector3 jumpPos = linkPos + FVector3(0, 0, 56 << FRACBITS);
 					FVector3 landPos = linkNav.pos3D() + FVector3(0, 0, 56 << FRACBITS);
+					
+					FVector2 backupPos = link.GetJumpBackupPos();
+					FVector3 backupStart = linkPos + FVector3(0, 0, 56 << FRACBITS);
+					FVector3 backupEnd = FVector3(backupPos.X, backupPos.Y, linkPos.Z + (56 << FRACBITS));
 
 					spritesDrawn += draw_debug_line(nav.pos3D(), linkPos, actor);
 					spritesDrawn += draw_debug_line(linkPos, jumpPos, actor);
 					spritesDrawn += draw_debug_line(jumpPos, landPos, actor);
 					spritesDrawn += draw_debug_line(landPos, linkNav.pos3D(), actor);
+
+					spritesDrawn += draw_debug_line(backupStart, backupEnd, actor);
 				}
 				else {
 					spritesDrawn += draw_debug_line(nav.pos3D(), linkPos, actor);

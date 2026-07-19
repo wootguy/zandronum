@@ -23,6 +23,12 @@ FVector2 getLineBackDir(line_t* line);
 
 FVector2 getLineCenter(line_t* line);
 
+bool DoLinesIntersect(const FVector2& la1, const FVector2& la2, const FVector2& lb1, const FVector2& lb2);
+
+FVector2 LineIntersect(const FVector2& la1, const FVector2& la2, const FVector2& lb1, const FVector2& lb2);
+
+FVector2 ClosestPointOnSegment(const FVector2& p, const FVector2& a, const FVector2& b);
+
 void set_ori(AActor* actor, int x, int y, angle_t angle);
 
 int getLineLength(line_t* line);
@@ -50,6 +56,7 @@ int draw_debug_line(FVector3 start, FVector3 end, AActor* actor);
 
 bool TraceLine(FVector3 start, FVector3 end, bool ignoreMonsters=true, AActor* ignoreEnt=NULL, FTraceResults* tr=NULL);
 
+bool TraceRadius(FVector3 start, FVector3 end, fixed_t radius, bool ignoreMonsters=true, AActor* ignoreEnt=NULL, FTraceResults* tr=NULL);
 
 // Hooks
 void wbot_handle_chat_command(ULONG ulPlayer, const char* msg);

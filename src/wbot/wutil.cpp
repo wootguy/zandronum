@@ -71,6 +71,82 @@ FVector2 getLineCenter(line_t* line) {
 	return FVector2((line->v1->x + line->v2->x) * 0.5, (line->v1->y + line->v2->y) * 0.5);
 }
 
+bool onSegment(const FVector2& p, const FVector2& q, const FVector2& r) {
+	return (q.X <= max(p.X, r.X) && q.X >= min(p.X, r.X) &&
+		    q.Y <= max(p.Y, r.Y) && q.Y >= min(p.Y, r.Y));
+}
+
+int orientation(const FVector2& p, const FVector2& q, const FVector2& r) {
+	float val = (q.Y - p.Y) * (r.X - q.X) - (q.X - p.X) * (r.Y - q.Y);
+
+	if (val == 0.0)
+		return 0;  // Collinear
+
+	return (val > 0.0) ? 1 : 2;  // Clockwise or counterclockwise
+}
+
+bool DoLinesIntersect(const FVector2& la1, const FVector2& la2, const FVector2& lb1, const FVector2& lb2) {
+	const FVector2& A = la1;
+	const FVector2& B = la2;
+	const FVector2& C = lb1;
+	const FVector2& D = lb2;
+
+	int o1 = orientation(A, B, C);
+	int o2 = orientation(A, B, D);
+	int o3 = orientation(C, D, A);
+	int o4 = orientation(C, D, B);
+
+	if (o1 != o2 && o3 != o4)
+		return true;  // They intersect
+
+	if (o1 == 0 && onSegment(A, C, B)) return true;
+	if (o2 == 0 && onSegment(A, D, B)) return true;
+	if (o3 == 0 && onSegment(C, A, D)) return true;
+	if (o4 == 0 && onSegment(C, B, D)) return true;
+
+	return false;  // Doesn't intersect
+}
+
+FVector2 LineIntersect(const FVector2& la1, const FVector2& la2, const FVector2& lb1, const FVector2& lb2) {
+	const FVector2& A = la1;
+	const FVector2& B = la2;
+	const FVector2& C = lb1;
+	const FVector2& D = lb2;
+
+	float a1 = B.Y - A.Y;
+	float b1 = A.X - B.X;
+	float c1 = a1 * A.X + b1 * A.Y;
+
+	float a2 = D.Y - C.Y;
+	float b2 = C.X - D.X;
+	float c2 = a2 * C.X + b2 * C.Y;
+
+	float determinant = a1 * b2 - a2 * b1;
+
+	if (determinant == 0.0) {
+		return FVector2(0, 0);
+	}
+
+	float x = (b2 * c1 - b1 * c2) / determinant;
+	float y = (a1 * c2 - a2 * c1) / determinant;
+	return FVector2(x, y);
+}
+
+FVector2 ClosestPointOnSegment(const FVector2& p, const FVector2& a, const FVector2& b) {
+	FVector2 ab = b - a;
+	float lenSq = DotProduct(ab, ab);
+
+	if (lenSq <= 0.0f)
+		return a; // Segment is a point
+
+	float t = DotProduct(p - a, ab) / lenSq;
+	
+	if (t < 0.0f) t = 0.0f;
+	else if (t > 1.0f) t = 1.0f;
+
+	return a + ab * t;
+}
+
 void set_ori(AActor* actor, int x, int y, angle_t angle) {
 	fixed_t fx = x << FRACBITS;
 	fixed_t fy = y << FRACBITS;
@@ -185,7 +261,7 @@ bool TraceLine(FVector3 start, FVector3 end, bool ignoreMonsters, AActor* ignore
 	FVector3 delta = end - start;
 	fixed_t dist = delta.Length();
 	delta.MakeUnit();
-	delta *= 1 << FRACBITS;
+	delta *= FRACUNIT;
 
 	sector_t* sector = P_PointInSector(start.X, start.Y);
 
@@ -195,6 +271,29 @@ bool TraceLine(FVector3 start, FVector3 end, bool ignoreMonsters, AActor* ignore
 	return Trace((fixed_t)start.X, (fixed_t)start.Y, (fixed_t)start.Z, sector,
 		(fixed_t)delta.X, (fixed_t)delta.Y, (fixed_t)delta.Z, dist, ignoreMonsters ? 0 : 0xffffffff,
 		ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, ignoreEnt, *out);
+}
+
+bool TraceRadius(FVector3 start, FVector3 end, fixed_t radius, bool ignoreMonsters, AActor* ignoreEnt, FTraceResults* tr) {
+	FVector2 delta = end - start;
+	delta.MakeUnit();
+	FVector3 rightDir(delta.Y, -delta.X, 0);
+	fixed_t rightStep = radius / 2;
+	fixed_t minFrac = FRACUNIT;
+
+	static FTraceResults dummy;
+	FTraceResults* out = tr ? tr : &dummy;
+
+	for (int i = -2; i <= 2; i++) {
+		FTraceResults temp;
+		TraceLine(start + rightDir * i * rightStep, end + rightDir * i * rightStep, ignoreMonsters, ignoreEnt, &temp);
+		
+		if (tr->Fraction < minFrac) {
+			minFrac = tr->Fraction;
+			*out = temp;
+		}
+	}
+
+	return minFrac < FRACUNIT;
 }
 
 void wbot_handle_line_activation(line_t* line, AActor* activator) {

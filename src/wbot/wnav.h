@@ -44,11 +44,12 @@ struct NavSectorLink {
 	bool isJump; // jump required to reach the target sector
 	seg_t* seg;
 
-	FVector2 pos() {
-		return overlapCenter;
-	}
+	FVector2 pos();
 
 	FVector3 pos3D();
+
+	FVector2 GetJumpBackupPos(); // find the best place to begin running for a jump
+	FVector2 GetJumpStartPos(); // find the best place to begin the jump
 	
 	// true if this link can be moved thru, else it is too high or blocked.
 	bool blocked(AActor* actor, bool recurse=true);

@@ -88,7 +88,7 @@ public:
 	bool MoveTo(FVector2 pos, int radius=32, int speed=100);
 	FVector2 AvoidCornersVector(FVector2 wantDir); // direction to move to avoid hitting corners
 	FVector2 AvoidLedges(AActor* actor, int& cliffDist); // direction to move to avoid falling off a ledge
-	
+
 	void DeadThink();	// dead
 	void IdleThink();	// nothing to do
 	void GoalActionThink(); // do something with the goal object, after routing to it
@@ -109,6 +109,9 @@ public:
 	void Attack();
 
 	FVector3 GetViewPos();
+	fixed_t GetDistance(FVector2 p);
+	FVector3 GetVelocity();
+	int GetSpeed2D();
 	std::unordered_set<int> GetBlockedPaths(); // paths blocked during path to current goal
 
 	inline AActor* GetActor() { return m_pPlayer->mo; }
