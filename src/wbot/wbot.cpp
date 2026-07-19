@@ -605,6 +605,36 @@ void CWootBot::RouteThink() {
 					fixed_t dist = P_AproxDistance(m_pPlayer->mo->x - (fixed_t)navPos.X, m_pPlayer->mo->y - (fixed_t)navPos.Y);
 					if (dist > (16 << FRACBITS))
 						MoveTo(navPos, 0, RUN_SPEED / 4);
+
+					if (linkBlocked) {
+						fixed_t backFloor = targetNav.getFloorZ();
+						fixed_t frontCeil = idealNav.getCeilZ();
+
+						if (frontCeil - backFloor < (DUCK_HEIGHT << FRACBITS)) {
+							// too low of a ceil in the start sector to duck thru to the target floor
+							// see if the ceiling can be raised, to avoid waiting on an elevator
+							// forever (doom2 map15)
+							vector<BotGoal>& elevTrigs = idealNav.getTriggers();
+							for (BotGoal& goal : elevTrigs) {
+								if (goal.lineid < 0)
+									continue;
+								int moveFlags = g_wbot_nav.get_linedef_move_flag(&lines[goal.lineid]);
+								if (moveFlags & FL_SECTOR_MOVE_CEIL_UP) {
+									// found a trigger that will raise the ceiling on this elevator
+									DebugPrint("Raising elevator ceiling to unblock path!\n");
+									BotGoal goalCopy = goal;
+									for (NavSectorLink& elevLink : idealNav.links) {
+										// stop trying to use this elevator to reach high places for now
+										if (elevLink.blocked(m_pPlayer->mo))
+											goalCopy.blockers.insert(elevLink.id);
+									}
+									PushGoal(goalCopy, link);
+									break;
+								}
+							}
+						}
+					}
+
 					return; // wait until the elevator is done moving
 				}
 			}

@@ -117,6 +117,7 @@ public:
 	bool get_key_goals_for_line(AActor* actor, line_t* linedef, std::vector<BotGoal>& keyGoals, std::unordered_set<int>* blockedPaths); // get key required to use the linedef. Returns false if keys don't exist anywhere in the map.
 	std::vector<int> GetTouchedSubsectors(AActor* actor);
 	int get_route_distance(std::vector<int>& route);
+	int get_linedef_move_flag(line_t* line); // FL_SECTOR_MOVE_*
 
 private:
 	LinkSeg GetSegmentOverlap(seg_t* a, seg_t* b);
@@ -133,7 +134,6 @@ private:
 	void add_jump_links();
 	bool is_link_bordered_by_walls(subsector_t& sub, int segIdx, int& leftSubId, int& rightSubId);
 	bool can_cross_seg_now(seg_t* seg);
-	int get_linedef_move_flag(line_t* line); // returns SectorMoveMode
 	int get_linedef_goal_action(line_t* line);
 	bool subsector_does_damage(subsector_t* sec);
 	bool create_jump_link(NavSector& fromNav, NavSectorLink& fromLink, NavSector& toNav, NavSectorLink& toLink);

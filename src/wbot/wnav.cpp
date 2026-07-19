@@ -357,11 +357,24 @@ bool SectorNavMesh::is_seg_potentially_crossable(seg_t* seg) {
 	}
 
 	fixed_t backCeil = seg->backsector->ceilingplane.ZatPoint(x, y);
-	fixed_t fduckHeight = DUCK_HEIGHT << FRACBITS;
+	fixed_t frontCeil = seg->frontsector->ceilingplane.ZatPoint(x, y);
+	const fixed_t fduckHeight = DUCK_HEIGHT << FRACBITS;
 
-	if (backCeil - backFloor < fduckHeight || backCeil - frontFloor < fduckHeight) {
+	if (backCeil - backFloor < fduckHeight) {
+		// not enough space in target sector
+		if (!(backMovement & (FL_SECTOR_MOVE_CEIL_UP | FL_SECTOR_MOVE_FLOOR_DOWN)))
+			return false; // and the sector never expands
+	}
+
+	if (backCeil - frontFloor < fduckHeight) {
 		// too low of a ceil in the target sector to duck thru from the starting floor
-		if (!(backMovement & (FL_SECTOR_MOVE_CEIL_UP | FL_SECTOR_MOVE_FLOOR_DOWN)) && !(frontMovement & FL_SECTOR_MOVE_FLOOR_DOWN))
+		if (!(backMovement & FL_SECTOR_MOVE_CEIL_UP) && !(frontMovement & FL_SECTOR_MOVE_FLOOR_DOWN))
+			return false; // and the sectors don't move in a way that would make the duck possible
+	}
+
+	if (frontCeil - backFloor < fduckHeight) {
+		// too low of a ceil in the start sector to duck thru to the target floor
+		if (!(backMovement & FL_SECTOR_MOVE_FLOOR_DOWN) && !(frontMovement & FL_SECTOR_MOVE_CEIL_UP))
 			return false; // and the sectors don't move in a way that would make the duck possible
 	}
 
@@ -384,12 +397,14 @@ bool SectorNavMesh::can_cross_seg_now(seg_t* seg)
 	}
 
 	fixed_t backCeil = seg->backsector->ceilingplane.ZatPoint(x, y);
+	fixed_t frontCeil = seg->frontsector->ceilingplane.ZatPoint(x, y);
+	const fixed_t fduckHeight = DUCK_HEIGHT << FRACBITS;
 
-	if ((backCeil - backFloor) < (DUCK_HEIGHT << FRACBITS)) {
+	fixed_t backHeight = backCeil - backFloor;
+	fixed_t borderHeight = std::min(backCeil - frontFloor, frontCeil - backFloor);
+
+	if (backHeight < fduckHeight || borderHeight < fduckHeight) {
 		return false; // not enough space in target sector
-	}
-	if ((backCeil - frontFloor) < (DUCK_HEIGHT << FRACBITS)) {
-		return false; // not enough space at the border segment (can't step down)
 	}
 
 	return true;
@@ -1022,8 +1037,8 @@ void SectorNavMesh::generate_node_graph() {
 			seg_t& seg = sub.firstline[k];
 
 			if (!is_seg_potentially_crossable(&seg)) {
-				//if (i == 332) {
-				//	is_seg_potentially_crossable(&seg); // debug links not created
+				//if (i == 167) {
+				//	is_seg_potentially_crossable(&seg); // debug possible link not created
 				//}
 				continue;
 			}
@@ -1032,6 +1047,10 @@ void SectorNavMesh::generate_node_graph() {
 
 			if (linkseg.otherSub < 0)
 				continue;
+
+			//if (i == 167 && linkseg.otherSub == 171) {
+			//	is_seg_potentially_crossable(&seg); // debug impossible link created
+			//}
 
 			fixed_t cx = (linkseg.x1 + linkseg.x2) / 2;
 			fixed_t cy = (linkseg.y1 + linkseg.y2) / 2;
