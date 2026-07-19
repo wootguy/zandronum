@@ -38,7 +38,8 @@ public:
 
 private:
 	CWootBot* pBot = NULL;
-	AActor* pActor = NULL;
+	APlayerPawn* pActor = NULL;
+	player_t* pPlayer = NULL;
 
 	// think logic
 	void UpdateRoute();							// setup and advance route nodes

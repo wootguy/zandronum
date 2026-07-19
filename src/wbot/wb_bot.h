@@ -1,13 +1,12 @@
 #pragma once
 #include "bots.h"
 #include "wb_route.h"
+#include "wb_combat.h"
 #include "wb_goal.h"
 #include <unordered_set>
 
 struct FTraceResults;
-struct NavSector;
 struct NavSectorLink;
-class AActor;
 
 #define FL_WBOT_WAIT_ELEV	1 // bot is waiting for an elevator to lift/descend
 #define FL_WBOT_WAIT_DOOR	2 // bot is waiting for a door or platform to move out of the way
@@ -18,6 +17,7 @@ class AActor;
 
 class CWootBot : public CSkullBot {
 public:
+	APlayerPawn* pActor = NULL;
 	std::vector<BotGoal> m_goals;	// stack of goals
 	int m_forwardMove = 0;		// range of +/-100
 	int m_sideMove = 0;			// range of +/-100
@@ -28,22 +28,19 @@ public:
 	int stuckCounter = 0;				// increases while trying to move with nothing happening
 	int m_cliffDist = 9999;
 	FVector2 lastPos = FVector2(0, 0);	// used to detect being stuck
+	bool m_wasDead;
 
 	// debug state
 	bool m_debug = false;		// print thoughts to chat
 	float m_speedMult = 1.0f;	// scale movement speed
 
-	// combat state
-	int m_targetLastSeenTic = 0;	// last tick the current target was visible
-	int m_lastAttack;				// last tic the player attacked
-
 	CBotRouteController m_routeController;
+	CBotCombatController m_combatController;
 
 	CWootBot(const char* pszName, const char* pszTeamName, ULONG ulPlayerNum);
 	~CWootBot() {}
 
-	// all thinking logic happens here
-	void ParseScript(void) override;
+	void ParseScript(void) override { Think(); } // called by skullbot tick
 
 	void Reset(); // clear all memory and restart the bot
 
@@ -54,25 +51,20 @@ public:
 	inline bool HasGoal() { return m_goals.size(); };
 	inline BotGoal* CurrentGoal() { return m_goals.size() ? &m_goals[m_goals.size() - 1] : NULL; }
 	
-	AActor* BestEnemy();
 	void AimAtPos(FVector3 pos);
 	bool MoveTo(FVector2 pos, int radius=32, int speed=100);
 	FVector2 AvoidCornersVector(FVector2 wantDir); // direction to move to avoid hitting corners
 	FVector2 AvoidLedges(AActor* actor, int& cliffDist); // direction to move to avoid falling off a ledge
 	void UpdatePositionFlags();
 
+	void Think();
 	void DeadThink();	// dead
 	void IdleThink();	// nothing to do	
 	bool StuckThink(int maxStuck=1000);	// true if stuck longer than the given time
 	void GoalActionThink(); // do something with the goal object, after routing to it
 
-	// Combat logic
-	void CombatThink();	// attacking an enemy
-	void SelectBestWeapon();
-
 	bool TraceAhead(int dist, FVector3 offset, bool ignoreMonsters, FTraceResults* tr);
 
-	void ShowDebugInfo();
 	void DebugPrint(const char* msg);
 
 	void Use(int ticsBetweenUses=7); // anti-spam use pressing
@@ -82,8 +74,6 @@ public:
 	fixed_t GetDistance(FVector2 p);
 	FVector3 GetVelocity();
 	int GetSpeed2D();
-
-	inline AActor* GetActor() { return m_pPlayer->mo; }
 
 	// something somewhere triggered a line
 	void HandleLineActivation(line_t* line, AActor* activator);

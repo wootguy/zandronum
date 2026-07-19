@@ -11,7 +11,8 @@
 
 using namespace std;
 
-CBotRouteController::CBotRouteController(CWootBot* pBot) : pBot(pBot), pActor(pBot->GetActor()) {}
+CBotRouteController::CBotRouteController(CWootBot* pBot)
+	: pBot(pBot), pActor(pBot->pActor), pPlayer(pBot->GetPlayer()) {}
 
 void CBotRouteController::Think() {
 	m_routeSpeed = RUN_SPEED;
@@ -404,7 +405,7 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link) {
 
 void CBotRouteController::CancelRoute() {
 	if (m_route.size() && m_freezeOnRouteChange) {
-		pActor->player->cheats |= CF_FROZEN;
+		pPlayer->cheats |= CF_FROZEN;
 		pActor->velx = 0;
 		pActor->vely = 0;
 		pActor->velz = 0;

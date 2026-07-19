@@ -5,15 +5,6 @@
 
 struct FTraceResults;
 
-struct WeaponInfo {
-	int priority;
-	int minRange;
-	int idealRange;
-	int maxRange;
-};
-
-extern std::unordered_map<std::string, WeaponInfo> g_wbot_weapon_info;
-
 char* VarArgs(const char* format, ...);
 
 AActor* getAnyPlayer();

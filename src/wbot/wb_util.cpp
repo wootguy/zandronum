@@ -15,22 +15,6 @@
 using namespace std;
 using namespace std::chrono;
 
-unordered_map<string, WeaponInfo> g_wbot_weapon_info = {
-	{"Fist",			{0,  0,   0,   64}},
-	{"Chainsaw",		{1,  0,   0,   64}},
-	{"Pistol",			{2,  0,   200, 4000}},
-	{"Shotgun",			{3,  0,   200, 2000}},
-	{"Chaingun",		{4,  0,   400, 4000}},
-	{"Minigun",			{4,  0,   400, 4000}},
-	{"GrenadeLauncher",	{5,  200, 400, 2000}},
-	{"RocketLauncher",	{5,  200, 500, 4000}},
-	{"SuperShotgun",	{6,  0,   200, 2000}},
-	{"PlasmaRifle",		{7,  0,   400, 4000}},
-	{"Railgun",			{7,	 0,   400, 4000}},
-	{"BFG9000",			{8,  0,   200, 2000}},
-	{"BFG10K",			{8,  0,   200, 2000}},
-};
-
 char* VarArgs(const char* format, ...)
 {
 	va_list		argptr;

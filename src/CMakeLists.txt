@@ -1048,12 +1048,14 @@ set( NOT_COMPILED_SOURCE_FILES
 
 set(WBOT_SOURCES
 	wbot/wb_bot.h wbot/wb_bot.cpp
+	wbot/wb_combat.h wbot/wb_combat.cpp
 	wbot/wb_nav.h wbot/wb_nav.cpp
 	wbot/wb_nav_gen.h wbot/wb_nav_gen.cpp
 	wbot/wb_util.h wbot/wb_util.cpp
 	wbot/wb_route.h wbot/wb_route.cpp
 	wbot/wb_goal.h wbot/wb_goal.cpp
 	wbot/wb_map.h wbot/wb_map.cpp
+	wbot/wb_debug.h wbot/wb_debug.cpp
 )
 
 # [TP] servercommands.cpp is generated from the protocol specification. CMake needs to know this or it raises an error

@@ -20,9 +20,7 @@ struct NavSectorLink {
 	seg_t* seg;
 
 	FVector2 pos();
-
 	FVector3 pos3D();
-
 	FVector2 GetJumpBackupPos(); // find the best place to begin running for a jump
 	FVector2 GetJumpStartPos(); // find the best place to begin the jump
 	
