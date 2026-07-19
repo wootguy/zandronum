@@ -1,5 +1,6 @@
 #include "wb_goal.h"
 #include "wb_nav.h"
+#include "wb_map.h"
 #include "r_state.h"
 #include <string>
 
@@ -42,10 +43,10 @@ std::string BotGoal::desc() {
 
 int BotGoal::getNavId() {
 	if (actor) {
-		return g_wbot_nav.get_nav_id(actor);
+		return g_wb_nav.get_nav_id(actor);
 	}
 	else if (lineid >= 0) {
-		int ret = g_wbot_nav.line_subsectors[lineid];
+		int ret = g_wb_mapinfo.line_subsectors[lineid];
 
 		if (ret == -1)
 			Printf("Failed to find subsector for line %d\n", lineid);
@@ -82,6 +83,8 @@ int BotGoal::touchDistance(AActor* toucher) {
 	else if (lineid >= 0) {
 		return (toucher->radius >> FRACBITS) + 1; // added 1 in case wall is solid and you can't go inside it
 	}
+
+	return 0;
 }
 
 bool BotGoal::valid() {

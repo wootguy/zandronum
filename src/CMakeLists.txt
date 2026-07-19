@@ -1046,6 +1046,16 @@ set( NOT_COMPILED_SOURCE_FILES
 	asm_x86_64/tmap3.s
 )
 
+set(WBOT_SOURCES
+	wbot/wb_bot.h wbot/wb_bot.cpp
+	wbot/wb_nav.h wbot/wb_nav.cpp
+	wbot/wb_nav_gen.h wbot/wb_nav_gen.cpp
+	wbot/wb_util.h wbot/wb_util.cpp
+	wbot/wb_route.h wbot/wb_route.cpp
+	wbot/wb_goal.h wbot/wb_goal.cpp
+	wbot/wb_map.h wbot/wb_map.cpp
+)
+
 # [TP] servercommands.cpp is generated from the protocol specification. CMake needs to know this or it raises an error
 # if it doesn't exist yet.
 set_source_files_properties( ${CMAKE_CURRENT_SOURCE_DIR}/network/servercommands.cpp PROPERTIES GENERATED TRUE )
@@ -1071,11 +1081,7 @@ add_executable( zdoom WIN32
 	botcommands.cpp #ST
 	botpath.cpp #ST
 	bots.cpp #ST
-	wbot/wb_bot.h wbot/wb_bot.cpp
-	wbot/wb_nav.h wbot/wb_nav.cpp
-	wbot/wb_util.h wbot/wb_util.cpp
-	wbot/wb_route.h wbot/wb_route.cpp
-	wbot/wb_goal.h wbot/wb_goal.cpp
+	${WBOT_SOURCES}
 	browser.cpp #ST
 	callvote.cpp #ST
 	campaign.cpp #ST
@@ -1630,8 +1636,7 @@ source_group("Source Files" FILES ${CMAKE_CURRENT_BINARY_DIR}/sc_man_scanner.h s
 
 # [BB] Zandronum specific source groups
 source_group("Bots" FILES astar.cpp astar.h REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/bot.+")
-source_group("Bots\\woop" FILES wbot/wb_bot.cpp wbot/wb_bot.h wbot/wb_nav.h wbot/wb_nav.cpp wbot/wb_util.h wbot/wb_util.cpp
-	bot/wb_route.h wbot/wb_route.cpp bot/wb_goal.h wbot/wb_goal.cpp)
+source_group("Bots\\woop" FILES ${WBOT_SOURCES})
 source_group("Network\\Client" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/cl_.+")
 source_group("Network\\Misc" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/network.+")
 source_group("Network\\Server" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/sv_.+")

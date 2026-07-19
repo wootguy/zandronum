@@ -320,7 +320,7 @@ void kill_all_shootables() {
 
 void wbot_map_init() {
 	srand((unsigned int)time(NULL));
-	g_wbot_nav.generate_node_graph();
+	g_wb_nav.init();
 
 	for (int i = 0; i < MAXPLAYERS; i++) {
 		AActor* player = players[i].mo;
@@ -389,6 +389,14 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 			CWootBot* bot = (CWootBot*)player->player->pSkullBot;
 			bot->m_speedMult = slowMotion ? 0.1f : 1.0f;
 		}
+	}
+}
+
+void wbot_tick() {
+	static bool testModo = true;
+	if (testModo) {
+		testModo = false;
+		new CWootBot(NULL, NULL, BOTS_FindFreePlayerSlot());
 	}
 }
 

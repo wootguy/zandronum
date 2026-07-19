@@ -91,6 +91,7 @@
 #include "doomerrors.h"
 #include "chat.h"
 #include "scoreboard.h"
+#include "wbot/wb_util.h"
 
 //*****************************************************************************
 //	VARIABLES
@@ -441,6 +442,8 @@ void BOTS_Tick( void )
 			}
 		}
 	}
+
+	wbot_tick();
 }
 
 //*****************************************************************************

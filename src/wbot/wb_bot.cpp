@@ -1,5 +1,6 @@
 #include "wb_bot.h"
 #include "wb_nav.h"
+#include "wb_map.h"
 #include "wb_util.h"
 #include "botcommands.h"
 #include "sv_commands.h"
@@ -94,9 +95,9 @@ void CWootBot::Reset() {
 }
 
 void CWootBot::ShowDebugInfo() {
-	g_wbot_nav.draw_nodes(m_pPlayer->mo);
+	g_wb_nav.draw_nodes(m_pPlayer->mo);
 
-	int thisSubId = g_wbot_nav.get_nav_id(m_pPlayer->mo);
+	int thisSubId = g_wb_nav.get_nav_id(m_pPlayer->mo);
 
 	string routeStr = "Route: " + to_string(thisSubId);
 	if (m_routeController.pretendRouteSector >= 0) {
@@ -111,13 +112,13 @@ void CWootBot::ShowDebugInfo() {
 	if (m_routeController.m_route.size() > 4) {
 		routeStr += " (+" + to_string(m_routeController.m_route.size() - 4) + ")";
 	}
-	routeStr += "\n                     " + to_string(g_wbot_nav.get_route_distance(m_routeController.m_route)) + " units";
+	routeStr += "\n                     " + to_string(g_wb_nav.get_route_distance(m_routeController.m_route)) + " units";
 	
 	if (m_routeController.m_route.size() > 1) {
-		NavSector& nav = g_wbot_nav.nav_sectors[m_routeController.m_route[0]];
+		NavSector& nav = g_wb_nav.mesh[m_routeController.m_route[0]];
 		NavSectorLink* link = nav.getLink(m_routeController.m_route[1]);
 		if (link) {
-			routeStr += "\nLink: " + to_string(link->id) + " -> " + to_string(link->target);
+			routeStr += "\nLink: " + to_string(link->id) + " -> " + to_string(link->target->id);
 		}
 	}
 	routeStr += "\nSpeed: " + to_string(m_routeController.m_routeSpeed);
@@ -130,9 +131,9 @@ void CWootBot::ShowDebugInfo() {
 
 	string navInfo;
 	{
-		int plrnavid = g_wbot_nav.get_nav_id(player);
+		int plrnavid = g_wb_nav.get_nav_id(player);
 		navInfo = "Sector " + to_string(plrnavid) + ":";
-		NavSector& nav = g_wbot_nav.nav_sectors[plrnavid];
+		NavSector& nav = g_wb_nav.mesh[plrnavid];
 
 		//int temp;
 		//AvoidLedges(player, temp);
@@ -146,9 +147,9 @@ void CWootBot::ShowDebugInfo() {
 		navInfo += "\n   Links:";
 		for (int i = 0; i < nav.links.size(); i++) {
 			NavSectorLink& link = nav.links[i];
-			NavSector& targ = g_wbot_nav.nav_sectors[link.target];
+			NavSector& targ = *link.target;
 			string arrow = link.blocked(player) ? " -X> " : " --> ";
-			navInfo += "\n      " + to_string(link.id) + arrow + to_string(link.target);
+			navInfo += "\n      " + to_string(link.id) + arrow + to_string(link.target->id);
 			vector<BotGoal>& targtriggers = targ.getTriggers();
 			if (targtriggers.size())
 				navInfo += " (" + to_string(targtriggers.size()) + " T)";
@@ -275,6 +276,9 @@ void CWootBot::IdleThink() {
 }
 
 void CWootBot::GoalActionThink() {
+	if (!m_routeController.m_navIdeal)
+		return;
+
 	BotGoal& goal = *CurrentGoal();
 	NavSector& nav = *m_routeController.m_navIdeal;
 
@@ -481,17 +485,17 @@ FVector2 CWootBot::AvoidCornersVector(FVector2 wantDir) {
 }
 
 FVector2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
-	//NavSector& nav = g_wbot_nav.nav_sectors[m_navid];
+	//NavSector& nav = g_wb_nav.mesh[m_navid];
 	//FVector2 plrPos(m_pPlayer->mo->x, m_pPlayer->mo->y);
 	int subid = R_PointInSubsector(actor->x, actor->y) - subsectors;
-	NavSector* nav = &g_wbot_nav.nav_sectors[subid];
+	NavSector* nav = &g_wb_nav.mesh[subid];
 	FVector2 plrPos(actor->x, actor->y);
 
 	int targetNav = -1;
 	int idealNav = -1;
 	if (m_routeController.m_route.size() > 0) {
 		idealNav = m_routeController.m_route[0];
-		nav = &g_wbot_nav.nav_sectors[idealNav];
+		nav = &g_wb_nav.mesh[idealNav];
 	}
 	if (m_routeController.m_route.size() > 1) {
 		targetNav = m_routeController.m_route[1];
@@ -505,9 +509,8 @@ FVector2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
 		if (link.isCliff || link.isTeleport)
 			continue;
 
-		NavSector& target = g_wbot_nav.nav_sectors[link.target];
-		if (target.hasCliffs) {
-			sectors.push_back(&target);
+		if (link.target->hasCliffs) {
+			sectors.push_back(link.target);
 		}
 	}
 
@@ -521,7 +524,7 @@ FVector2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
 			if (!link.isCliff)
 				continue;
 
-			if (link.target == targetNav || link.target == idealNav)
+			if (link.target->id == targetNav || link.target->id == idealNav)
 				continue; // don't back off from segments that must be crossed
 
 			seg_t* seg = link.seg;
@@ -567,11 +570,11 @@ FVector2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
 }
 
 void CWootBot::UpdatePositionFlags() {
-	m_routeController.m_navid = g_wbot_nav.get_nav_id(m_pPlayer->mo);
+	m_routeController.m_navid = g_wb_nav.get_nav_id(m_pPlayer->mo);
 
 	stateFlags &= ~(FL_WBOT_FLYING | FL_WBOT_ON_ELEV);
 	if (m_routeController.m_navCur) {
-		NavSector& nav = g_wbot_nav.nav_sectors[m_routeController.m_navid];
+		NavSector& nav = g_wb_nav.mesh[m_routeController.m_navid];
 		if (m_pPlayer->mo->z > nav.getFloorZ())
 			stateFlags |= FL_WBOT_FLYING;
 		if (nav.sector()->floordata)
@@ -762,7 +765,7 @@ AActor* CWootBot::BestEnemy() {
 }
 
 bool CWootBot::FindGoal() {
-	int thisSubId = g_wbot_nav.get_nav_id(m_pPlayer->mo);
+	int thisSubId = g_wb_nav.get_nav_id(m_pPlayer->mo);
 
 	AActor* player = NULL;
 	for (int i = 0; i < MAXPLAYERS; i++)
@@ -777,7 +780,7 @@ bool CWootBot::FindGoal() {
 		if (actor->player->cheats & (CF_NOCLIP | CF_NOCLIP2))
 			continue; // for testing
 
-		if (thisSubId == g_wbot_nav.get_nav_id(actor))
+		if (thisSubId == g_wb_nav.get_nav_id(actor))
 			continue; // already with this player
 
 		PushGoal(BotGoal(WBOT_GOAL_ACTION_MOVE_TO, actor), NULL);
@@ -812,7 +815,7 @@ bool CWootBot::PushGoal(BotGoal& goal, NavSectorLink* purposeLink) {
 	if (line && line->special == Door_LockedRaise && !P_CheckKeys(m_pPlayer->mo, line->args[3], false)) {
 		vector<BotGoal> keyGoals;
 		unordered_set<int> allBlockedPaths = m_routeController.GetBlockedPaths();
-		g_wbot_nav.get_key_goals_for_line(m_pPlayer->mo, line, keyGoals, &allBlockedPaths);
+		g_wb_nav.get_key_goals_for_line(m_pPlayer->mo, line, keyGoals, &allBlockedPaths);
 
 		DebugPrint(VarArgs("    Adding locked line subgoals.\n"));
 
@@ -836,7 +839,7 @@ void CWootBot::PopGoal() {
 	stateFlags &= ~FL_WBOT_RUSHING;
 
 	int purposeLinkId = goal.purposeLink ? goal.purposeLink->id : -1;
-	NavSector* purposeNav = goal.purposeLink ? goal.purposeLink->getTarget() : NULL;
+	NavSector* purposeNav = goal.purposeLink ? goal.purposeLink->target : NULL;
 	if (purposeNav && (purposeNav->getMoveFlags() & FL_SECTOR_MOVE_TIMED)) {
 		// the purpose of this goal was to move a timed sector. Better hurry before that sector resets!
 		stateFlags |= FL_WBOT_RUSHING;
