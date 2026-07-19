@@ -143,12 +143,12 @@ void CWootBot::ParseScript() {
 	}
 
 	m_navid = g_wbot_nav.get_nav_id(m_pPlayer->mo);
-	if (m_pPlayer->mo->z > g_wbot_nav.nav_sectors[m_navid].getFloorZ()) {
+	NavSector& nav = g_wbot_nav.nav_sectors[m_navid];
+	stateFlags &= ~(FL_WBOT_FLYING | FL_WBOT_ON_ELEV);
+	if (m_pPlayer->mo->z > nav.getFloorZ())
 		stateFlags |= FL_WBOT_FLYING;
-	}
-	else {
-		stateFlags &= ~FL_WBOT_FLYING;
-	}
+	if (nav.sector()->floordata)
+		stateFlags |= FL_WBOT_ON_ELEV;
 
 	if (m_debug) {
 		ShowDebugInfo();
@@ -209,6 +209,7 @@ void CWootBot::Reset() {
 	m_forwardMove = 0;
 	m_sideMove = 0;
 	m_nextThink = 0;
+	m_lastElevZ = 0;
 }
 
 void CWootBot::ShowDebugInfo() {
@@ -230,6 +231,14 @@ void CWootBot::ShowDebugInfo() {
 		routeStr += " (+" + to_string(m_route.size() - 4) + ")";
 	}
 	routeStr += "\n                     " + to_string(g_wbot_nav.get_route_distance(m_route)) + " units";
+	
+	if (m_route.size() > 1) {
+		NavSector& nav = g_wbot_nav.nav_sectors[m_route[0]];
+		NavSectorLink* link = nav.getLink(m_route[1]);
+		if (link) {
+			routeStr += "\nLink: " + to_string(link->id) + " -> " + to_string(link->target);
+		}
+	}
 	routeStr += "\nSpeed: " + to_string(m_routeSpeed);
 	if (m_speedMult != 1.0f)
 		routeStr += " * " + to_string((int)m_speedMult) + "." + to_string((int)(m_speedMult * 10) % 10);
@@ -295,6 +304,7 @@ void CWootBot::ShowDebugInfo() {
 
 	string stateStr = "State:";
 	if (stateFlags & FL_WBOT_WAIT_ELEV) { stateStr += " WAIT_ELEV"; }
+	if (stateFlags & FL_WBOT_ON_ELEV) { stateStr += " ON_ELEV"; }
 	if (stateFlags & FL_WBOT_WAIT_DOOR) { stateStr += " WAIT_DOOR"; }
 	if (stateFlags & FL_WBOT_JUMPING) { stateStr += " JUMP"; }
 	if (stateFlags & FL_WBOT_FLYING) { stateStr += " FLY"; }
@@ -586,15 +596,27 @@ void CWootBot::RouteThink() {
 			|| idealNav.touches(m_pPlayer->mo) || targetNav.touches(m_pPlayer->mo);		
 
 		if (onTrack) {
-			sector_t* thisSector = subsectors[m_navid].sector;
 			sector_t* nextSector = subsectors[m_route[1]].sector;
-			bool onElevator = thisSector && thisSector->floordata;
 			bool nextOnElevator = nextSector && nextSector->floordata;
-			if (onElevator) {
-				// on an elevator that is about to move or is moving
-				// wait for it to raise/lower the bot to a height close enough to the target sector
-				int zDelta = ((fixed_t)targetNav.getFloorZ() - m_pPlayer->mo->z) >> FRACBITS;
-				if (abs(zDelta) > STEP_HEIGHT) {
+			bool linkBlocked = link->blocked(m_pPlayer->mo);
+
+			// wait on elevators
+			if (stateFlags & FL_WBOT_ON_ELEV) {
+				sector_t* thisSector = curNav.sector();
+				bool waitedLongEnough = link->walkable();
+
+				if (link->isJump) {
+					// If the next link is a jump, wait until the very top for better success chance
+					fixed_t elevZ = thisSector->floorplane.ZatPoint(m_pPlayer->mo->x, m_pPlayer->mo->y);;
+					fixed_t moveDelta = elevZ - m_lastElevZ;
+
+					// elevator stopped at the top or started going down?
+					waitedLongEnough = !linkBlocked && moveDelta <= 0;
+
+					m_lastElevZ = elevZ;
+				}
+
+				if (!waitedLongEnough) {
 					stateFlags |= FL_WBOT_WAIT_ELEV;
 
 					// stay centered on the elevator to avoid blocking it or falling off
@@ -605,14 +627,38 @@ void CWootBot::RouteThink() {
 					return; // wait until the elevator is done moving
 				}
 			}
+			else {
+				m_lastElevZ = 0;
+			}
 
-			if (link->blocked(m_pPlayer->mo)) {
+			// wait for doors to open
+			if (!link->walkable() && (nextSector->floordata || nextSector->ceilingdata)) {
+				// door is raising or elevator is lowering in the next sector
+				if (link->isJump && !nextSector->floordata && !link->isJumpHeightValid()) {
+					// a door opening isn't going to make the jump doable if the floor is too high
+				}
+				else {
+					stateFlags |= FL_WBOT_WAIT_DOOR;
+					return; // wait until the door/elevator is done moving
+				}
+			}
+
+			// handle severe blockages
+			if (linkBlocked) {
 				BlockedPathThink(link);
 				return;
 			} else if (!nextOnElevator && m_route.size() > 2 && targetNav.touches(m_pPlayer->mo)) {
 				// if we're touching the next sector and the next path is blocked, also do block
-				// handling. Helps in case of doors with tiny sectors in front of them.
+				// handling. Helps in case of doors with tiny sectors in front of them which the
+				// bot can't fully get inside.
 				NavSectorLink* nextLink = g_wbot_nav.nav_sectors[link->target].getLink(m_route[2]);
+				sector_t* nextNextSector = subsectors[m_route[2]].sector;
+
+				if (!nextLink->walkable() && (nextNextSector->floordata || nextNextSector->ceilingdata)) {
+					stateFlags |= FL_WBOT_WAIT_DOOR;
+					return; // wait until the door/elevator is done moving
+				}
+				
 				if (nextLink && nextLink->blocked(m_pPlayer->mo)) {
 					BlockedPathThink(nextLink);
 					return;
@@ -620,8 +666,9 @@ void CWootBot::RouteThink() {
 			}
 
 			// duck if unable to fit while standing
-			bool crampedTarg = (targetNav.getHeight() >> FRACBITS) < STAND_HEIGHT;
-			if (crampedTarg) {
+			int targetHeight = targetNav.getHeight() >> FRACBITS;
+			int borderHeight = (targetNav.getCeilZ() - idealNav.getFloorZ()) >> FRACBITS;
+			if (std::min(targetHeight, borderHeight) < STAND_HEIGHT) {
 				m_lButtons |= BT_CROUCH;
 			}
 
@@ -703,19 +750,6 @@ void CWootBot::RouteThink() {
 void CWootBot::BlockedPathThink(NavSectorLink* link) {
 	link->blocked(m_pPlayer->mo); // debug here
 
-	// if the blocker is moving, be patient
-	sector_t* thisSector = subsectors[link->parent].sector;
-	sector_t* targetSector = subsectors[link->target].sector;
-	if (targetSector->floordata || targetSector->ceilingdata) {
-		if (link->isJump && !targetSector->floordata && !link->isJumpHeightValid()) {
-			// a door opening isn't going to make the jump doable if the floor is too high
-		}
-		else {
-			stateFlags |= FL_WBOT_WAIT_DOOR;
-			return; // wait until the door/elevator is done moving
-		}
-	}
-
 	string blockMsg = VarArgs("Link %d blocked!", link->id);
 
 	BotGoal& curGoal = m_goals[m_goals.size() - 1];
@@ -723,26 +757,6 @@ void CWootBot::BlockedPathThink(NavSectorLink* link) {
 
 	// don't try to route through previous paths we've been trying to unblock
 	unordered_set<int> allBlockedPaths = GetBlockedPaths();
-
-	// get keys needed to cross this line, if missing
-	line_t* line = link->seg->linedef;
-	if (line && line->special == Door_LockedRaise && !P_CheckKeys(m_pPlayer->mo, line->args[3], false)) {
-		vector<BotGoal> keyGoals;
-		g_wbot_nav.get_key_goals_for_line(m_pPlayer->mo, line, keyGoals, &allBlockedPaths);
-
-		DebugPrint(VarArgs("%s Adding locked door subgoals.\n", blockMsg.c_str()));
-
-		bool allGoalsPushed = true;
-		for (BotGoal& keyGoal : keyGoals) {
-			if (!PushGoal(keyGoal, link)) {
-				allGoalsPushed = false;
-			}
-		}
-
-		if (allGoalsPushed) {
-			return;
-		}
-	}
 
 	// nothing is moving, try unblocking it ourselves.
 	NavSector& targetNav = g_wbot_nav.nav_sectors[link->target];
@@ -849,7 +863,13 @@ bool CWootBot::MoveTo(FVector2 pos, int radius, int speed) {
 	FTraceResults tr;
 	if (TraceAhead(32, FVector3(0, 0, STEP_HEIGHT << FRACBITS), true, &tr)) {
 		m_lButtons |= BT_JUMP;
-		Use();
+
+		// only use walls that aren't already moving, so doors aren't closed while moving
+		if (tr.Line && tr.Line->backsector) {
+			if (!tr.Line->backsector->floordata && !tr.Line->backsector->ceilingdata) {
+				Use();
+			}
+		}
 	}
 
 	// combine desired vector with avoidance vectors
@@ -1223,9 +1243,22 @@ bool CWootBot::PushGoal(BotGoal& goal, NavSectorLink* purposeLink) {
 	DebugPrint(VarArgs("New goal: %s\n", goal.desc().c_str()));
 	m_goals.push_back(goal);
 	m_goals[m_goals.size() - 1].purposeLink = purposeLink;
-	RouteToGoal();
 
-	return true;
+	// also add key goals needed to use this line, if missing
+	line_t* line = goal.lineid >= 0 ? &lines[goal.lineid] : NULL;
+	if (line && line->special == Door_LockedRaise && !P_CheckKeys(m_pPlayer->mo, line->args[3], false)) {
+		vector<BotGoal> keyGoals;
+		unordered_set<int> allBlockedPaths = GetBlockedPaths();
+		g_wbot_nav.get_key_goals_for_line(m_pPlayer->mo, line, keyGoals, &allBlockedPaths);
+
+		DebugPrint(VarArgs("    Adding locked line subgoals.\n"));
+
+		for (BotGoal& keyGoal : keyGoals) {
+			m_goals.push_back(keyGoal);
+		}
+	}
+
+	return RouteToGoal();
 }
 
 void CWootBot::PopGoal() {
@@ -1274,12 +1307,12 @@ std::vector<int> CWootBot::RouteToSector(int subid) {
 	return g_wbot_nav.get_astar_route(m_navid, subid, &allBlockedPaths, stateFlags & FL_WBOT_RUSHING);
 }
 
-void CWootBot::RouteToGoal() {
+bool CWootBot::RouteToGoal() {
 	CancelRoute();
 
 	if (m_goals.empty()) {
 		DebugPrint("No goal to route to\n");
-		return;
+		return false;
 	}
 
 	BotGoal& goal = m_goals[m_goals.size() - 1];
@@ -1317,11 +1350,13 @@ void CWootBot::RouteToGoal() {
 		}
 
 		DebugPrint(VarArgs("Routing to goal: %s\n", goal.desc().c_str()));
+		return true;
 	}
-	else {
-		DebugPrint(VarArgs("Failed goal (no route): %s\n", goal.desc().c_str()));
-		m_goals.pop_back();
-	}
+
+	DebugPrint(VarArgs("Failed goal (no route): %s\n", goal.desc().c_str()));
+	m_goals.pop_back();
+	m_nextThink = level.time + 10;
+	return false;
 }
 
 void CWootBot::Use(int ticsBetweenUses) {
@@ -1338,8 +1373,14 @@ void CWootBot::Attack() {
 	m_lastAttack = level.time;
 }
 
-void CWootBot::HandleLineActivation(line_t* line) {
+void CWootBot::HandleLineActivation(line_t* line, AActor* activator) {
 	int lineid = line - lines;
+
+	if (line->special && line->special == Door_LockedRaise) {
+		if (!P_CheckKeys(activator, line->args[3], false)) {
+			return; // door wasn't actually opened
+		}
+	}
 
 	int popIdx = -1;
 	for (int i = 0; i < m_goals.size(); i++) {

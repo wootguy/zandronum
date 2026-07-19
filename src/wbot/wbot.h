@@ -43,6 +43,7 @@ struct BotGoal {
 #define FL_WBOT_JUMPING		4 // bot is jumping across a gap
 #define FL_WBOT_FLYING		8 // bot is jumping, falling, or above a gap in the floor
 #define FL_WBOT_RUSHING		16 // bot is hurrying to reach a sector before a timed event ends
+#define FL_WBOT_ON_ELEV		32 // bot is standing on a platform that is moving or about to move
 
 class CWootBot : public CSkullBot {
 public:
@@ -65,6 +66,7 @@ public:
 	int m_routeSpeed = 0;
 	int m_cliffDist = 9999;
 	int m_nextThink; // for cooling down failures
+	fixed_t m_lastElevZ; // last height of the elevator we've been standing on
 	bool m_freezeOnRouteChange = false; // set to true to stop moving when the route changes. For debugging
 	FVector2 lastPos;
 
@@ -79,7 +81,7 @@ public:
 	bool FindGoal(); // find something to do in the map
 	bool PushGoal(BotGoal& goal, NavSectorLink* purposeLink); // returns false if this is already the current goal
 	void PopGoal();
-	void RouteToGoal();
+	bool RouteToGoal();
 	std::vector<int> RouteToSector(int subid);
 	AActor* BestEnemy();
 	void AimAtPos(FVector3 pos);
@@ -112,5 +114,5 @@ public:
 	inline AActor* GetActor() { return m_pPlayer->mo; }
 
 	// something somewhere triggered a line
-	void HandleLineActivation(line_t* line);
+	void HandleLineActivation(line_t* line, AActor* activator);
 };

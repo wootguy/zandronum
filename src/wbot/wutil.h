@@ -53,4 +53,4 @@ bool TraceLine(FVector3 start, FVector3 end, bool ignoreMonsters=true, AActor* i
 
 // Hooks
 void wbot_handle_chat_command(ULONG ulPlayer, const char* msg);
-void wbot_handle_line_activation(line_t* line);
+void wbot_handle_line_activation(line_t* line, AActor* activator);

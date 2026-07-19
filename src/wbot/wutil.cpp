@@ -197,33 +197,53 @@ bool TraceLine(FVector3 start, FVector3 end, bool ignoreMonsters, AActor* ignore
 		ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, ignoreEnt, *out);
 }
 
-void wbot_handle_line_activation(line_t* line) {
+void wbot_handle_line_activation(line_t* line, AActor* activator) {
 	for (int i = 0; i < MAXPLAYERS; i++) {
 		AActor* player = players[i].mo;
 		if (!playeringame[i] || !player || !player->player->bIsBot)
 			continue;
 
 		CWootBot* bot = (CWootBot*)player->player->pSkullBot;
-		bot->HandleLineActivation(line);
+		bot->HandleLineActivation(line, activator);
+	}
+}
+
+void kill_all_shootables() {
+	TThinkerIterator<AActor> it;
+	AActor* actor;
+	while ((actor = it.Next())) {
+		if ((actor->flags & MF_SHOOTABLE) && !actor->player) {
+			P_DamageMobj(actor, actor, actor, actor->health * 2, FName());
+		}
 	}
 }
 
 void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
-	// clear all enemies for general pathfinding tests
-	if (!strcmp(msg, "y")) {
-		TThinkerIterator<AActor> it;
-		AActor* actor;
-		while ((actor = it.Next())) {
-			if (actor->flags3 & MF3_ISMONSTER) {
-				P_DamageMobj(actor, actor, actor, actor->health * 2, FName());
-			}
-		}
+	// test a specific route
+	if (!strcmp(msg, "r")) {
+		kill_all_shootables();
 
 		for (int i = 0; i < MAXPLAYERS; i++) {
 			AActor* player = players[i].mo;
 			if (!playeringame[i] || !player)
 				continue;
+
+			if (player->player->bIsBot)	set_ori(player, 1440, -3084, ANGLE_1 * 0);
+			else						set_ori(player, 1444, -2863, ANGLE_1 * 315);
+
+			if (player->player->bIsBot) {
+				CWootBot* bot = (CWootBot*)player->player->pSkullBot;
+				bot->Reset();
+				player->player->cheats &= ~CF_FROZEN;
+				//bot->m_freezeOnRouteChange = true;
+				//bot->m_speedMult = 0.6f;
+			}
 		}
+	}
+
+	// clear all enemies for general pathfinding tests
+	if (!strcmp(msg, "y")) {
+		kill_all_shootables();
 	}
 
 	// give weapons/ammo for combat testing
@@ -238,34 +258,6 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 			cht_Give(player->player, "ammo");
 			cht_Give(player->player, "keys");
 			cht_Give(player->player, "armor");
-		}
-	}
-
-	// test a specific route
-	if (!strcmp(msg, "r")) {
-		TThinkerIterator<AActor> it;
-		AActor* actor;
-		while ((actor = it.Next())) {
-			if (actor->flags3 & MF3_ISMONSTER) {
-				P_DamageMobj(actor, actor, actor, actor->health * 2, FName());
-			}
-		}
-
-		for (int i = 0; i < MAXPLAYERS; i++) {
-			AActor* player = players[i].mo;
-			if (!playeringame[i] || !player)
-				continue;
-
-			if (player->player->bIsBot)	set_ori(player, 741, 364, ANGLE_1 * 0);
-			else						set_ori(player, 982, 917, ANGLE_1 * 225);
-
-			if (player->player->bIsBot) {
-				CWootBot* bot = (CWootBot*)player->player->pSkullBot;
-				bot->Reset();
-				player->player->cheats &= ~CF_FROZEN;
-				//bot->m_freezeOnRouteChange = true;
-				//bot->m_speedMult = 0.6f;
-			}
 		}
 	}
 

@@ -53,6 +53,7 @@ struct NavSectorLink {
 	// true if this link can be moved thru, else it is too high or blocked.
 	bool blocked(AActor* actor, bool recurse=true);
 	bool walkable();
+	bool jumpable();
 	bool isJumpHeightValid(); // checks if jump height is valid currently
 
 	NavSector* getParent();

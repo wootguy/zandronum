@@ -370,7 +370,7 @@ bool P_ActivateLine (line_t *line, AActor *mo, int side, int activationType)
 		Printf ("Line special %d activated on line %i\n", special, int(line - lines));
 	}
 
-	wbot_handle_line_activation(line);
+	wbot_handle_line_activation(line, mo);
 
 	return true;
 }

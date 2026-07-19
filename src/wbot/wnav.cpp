@@ -43,19 +43,8 @@ bool NavSectorLink::blocked(AActor* actor, bool recurse) {
 	}
 
 	// check if jumps are valid for dynamic links that depend on from/to sector states
-	if (isJump) {
-		if (!isJumpHeightValid()) {
-			return true;
-		}
-
-		NavSector* target = getTarget();
-		FVector3 start = pos3D() + FVector3(0, 0, 56 << FRACBITS);
-		FVector3 end = target->pos3D() + FVector3(0, 0, 56 << FRACBITS);
-
-		FTraceResults tr;
-		if (TraceLine(start, end, true, NULL, &tr)) {
-			return true;
-		}
+	if (!jumpable()) {
+		return true;
 	}
 	
 	if (recurse && linkWidth <= PLAYER_WIDTH) {
@@ -97,7 +86,27 @@ bool NavSectorLink::blocked(AActor* actor, bool recurse) {
 }
 
 bool NavSectorLink::walkable() {
-	return g_wbot_nav.can_cross_seg_now(seg);
+	return g_wbot_nav.can_cross_seg_now(seg) && jumpable();
+}
+
+bool NavSectorLink::jumpable() {
+	if (!isJump)
+		return true;
+
+	if (!isJumpHeightValid()) {
+		return false;
+	}
+
+	NavSector* target = getTarget();
+	FVector3 start = pos3D() + FVector3(0, 0, 56 << FRACBITS);
+	FVector3 end = target->pos3D() + FVector3(0, 0, 56 << FRACBITS);
+
+	FTraceResults tr;
+	if (TraceLine(start, end, true, NULL, &tr)) {
+		return false;
+	}
+
+	return true;
 }
 
 bool NavSectorLink::isJumpHeightValid() {
@@ -319,6 +328,10 @@ LinkSeg SectorNavMesh::get_neighbor_subsector(subsector_t* ignoreSector, seg_t* 
 	const fixed_t epsilonWidth = 2 << FRACBITS;
 	LinkSeg ret;
 	memset(&ret, 0, sizeof(ret));
+	ret.otherSub = -1;
+
+	float bestLen = epsilonWidth;
+	bool foundSeg = false;
 
 	for (int j = 0; j < numsubsectors; j++) {
 		subsector_t& otherSub = subsectors[j];
@@ -332,16 +345,17 @@ LinkSeg SectorNavMesh::get_neighbor_subsector(subsector_t* ignoreSector, seg_t* 
 				continue; // impassable wall
 
 			// TODO: Allow thin segments for tightrope areas
-			ret = GetSegmentOverlap(&tseg, borderSeg);
-			if (ret.length() >= epsilonWidth) {
+			LinkSeg lseg = GetSegmentOverlap(&tseg, borderSeg);
+			float len = lseg.length();
+			if (len >= bestLen) {
+				ret = lseg;
 				ret.idx = s;
 				ret.otherSub = j;
-				return ret;
+				bestLen = len;
 			}
 		}
 	}
-
-	ret.otherSub = -1;
+	
 	return ret;
 }
 
@@ -377,11 +391,9 @@ int SectorNavMesh::get_linedef_move_flag(line_t* line) {
 	case Generic_Door:
 		return timingFlag | FL_SECTOR_MOVE_CEIL_UP;
 
-	case Plat_PerpetualRaise:
 	case Plat_UpWaitDownStay:
 	case Plat_UpByValue:
 	case Plat_UpNearestWaitDownStay:
-	case Plat_PerpetualRaiseLip:
 	case Plat_RaiseAndStayTx0:
 	case Plat_UpByValueStayTx:
 	case Floor_RaiseToHighest:
@@ -393,6 +405,10 @@ int SectorNavMesh::get_linedef_move_flag(line_t* line) {
 	case Stairs_BuildUpSync:
 	case Stairs_BuildUpDoom:
 		return timingFlag | FL_SECTOR_MOVE_FLOOR_UP;
+
+	case Plat_PerpetualRaise:
+	case Plat_PerpetualRaiseLip:
+		return timingFlag | FL_SECTOR_MOVE_FLOOR_UP | FL_SECTOR_MOVE_FLOOR_DOWN;
 
 	case Plat_DownWaitUpStay:
 	case Plat_DownByValue:
@@ -436,7 +452,8 @@ int SectorNavMesh::get_linedef_move_flag(line_t* line) {
 		return 0; // visual-only specials
 
 	case Teleport:
-		return 0; // does not move sectors
+	case Plat_Stop:
+		return 0; // does not cause sectors to move
 
 	default:
 		Printf("Unknown special %d for line %d\n", line->special, line - lines);
@@ -824,17 +841,16 @@ void SectorNavMesh::add_sector_trigger_goals() {
 				}
 			}
 		}
-		else {
-			// surrounding lines can move the sector if untagged
-			for (int k = 0; k < sec->linecount; k++) {
-				line_t* line = sec->lines[k];
 
-				if (line->args[0] != 0)
-					continue;
+		// surrounding lines can move the sector if untagged
+		for (int k = 0; k < sec->linecount; k++) {
+			line_t* line = sec->lines[k];
 
-				if (line->backsector == sec && get_linedef_move_flag(line)) {
-					nav.triggers.push_back(BotGoal(get_linedef_goal_action(line), line - lines));
-				}
+			if (line->args[0] != 0)
+				continue;
+
+			if (line->backsector == sec && get_linedef_move_flag(line)) {
+				nav.triggers.push_back(BotGoal(get_linedef_goal_action(line), line - lines));
 			}
 		}
 
@@ -952,6 +968,9 @@ void SectorNavMesh::generate_node_graph() {
 			seg_t& seg = sub.firstline[k];
 
 			if (!is_seg_potentially_crossable(&seg)) {
+				//if (i == 332) {
+				//	is_seg_potentially_crossable(&seg); // debug links not created
+				//}
 				continue;
 			}
 
