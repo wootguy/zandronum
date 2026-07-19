@@ -83,7 +83,7 @@ public:
 	std::vector<int> RouteToSector(int subid);
 	AActor* BestEnemy();
 	void AimAtPos(FVector3 pos);
-	bool MoveTo(FVector3 pos, int radius=32, int speed=100);
+	bool MoveTo(FVector2 pos, int radius=32, int speed=100);
 	FVector2 AvoidCornersVector(FVector2 wantDir); // direction to move to avoid hitting corners
 	FVector2 AvoidLedges(AActor* actor, int& cliffDist); // direction to move to avoid falling off a ledge
 	

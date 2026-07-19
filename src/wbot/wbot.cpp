@@ -439,8 +439,8 @@ void CWootBot::GoalActionThink() {
 		if (goal.lineid >= 0) {
 			// move through the line to the backside of it
 			line_t* line = &lines[goal.lineid];
-			FVector3 backDir = getLineBackDir(line);
-			FVector3 backGoal = getLineCenter(line) + backDir * 32;
+			FVector2 backDir = getLineBackDir(line);
+			FVector2 backGoal = getLineCenter(line) + backDir * 32;
 
 			fixed_t dist = P_AproxDistance(m_pPlayer->mo->x - (fixed_t)backGoal.X, m_pPlayer->mo->y - (fixed_t)backGoal.Y);
 
@@ -495,7 +495,7 @@ void CWootBot::RouteThink() {
 			stateFlags &= ~FL_WBOT_JUMPING;
 		}
 		else {
-			FVector3 center = g_wbot_nav.nav_sectors[m_route[1]].pos();
+			FVector2 center = g_wbot_nav.nav_sectors[m_route[1]].pos();
 			fixed_t dist = P_AproxDistance(m_pPlayer->mo->x - (fixed_t)center.X, m_pPlayer->mo->y - (fixed_t)center.Y);
 			if (stuckCounter >= 200 && dist < (16 << FRACBITS)) {
 				// already very close to the center, so this is probably a tiny polygon jammed
@@ -552,6 +552,11 @@ void CWootBot::RouteThink() {
 		// just try to land in the right spot
 		MoveTo(targetNav.pos(), 0, m_routeSpeed);
 
+		if (targetNav.getFloorZ() > m_pPlayer->mo->z + (JUMP_HEIGHT << FRACBITS)) {
+			stateFlags &= ~FL_WBOT_JUMPING; // missed the jump
+			return;
+		}
+
 		NavSectorLink* link = idealNav.getLink(m_route[1]);
 		FVector2 target = targetNav.pos();
 		fixed_t jumpDist = (target - FVector2(m_pPlayer->mo->x, m_pPlayer->mo->y)).Length();
@@ -580,12 +585,12 @@ void CWootBot::RouteThink() {
 			if (onElevator) {
 				// on an elevator that is about to move or is moving
 				// wait for it to raise/lower the bot to a height close enough to the target sector
-				int zDelta = ((fixed_t)targetNav.pos().Z - m_pPlayer->mo->z) >> FRACBITS;
+				int zDelta = ((fixed_t)targetNav.getFloorZ() - m_pPlayer->mo->z) >> FRACBITS;
 				if (abs(zDelta) > STEP_HEIGHT) {
 					stateFlags |= FL_WBOT_WAIT_ELEV;
 
 					// stay centered on the elevator to avoid blocking it or falling off
-					FVector3 navPos = curNav.pos();
+					FVector2 navPos = curNav.pos();
 					fixed_t dist = P_AproxDistance(m_pPlayer->mo->x - (fixed_t)navPos.X, m_pPlayer->mo->y - (fixed_t)navPos.Y);
 					if (dist > (16 << FRACBITS))
 						MoveTo(navPos, 0, RUN_SPEED / 4);
@@ -618,8 +623,8 @@ void CWootBot::RouteThink() {
 				if (link->isTeleport && link->seg->linedef) {
 					// move behind the teleporter line edge.
 					// The target sector may be in a completely different direction.
-					FVector3 backDir = getLineBackDir(link->seg->linedef);
-					FVector3 teleGoal = link->pos() + backDir * 200;
+					FVector2 backDir = getLineBackDir(link->seg->linedef);
+					FVector2 teleGoal = link->pos() + backDir * 200;
 					MoveTo(teleGoal, 0, m_routeSpeed);
 				}
 				else if (link->isJump) {
@@ -655,7 +660,7 @@ void CWootBot::RouteThink() {
 		}
 	}
 	else if (m_route.size() == 1) {
-		FVector3 centerGoal = idealNav.pos();
+		FVector2 centerGoal = idealNav.pos();
 		if (MoveTo(centerGoal, nodeTouchDist, m_routeSpeed)) {
 			m_route.clear(); // don't reset pretendsector in case a goal is inside it
 			stuckPath = -1;
@@ -824,9 +829,9 @@ bool CWootBot::TraceAhead(int dist, FVector3 offset, bool ignoreMonsters, FTrace
 		ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, m_pPlayer->mo, *tr);
 }
 
-bool CWootBot::MoveTo(FVector3 pos, int radius, int speed) {
-	pos.Z = (float)(m_pPlayer->mo->z + m_pPlayer->viewheight);
-	AimAtPos(pos);
+bool CWootBot::MoveTo(FVector2 pos, int radius, int speed) {
+	float z = (float)(m_pPlayer->mo->z + m_pPlayer->viewheight);
+	AimAtPos(FVector3(pos.X, pos.Y, z));
 
 	FVector2 wantDir = pos - FVector2(m_pPlayer->mo->x, m_pPlayer->mo->y);
 	wantDir.MakeUnit();

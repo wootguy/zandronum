@@ -35,7 +35,7 @@ struct NavSectorLink {
 	int target; // subsector ID
 	int id;		// link ID, not associated with any bsp structure
 	int parent; // parent nav id
-	FVector3 overlapCenter;
+	FVector2 overlapCenter;
 	int linkWidth;
 	int leftSector; // setor on the left side of the target sector, relative to the border segment
 	int rightSector; // setor on the right side of the target sector, relative to the border segment
@@ -44,9 +44,11 @@ struct NavSectorLink {
 	bool isJump; // jump required to reach the target sector
 	seg_t* seg;
 
-	FVector3 pos() {
+	FVector2 pos() {
 		return overlapCenter;
 	}
+
+	FVector3 pos3D();
 	
 	// true if this link can be moved thru, else it is too high or blocked.
 	bool blocked(AActor* actor, bool recurse=true);
@@ -58,16 +60,15 @@ struct NavSectorLink {
 };
 
 struct NavSector {
-	int x, y, z; // center point of the sector
+	FVector2 center;
 	int id = -1; // also index into nav array
 	bool hasCliffs = false; // bot should be careful here
 	bool doesDamage = false; // bot should try to route around this
 	std::vector<BotGoal> triggers; // things which can trigger this sector to move up/down
 	std::vector<NavSectorLink> links;
 
-	FVector3 pos() {
-		return FVector3(x << FRACBITS, y << FRACBITS, z << FRACBITS);
-	}
+	FVector2 pos();
+	FVector3 pos3D();
 
 	// get link by id
 	NavSectorLink* getLink(int subSectorId);

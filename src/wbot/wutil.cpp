@@ -60,15 +60,15 @@ AActor* getAnyPlayer() {
 }
 
 // get direction pointing behind the given linedef
-FVector3 getLineBackDir(line_t* line) {
+FVector2 getLineBackDir(line_t* line) {
 	fixed_t dx = line->v2->x - line->v1->x;
 	fixed_t dy = line->v2->y - line->v1->y;
 	double len = sqrt((double)dx * dx + (double)dy * dy);
-	return FVector3(-(double)dy / len, (double)dx / len, 0);
+	return FVector2(-(double)dy / len, (double)dx / len);
 }
 
-FVector3 getLineCenter(line_t* line) {
-	return FVector3((line->v1->x + line->v2->x) * 0.5, (line->v1->y + line->v2->y) * 0.5, 0);
+FVector2 getLineCenter(line_t* line) {
+	return FVector2((line->v1->x + line->v2->x) * 0.5, (line->v1->y + line->v2->y) * 0.5);
 }
 
 void set_ori(AActor* actor, int x, int y, angle_t angle) {
@@ -256,8 +256,8 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 			if (!playeringame[i] || !player)
 				continue;
 
-			if (player->player->bIsBot)	set_ori(player, -1612, 964, ANGLE_1 * 0);
-			else						set_ori(player, -726, 1968, ANGLE_1 * 110);
+			if (player->player->bIsBot)	set_ori(player, 741, 364, ANGLE_1 * 0);
+			else						set_ori(player, 982, 917, ANGLE_1 * 225);
 
 			if (player->player->bIsBot) {
 				CWootBot* bot = (CWootBot*)player->player->pSkullBot;

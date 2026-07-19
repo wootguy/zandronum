@@ -19,9 +19,9 @@ char* VarArgs(const char* format, ...);
 AActor* getAnyPlayer();
 
 // get direction pointing behind the given linedef
-FVector3 getLineBackDir(line_t* line);
+FVector2 getLineBackDir(line_t* line);
 
-FVector3 getLineCenter(line_t* line);
+FVector2 getLineCenter(line_t* line);
 
 void set_ori(AActor* actor, int x, int y, angle_t angle);
 

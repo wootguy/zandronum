@@ -18,6 +18,11 @@ using namespace std;
 SectorNavMesh g_wbot_nav;
 int g_total_links;
 
+FVector3 NavSectorLink::pos3D() {
+	NavSector* nav = getParent();
+	return FVector3(overlapCenter.X, overlapCenter.Y, nav->getFloorZ());
+}
+
 bool NavSectorLink::blocked(AActor* actor, bool recurse) {
 	g_wbot_nav.pathTests++;
 
@@ -44,8 +49,8 @@ bool NavSectorLink::blocked(AActor* actor, bool recurse) {
 		}
 
 		NavSector* target = getTarget();
-		FVector3 start = pos() + FVector3(0, 0, 56 << FRACBITS);
-		FVector3 end = target->pos() + FVector3(0, 0, 56 << FRACBITS);
+		FVector3 start = pos3D() + FVector3(0, 0, 56 << FRACBITS);
+		FVector3 end = target->pos3D() + FVector3(0, 0, 56 << FRACBITS);
 
 		FTraceResults tr;
 		if (TraceLine(start, end, true, NULL, &tr)) {
@@ -112,6 +117,14 @@ NavSector* NavSectorLink::getTarget() {
 	return &g_wbot_nav.nav_sectors[target];
 }
 
+FVector3 NavSector::pos3D() {
+	return FVector3(center.X, center.Y, getFloorZ());
+}
+
+FVector2 NavSector::pos() {
+	return center;
+}
+
 NavSectorLink* NavSector::getLink(int subSectorId) {
 	if (subSectorId < 0)
 		return NULL;
@@ -159,19 +172,17 @@ sector_t* NavSector::sector() {
 }
 
 fixed_t NavSector::getHeight() {
-	fixed_t fx = x << FRACBITS;
-	fixed_t fy = y << FRACBITS;
-
 	sector_t* sec = subsectors[id].sector;
-	return sec->ceilingplane.ZatPoint(fx, fy) - sec->floorplane.ZatPoint(fx, fy);
+	return sec->ceilingplane.ZatPoint((fixed_t)center.X, (fixed_t)center.Y)
+		   - sec->floorplane.ZatPoint((fixed_t)center.X, (fixed_t)center.Y);
 }
 
 fixed_t NavSector::getFloorZ() {
-	return subsectors[id].sector->floorplane.ZatPoint(x << FRACBITS, y << FRACBITS);
+	return subsectors[id].sector->floorplane.ZatPoint((fixed_t)center.X, (fixed_t)center.Y);
 }
 
 fixed_t NavSector::getCeilZ() {
-	return subsectors[id].sector->ceilingplane.ZatPoint(x << FRACBITS, y << FRACBITS);
+	return subsectors[id].sector->ceilingplane.ZatPoint((fixed_t)center.X, (fixed_t)center.Y);
 }
 
 LinkSeg SectorNavMesh::GetSegmentOverlap(seg_t* a, seg_t* b)
@@ -515,23 +526,30 @@ bool SectorNavMesh::create_jump_link(NavSector& fromNav, NavSectorLink& fromLink
 
 	// check that the path is clear
 	{
-		FVector3 start = fromLink.pos() + FVector3(0, 0, 56 << FRACBITS);
-		FVector3 end = toNav.pos() + FVector3(0, 0, 56 << FRACBITS);
+		FTraceResults tr;
+
+		FVector3 start = fromLink.pos3D() + FVector3(0, 0, 56 << FRACBITS);
+		FVector3 end = toNav.pos3D() + FVector3(0, 0, 56 << FRACBITS);
 
 		FVector2 delta = end - start;
 		delta.MakeUnit();
 		FVector3 rightDir(delta.Y, -delta.X, 0);
 		int radius = PLAYER_WIDTH / 2;
 		fixed_t rightStep = (radius / 2) << FRACBITS;
+		bool fromNavMoves = fromNav.getMoveFlags() != 0;
 
 		for (int i = -2; i <= 2; i++) {
-			FTraceResults tr;
+			
 			if (TraceLine(start + rightDir * i * rightStep, end + rightDir * i * rightStep, true, NULL, &tr)) {
-				if (tr.Line && tr.Line->backsector) {
+				if (tr.HitType == TRACE_HitWall && tr.Line && tr.Line->backsector) {
 					int moveFlags = sector_move_flags[tr.Line->backsector - sectors];
 					if (moveFlags) {
 						continue; // wall may move out of the way in the future
 					}
+				}
+				if (tr.HitType == TRACE_HitCeiling && fromNavMoves) {
+					// sector may be fully lifted to the ceiling and so can't connect yet
+					continue; // may move out of the way in the future
 				}
 
 				return false; // hit an immovable wall
@@ -870,9 +888,10 @@ void SectorNavMesh::calc_nav_centers() {
 			subCenterY += seg.v1->y >> FRACBITS;
 		}
 
-		nav.x = subCenterX / (int)sub.numlines;
-		nav.y = subCenterY / (int)sub.numlines;
-		nav.z = sub.sector->floorplane.ZatPoint(nav.x << FRACBITS, nav.y << FRACBITS) >> FRACBITS;
+		nav.center = FVector2(
+			(subCenterX / (int)sub.numlines) << FRACBITS,
+			(subCenterY / (int)sub.numlines) << FRACBITS
+		);
 	}
 }
 
@@ -1038,7 +1057,6 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 
 	if (sub && subId < numsubsectors) {
 		NavSector& nav = nav_sectors[subId];
-		FVector3 pos(nav.x << FRACBITS, nav.y << FRACBITS, nav.z << FRACBITS);
 		int spritesDrawn = 0;
 		const int maxSprites = 1000;
 
@@ -1047,26 +1065,25 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 			NavSector& linkNav = nav_sectors[link.target];
 			
 			if (!link.blocked(player)) {
-				FVector3 linkPos = link.pos();
-				linkPos.Z = nav.getFloorZ();
+				FVector3 linkPos = link.pos3D();
 
 				if (link.isJump) {
 					FVector3 jumpPos = linkPos + FVector3(0, 0, 56 << FRACBITS);
-					FVector3 landPos = linkNav.pos() + FVector3(0, 0, 56 << FRACBITS);
+					FVector3 landPos = linkNav.pos3D() + FVector3(0, 0, 56 << FRACBITS);
 
-					spritesDrawn += draw_debug_line(nav.pos(), linkPos, actor);
+					spritesDrawn += draw_debug_line(nav.pos3D(), linkPos, actor);
 					spritesDrawn += draw_debug_line(linkPos, jumpPos, actor);
 					spritesDrawn += draw_debug_line(jumpPos, landPos, actor);
-					spritesDrawn += draw_debug_line(landPos, linkNav.pos(), actor);
+					spritesDrawn += draw_debug_line(landPos, linkNav.pos3D(), actor);
 				}
 				else {
-					spritesDrawn += draw_debug_line(nav.pos(), linkPos, actor);
-					spritesDrawn += draw_debug_line(linkPos, linkNav.pos(), actor);
+					spritesDrawn += draw_debug_line(nav.pos3D(), linkPos, actor);
+					spritesDrawn += draw_debug_line(linkPos, linkNav.pos3D(), actor);
 				}
 			}
 		}
 
-		fixed_t borderZ = nav.z << FRACBITS;
+		fixed_t borderZ = nav.getFloorZ();
 		for (int k = 0; k < sub->numlines && spritesDrawn < maxSprites; k++) {
 			seg_t& seg = sub->firstline[k];
 
@@ -1082,12 +1099,13 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 
 	for (int i = 0; i < numsubsectors; i++) {
 		NavSector& node = nav_sectors[i];
+		FVector3 pos = node.pos3D();
 
-		if (P_AproxDistance((node.x << FRACBITS) - player->x, (node.y << FRACBITS) - player->y) > (1000 << FRACBITS)) {
+		if (P_AproxDistance(pos.X - player->x, pos.Y - player->y) > (1000 << FRACBITS)) {
 			continue;
 		}
 
-		SERVERCOMMANDS_SpawnBlood(node.x << FRACBITS, node.y << FRACBITS, (node.z + 16) << FRACBITS, 0, 100, player);
+		SERVERCOMMANDS_SpawnBlood(pos.X, pos.Y, pos.Z + (16 << FRACBITS), 0, 100, player);
 	}
 }
 
@@ -1102,7 +1120,7 @@ int SectorNavMesh::get_nav_id(AActor* actor) {
 float SectorNavMesh::path_cost(int a, int b) {
 	NavSector& nodea = nav_sectors[a];
 	NavSector& nodeb = nav_sectors[b];
-	FVector3 delta = nodea.pos() - nodeb.pos();
+	FVector2 delta = nodea.pos() - nodeb.pos();
 	return delta.Length();
 }
 
@@ -1110,11 +1128,14 @@ float SectorNavMesh::path_cost(NavSectorLink& link, bool timeSensitive) {
 	NavSector& parent = nav_sectors[link.parent];
 	NavSector& target = nav_sectors[link.target];
 	float cost = 0;
+	float dist = 0;
 
 	if (link.isTeleport)
-		cost += (link.pos() - parent.pos()).Length();
+		dist = (link.pos() - parent.pos()).Length();
 	else
-		cost += (parent.pos() - target.pos()).Length();
+		dist = (parent.pos() - target.pos()).Length();
+
+	cost += dist;
 
 	if (link.linkWidth < PLAYER_WIDTH) {
 		// try to avoid tiny links. They gets the bot stuck on corners.
@@ -1125,12 +1146,12 @@ float SectorNavMesh::path_cost(NavSectorLink& link, bool timeSensitive) {
 		// avoid things that are hard to navigate if speed isn't important
 
 		if (target.doesDamage) {
-			cost += 4000 << FRACBITS; // avoid damage sectors
+			cost += dist * (4 << FRACBITS); // avoid damage sectors
 		}
 
 		if (link.isJump) {
-			// jumps are error-prone
-			cost += 1000 << FRACBITS;
+			// jumps are error-prone. If you must take one, choose the shortest
+			cost += dist * (100 << FRACBITS);
 
 			if (!link.isJumpHeightValid()) {
 				// jumps that can't be made yet are even more error prone
@@ -1140,8 +1161,10 @@ float SectorNavMesh::path_cost(NavSectorLink& link, bool timeSensitive) {
 	}
 
 	if (!can_cross_seg_now(link.seg)) {
-		if (target.getFloorZ() > parent.getFloorZ() + (JUMP_HEIGHT << FRACBITS))
-			cost += 4000 << FRACBITS; // avoid elevators
+		fixed_t elevDist = fabs(target.getFloorZ() - parent.getFloorZ());
+		if (elevDist > (JUMP_HEIGHT << FRACBITS)) {
+			cost += elevDist * (4 << FRACBITS); // avoid elevators
+		}
 	}
 
 	return cost;
