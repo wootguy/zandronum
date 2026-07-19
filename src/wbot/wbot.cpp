@@ -25,19 +25,6 @@ using namespace std;
 
 #define RUN_SPEED 100 // max move speed allowed before the server kicks you
 
-void init_wootbots() {
-	static int lastInit;
-	static int lastInitTime;
-	if (lastInit != level.levelnum || lastInitTime == 0 || lastInitTime > level.time) {
-		lastInit = level.levelnum;
-		lastInitTime = level.time;
-
-		srand((unsigned int)time(NULL));
-
-		g_wbot_nav.generate_node_graph();
-	}
-}
-
 std::string BotGoal::desc() {
 	std::string thingName;
 	if (actor) {
@@ -134,14 +121,6 @@ CWootBot::CWootBot(const char* pszName, const char* pszTeamName, ULONG ulPlayerN
 }
 
 void CWootBot::ParseScript() {
-	init_wootbots();
-
-	// level changed
-	if (lastInit != level.levelnum) {
-		lastInit = level.levelnum;
-		Reset();
-	}
-
 	m_navid = g_wbot_nav.get_nav_id(m_pPlayer->mo);
 	NavSector& nav = g_wbot_nav.nav_sectors[m_navid];
 	stateFlags &= ~(FL_WBOT_FLYING | FL_WBOT_ON_ELEV);

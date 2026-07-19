@@ -54,7 +54,6 @@ public:
 	std::vector<int> m_route; // current route
 	std::vector<BotGoal> m_goals; // stack of goals
 	bool m_debug = false;
-	int lastInit = 0; // last time the bot was initialized (for level change detection)
 	int pretendRouteSector = -1; // pretend we're in this sector for now
 	int stuckCounter = 0; // increases while trying to move with nothing happening
 	int stuckPath = -1; // path the bot got stuck at

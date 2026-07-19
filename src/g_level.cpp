@@ -109,6 +109,7 @@
 #include "chat.h"
 #include "scoreboard.h"
 #include <set> // [CK] For CCMD listmusic
+#include "wbot/wutil.h"
 
 #include "g_hub.h"
 
@@ -1650,6 +1651,8 @@ void G_DoLoadLevel (int position, bool autosave)
 		SERVER_LoadNewLevel( level.mapname );
 
 	}
+
+	wbot_map_init();
 }
 
 

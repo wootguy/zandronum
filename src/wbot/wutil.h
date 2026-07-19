@@ -61,3 +61,4 @@ bool TraceRadius(FVector3 start, FVector3 end, fixed_t radius, bool ignoreMonste
 // Hooks
 void wbot_handle_chat_command(ULONG ulPlayer, const char* msg);
 void wbot_handle_line_activation(line_t* line, AActor* activator);
+void wbot_map_init();

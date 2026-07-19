@@ -8,6 +8,7 @@
 #include "network.h"
 #include "sv_commands.h"
 #include "p_trace.h"
+#include "wbot/wnav.h"
 
 #include <chrono>
 
@@ -317,6 +318,20 @@ void kill_all_shootables() {
 	}
 }
 
+void wbot_map_init() {
+	srand((unsigned int)time(NULL));
+	g_wbot_nav.generate_node_graph();
+
+	for (int i = 0; i < MAXPLAYERS; i++) {
+		AActor* player = players[i].mo;
+		if (!playeringame[i] || !player || !player->player->bIsBot)
+			continue;
+
+		CWootBot* bot = (CWootBot*)player->player->pSkullBot;
+		bot->Reset();
+	}
+}
+
 void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 	// test a specific route
 	if (!strcmp(msg, "r")) {
@@ -327,8 +342,8 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 			if (!playeringame[i] || !player)
 				continue;
 
-			if (player->player->bIsBot)	set_ori(player, 1440, -3084, ANGLE_1 * 0);
-			else						set_ori(player, 1444, -2863, ANGLE_1 * 315);
+			if (player->player->bIsBot)	set_ori(player, 764, -2150, ANGLE_1 * 0);
+			else						set_ori(player, 389, -2149, ANGLE_1 * 360);
 
 			if (player->player->bIsBot) {
 				CWootBot* bot = (CWootBot*)player->player->pSkullBot;
