@@ -502,7 +502,7 @@ bool CWootBot::PushGoal(BotGoal& goal, NavSectorLink* purposeLink) {
 			DebugPrint(VarArgs("Skipping duplicate goal: %s\n", goal.desc().c_str()));
 			return false;
 		}
-		if (goal.purposeLink && lastGoal.purposeLink == goal.purposeLink) {
+		if (goal.purposeLink && lastGoal.purposeLink->target == goal.purposeLink->target) {
 			// don't route to multiple goals that activate the same thing, if unblocked
 			if (lastGoal.blockers.empty()) {
 				DebugPrint(VarArgs("Skipping redundant goal: %s\n", goal.desc().c_str()));
@@ -536,13 +536,17 @@ bool CWootBot::SelectGoal(vector<BotGoal>& goals, NavSectorLink* purposeLink, bo
 	BotGoal* bestGoal = NULL;
 	vector<BotGoal*> validGoals;
 
+	int unblockSector = purposeLink->target->id;
+
 	for (int i = 0; i < goals.size(); i++) {
 		BotGoal& goal = goals[i];
 		if (!goal.valid())
 			continue;
 		int subid = goal.getNavId();
 
-		if (subid == purposeLink->parent->id || m_routeController.RouteToSector(subid).size()) {
+		vector<int> route = m_routeController.RouteToSector(subid, unblockSector);
+
+		if (subid == purposeLink->parent->id || route.size()) {
 			if (randomize) {
 				validGoals.push_back(&goal);
 			} else {

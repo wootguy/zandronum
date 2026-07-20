@@ -115,7 +115,6 @@ bool NavSectorLink::isJumpValid() {
 	if (jumpHeight >= (JUMP_HEIGHT << FRACBITS))
 		return false;
 
-	fixed_t jumpDist = (target->pos() - pos()).Length();
 	if (jumpDist > (JUMP_DIST << FRACBITS) - jumpHeight)
 		return false; // too far to make it
 
@@ -419,7 +418,7 @@ float SectorNavMesh::path_cost(NavSectorLink& link, bool timeSensitive) {
 	return cost;
 }
 
-vector<int> SectorNavMesh::get_astar_route(int startSubSectorId, int endSubSectorId, unordered_set<int>* blockedPaths, bool timeSensitive)
+vector<int> SectorNavMesh::get_astar_route(int startSubSectorId, int endSubSectorId, unordered_set<int>* blockedPaths, int blockedSector, bool timeSensitive)
 {
 	unordered_set<int> closedSet;
 	unordered_set<int> openSet;
@@ -503,15 +502,12 @@ vector<int> SectorNavMesh::get_astar_route(int startSubSectorId, int endSubSecto
 
 		for (int i = 0; i < currentNode.links.size(); i++) {
 			NavSectorLink& link = currentNode.links[i];
-			if (link.target->id == -1) {
-				break;
-			}
-
 			int neighbor = link.target->id;
-			if (neighbor < 0 || neighbor >= numsubsectors)
-				continue;
 
 			if (closedSet.count(neighbor))
+				continue;
+
+			if (neighbor == blockedSector)
 				continue;
 
 			if (blockedPaths && blockedPaths->count(link.id))

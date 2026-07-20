@@ -18,7 +18,6 @@ public:
 	int m_nodeRadius = 0;				// node touch distance
 	int m_navid = -1;					// current navigation node/subsector id
 	int pretendRouteSector = -1;		// pretend we're in this sector for now
-	int stuckPath = -1;					// path the bot got stuck at
 	bool m_freezeOnRouteChange = false; // set to true to stop moving when the route changes. For debugging
 	fixed_t m_lastElevZ = 0;			// last height of the elevator we've been standing on
 	NavSector* m_navCur = NULL;			// current physical node (or "pretend" node)
@@ -35,7 +34,7 @@ public:
 	inline bool HasRoute() { return m_route.size(); };
 
 	std::unordered_set<int> GetBlockedPaths();	// paths blocked during path to current goal
-	std::vector<int> RouteToSector(int subid);
+	std::vector<int> RouteToSector(int subid, int blockSector=-1);
 
 private:
 	CWootBot* pBot = NULL;

@@ -59,7 +59,6 @@ void CBotRouteController::Think() {
 		FVector2 centerGoal = m_navIdeal->pos();
 		if (pBot->MoveTo(centerGoal, m_nodeRadius, m_routeSpeed)) {
 			m_route.clear(); // don't reset pretendsector in case a goal is inside it
-			stuckPath = -1;
 			pBot->stateFlags &= ~FL_WBOT_JUMPING;
 		}
 	}
@@ -444,17 +443,10 @@ unordered_set<int> CBotRouteController::GetBlockedPaths() {
 	return allBlockedPaths;
 }
 
-vector<int> CBotRouteController::RouteToSector(int subid) {
+vector<int> CBotRouteController::RouteToSector(int subid, int blockSector) {
 	unordered_set<int> allBlockedPaths = GetBlockedPaths();
-
-	if (stuckPath >= 0) {
-		// avoid the path that got the bot stuck in the last movement
-		DebugPrint(VarArgs("Ignoring stucked path %d for this route\n", stuckPath));
-		allBlockedPaths.insert(stuckPath);
-		stuckPath = -1;
-	}
-
-	return g_wb_nav.get_astar_route(m_navid, subid, &allBlockedPaths, pBot->stateFlags & FL_WBOT_RUSHING);
+	bool rush = pBot->stateFlags & FL_WBOT_RUSHING;
+	return g_wb_nav.get_astar_route(m_navid, subid, &allBlockedPaths, blockSector, rush);
 }
 
 bool CBotRouteController::RouteToGoal() {

@@ -642,6 +642,7 @@ void BotMapInfo::remove_invalid_goals(int secid) {
 		if (!goal.valid()) {
 			info.triggers.erase(info.triggers.begin() + i);
 			i--;
+			//Printf("Removed invalid goal on sector %d (%d left)\n", secid, info.triggers.size());
 		}
 	}
 

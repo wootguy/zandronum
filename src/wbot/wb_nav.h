@@ -26,6 +26,7 @@ struct NavSectorLink {
 	bool isTeleport;
 	bool isCliff; // crossing this segs drops you down to a floor so low that you can't get back
 	bool isJump; // jump required to reach the target sector
+	fixed_t jumpDist; // distance to the nearest landing point in the target sector
 	seg_t* seg;
 
 	FVector2 pos();
@@ -81,7 +82,7 @@ public:
 
 	// set timeSensitive=true if the most direct route should be preferred, even if the bot has
 	// to walk through lava or jump somewhere
-	std::vector<int> get_astar_route(int startSubSectorId, int endSubSectorId, std::unordered_set<int>* blockedPaths=NULL, bool timeSensitive=false);
+	std::vector<int> get_astar_route(int startSubSectorId, int endSubSectorId, std::unordered_set<int>* blockedPaths=NULL, int blockedSector=-1, bool timeSensitive=false);
 	
 	// get key required to use the linedef. Returns false if keys don't exist anywhere in the map.
 	bool get_key_goals_for_line(AActor* actor, line_t* linedef, std::vector<BotGoal>& keyGoals, std::unordered_set<int>* blockedPaths);

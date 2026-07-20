@@ -119,6 +119,7 @@ bool SectorNavMeshGenerator::create_jump_link(NavSector& fromNav, NavSectorLink&
 	link.target = &toNav;
 	link.id = g_total_links++;
 	link.isJump = true;
+	link.jumpDist = (fromLink.pos() - toLink.pos()).Length();
 
 	//if (link.id == 2673 && toNav.id == 673) {
 		//Printf("");
@@ -233,6 +234,7 @@ void SectorNavMeshGenerator::add_walkable_links(NavSector* mesh, int nodeid, std
 		link.isTeleport = false;
 		link.leftSector = -1;
 		link.rightSector = -1;
+		link.jumpDist = 0;
 
 		subsector_t& neighbor = subsectors[linkseg.otherSub];
 
