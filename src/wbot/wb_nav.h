@@ -4,6 +4,15 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#define STEP_HEIGHT 24
+#define JUMP_HEIGHT 56
+#define STAND_HEIGHT 56
+#define DUCK_HEIGHT 28
+#define PLAYER_WIDTH 32
+#define PLAYER_RADIUS 16
+#define SAFE_CLIFF_DIST 80 // don't reduce movement speed when this far away from any cliff
+#define JUMP_DIST 200 // max jump distance on flat ground
+
 struct NavSector;
 
 struct NavSectorLink {
@@ -28,7 +37,7 @@ struct NavSectorLink {
 	bool blocked(AActor* actor, bool recurse=true);
 	bool walkable();
 	bool jumpable();
-	bool isJumpHeightValid(); // checks if jump height is valid currently
+	bool isJumpValid(); // checks if jump height and distance is valid currently
 };
 
 struct NavSector {

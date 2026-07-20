@@ -198,7 +198,7 @@ bool CBotRouteController::HandleBlockedPaths() {
 	// wait for doors to open
 	if (!m_navLink->walkable() && (nextSector->floordata || nextSector->ceilingdata)) {
 		// door is raising or elevator is lowering in the next sector
-		if (m_navLink->isJump && !nextSector->floordata && !m_navLink->isJumpHeightValid()) {
+		if (m_navLink->isJump && !nextSector->floordata && !m_navLink->isJumpValid()) {
 			// a door opening isn't going to make the jump doable if the floor is too high
 		}
 		else {

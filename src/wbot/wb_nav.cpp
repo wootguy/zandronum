@@ -95,7 +95,7 @@ bool NavSectorLink::jumpable() {
 	if (!isJump)
 		return true;
 
-	if (!isJumpHeightValid()) {
+	if (!isJumpValid()) {
 		return false;
 	}
 
@@ -110,9 +110,16 @@ bool NavSectorLink::jumpable() {
 	return true;
 }
 
-bool NavSectorLink::isJumpHeightValid() {
+bool NavSectorLink::isJumpValid() {
 	fixed_t jumpHeight = target->getFloorZ() - parent->getFloorZ();
-	return jumpHeight < (JUMP_HEIGHT << FRACBITS);
+	if (jumpHeight >= (JUMP_HEIGHT << FRACBITS))
+		return false;
+
+	fixed_t jumpDist = (target->pos() - pos()).Length();
+	if (jumpDist > (JUMP_DIST << FRACBITS) - jumpHeight)
+		return false; // too far to make it
+
+	return true;
 }
 
 FVector2 NavSectorLink::GetJumpStartPos() {
@@ -384,7 +391,7 @@ float SectorNavMesh::path_cost(NavSectorLink& link, bool timeSensitive) {
 			// jumps are error-prone. If you must take one, choose the shortest
 			cost += dist * (100 << FRACBITS);
 
-			if (!link.isJumpHeightValid()) {
+			if (!link.isJumpValid()) {
 				// jumps that can't be made yet are even more error prone
 				cost += 4000 << FRACBITS;
 			}

@@ -14,21 +14,24 @@ int g_total_links;
 bool SectorNavMeshGenerator::create_jump_link(NavSector& fromNav, NavSectorLink& fromLink, NavSector& toNav, NavSectorLink& toLink) {
 	fixed_t fromHeight = fromNav.getFloorZ();
 	fixed_t toHeight = toNav.getFloorZ();
-	fixed_t dropHeight = fromHeight - toHeight;
+	fixed_t jumpHeight = toHeight - fromHeight;
 
-	if (dropHeight < -(JUMP_HEIGHT << FRACBITS)) {
+
+	int fromMovement = fromNav.getMoveFlags();
+	int toMovement = toNav.getMoveFlags();
+	bool jumpMayBeLowerLater = (toMovement & FL_SECTOR_MOVE_FLOOR_DOWN) || (fromMovement & FL_SECTOR_MOVE_FLOOR_UP);
+
+	if (jumpHeight >= (JUMP_HEIGHT << FRACBITS) && !jumpMayBeLowerLater) {
 		// too high to jump to
-		if (!(fromNav.getMoveFlags() & FL_SECTOR_MOVE_FLOOR_UP) && !(toNav.getMoveFlags() & FL_SECTOR_MOVE_FLOOR_DOWN))
-			return false; // and neither sector moves in a way that would make the jump possible later
+		return false;
 	}
 
 	// increase link distance for drops, decrease for jumps
-	int maxDist = 200 << FRACBITS;
-	maxDist += dropHeight;
+	int maxDist = (200 << FRACBITS) - jumpHeight;
 
 	fixed_t linkDist = (fromLink.pos() - toLink.pos()).Length();
-	if (linkDist > maxDist) {
-		return false; // too far to link to
+	if (linkDist > maxDist && !jumpMayBeLowerLater) {
+		return false; // too far to link to, and the target won't ever lower
 	}
 
 	FVector2 e1v1(fromLink.seg->v1->x, fromLink.seg->v1->y);
@@ -119,7 +122,7 @@ void SectorNavMeshGenerator::add_jump_links(NavSector* mesh) {
 	// add jump links between cliff segments
 	for (int i = 0; i < numsubsectors; i++) {
 		NavSector& nav = mesh[i];
-		bool allLinksCanBeCliffsLater = nav.getMoveFlags() & FL_SECTOR_MOVE_FLOOR_UP;
+		bool srcCanBeCliffsLater = nav.getMoveFlags() & FL_SECTOR_MOVE_FLOOR_UP;
 
 		for (int k = 0; k < nav.links.size(); k++) {
 			NavSectorLink& link = nav.links[k];
@@ -127,8 +130,11 @@ void SectorNavMeshGenerator::add_jump_links(NavSector* mesh) {
 			if (link.isJump)
 				continue;
 
-			if (!link.isCliff && !allLinksCanBeCliffsLater)
-				continue;
+			if (!link.isCliff && !srcCanBeCliffsLater) {
+				// if the neighbor can lower, then its still possible to become a cliff
+				if (!(link.target->getMoveFlags() & FL_SECTOR_MOVE_FLOOR_DOWN))
+					continue;
+			}
 
 			// find other other cliff segments to try linking to
 			for (int j = 0; j < numsubsectors; j++) {
@@ -136,6 +142,8 @@ void SectorNavMeshGenerator::add_jump_links(NavSector* mesh) {
 
 				if (j == i)
 					continue;
+
+				bool dstCanBeCliffsLater = otherNav.getMoveFlags() & FL_SECTOR_MOVE_FLOOR_UP;
 
 				for (int x = 0; x < otherNav.links.size(); x++) {
 					NavSectorLink& otherLink = otherNav.links[x];
@@ -206,8 +214,8 @@ NavSector* SectorNavMeshGenerator::generate() {
 			seg_t& seg = sub.firstline[k];
 
 			if (!g_wb_mapinfo.is_seg_potentially_crossable(&seg)) {
-				//if (i == 167) {
-				//	is_seg_potentially_crossable(&seg); // debug possible link not created
+				//if (i == 304) { // debug possible link not created
+				//	g_wb_mapinfo.is_seg_potentially_crossable(&seg);
 				//}
 				continue;
 			}

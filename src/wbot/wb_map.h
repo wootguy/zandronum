@@ -4,14 +4,6 @@
 #include <unordered_set>
 #include <vector>
 
-#define STEP_HEIGHT 24
-#define JUMP_HEIGHT 56
-#define STAND_HEIGHT 56
-#define DUCK_HEIGHT 28
-#define PLAYER_WIDTH 32
-#define PLAYER_RADIUS 16
-#define SAFE_CLIFF_DIST 80 // don't reduce movement speed when this far away from any cliff
-
 #define FL_SECTOR_MOVE_FLOOR_DOWN	1
 #define FL_SECTOR_MOVE_FLOOR_UP		2
 #define FL_SECTOR_MOVE_FLOOR_ANY	4
