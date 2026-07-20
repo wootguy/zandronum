@@ -2,6 +2,7 @@
 #include "wb_map.h"
 #include "wb_util.h"
 #include "p_trace.h"
+#include "p_local.h"
 #include "r_state.h"
 #include "r_utility.h"
 #include "p_lnspec.h"
@@ -25,17 +26,14 @@ bool SectorNavMeshGenerator::is_potential_jump_link(NavSector& fromNav, NavSecto
 		return false;
 	}
 
+	FVector2 linkDelta = fromLink.pos() - toLink.pos();
+	fixed_t linkDist = linkDelta.Length();
+
 	// increase link distance for drops, decrease for jumps
-	int maxDist = (200 << FRACBITS) - jumpHeight;
-
-	fixed_t linkDist = (fromLink.pos() - toLink.pos()).Length();
-	if (linkDist > maxDist && !jumpMayBeLowerLater) {
+	int maxJumpDist = (JUMP_DIST << FRACBITS) - jumpHeight;
+	bool jumpTooFarCurrently = linkDist > maxJumpDist;
+	if (jumpTooFarCurrently && !jumpMayBeLowerLater) {
 		return false; // too far to link to, and the target won't ever lower
-	}
-
-	if ((linkDist >> FRACBITS) > 512) {
-		// TODO: instead of doing this, do a trace that goes thru walls until hitting an impassable one
-		return false; // no jump should be this far, ever
 	}
 
 	FVector2 e1v1(fromLink.seg->v1->x, fromLink.seg->v1->y);
@@ -44,10 +42,8 @@ bool SectorNavMeshGenerator::is_potential_jump_link(NavSector& fromNav, NavSecto
 	FVector2 e2v1(toLink.seg->v1->x, toLink.seg->v1->y);
 	FVector2 e2v2(toLink.seg->v2->x, toLink.seg->v2->y);
 
-	FVector2 edge1 = (e1v2 - e1v1);
-	FVector2 edge2 = (e2v2 - e2v1);
-	edge1.MakeUnit();
-	edge2.MakeUnit();
+	FVector2 edge1 = (e1v2 - e1v1).Unit();
+	FVector2 edge2 = (e2v2 - e2v1).Unit();
 
 	FVector2 normalA(edge1.Y, -edge1.X);
 	FVector2 normalB(edge2.Y, -edge2.X);
@@ -57,8 +53,7 @@ bool SectorNavMeshGenerator::is_potential_jump_link(NavSector& fromNav, NavSecto
 		return false; // edges not facing each other enough
 	}
 
-	FVector2 delta = fromLink.pos() - toLink.pos();
-	float planeDist = DotProduct(normalA, delta);
+	float planeDist = DotProduct(normalA, linkDelta);
 	if (planeDist < 0) {
 		return false; // not in front of the segment
 	}
@@ -74,12 +69,37 @@ bool SectorNavMeshGenerator::is_potential_jump_link(NavSector& fromNav, NavSecto
 		FVector3 start = fromLink.pos3D() + FVector3(0, 0, 56 << FRACBITS);
 		FVector3 end = toNav.pos3D() + FVector3(0, 0, 56 << FRACBITS);
 
-		FVector2 delta = end - start;
-		delta.MakeUnit();
-		FVector3 rightDir(delta.Y, -delta.X, 0);
+		FVector2 dir = (end - start).Unit();
+		FVector3 rightDir(dir.Y, -dir.X, 0);
 		int radius = PLAYER_WIDTH / 2;
 		fixed_t rightStep = (radius / 2) << FRACBITS;
 		bool fromNavMoves = fromNav.getMoveFlags() != 0;
+		bool toNavMoves = toNav.getMoveFlags() != 0;
+
+		// First test if any impassable walls are intersected. Shift the points inward a bit to
+		// avoid collision with the start/end lines which we know are clear.
+		FVector2 dir2d = dir * FRACUNIT;
+		FVector2 start2d = fromLink.pos() + dir2d;
+		FVector2 end2d = toLink.pos() - dir2d;
+		if (TraceImpassable(start2d, end2d))
+			return false;
+
+		if (jumpTooFarCurrently && jumpMayBeLowerLater) {
+			// One or both sectors must move for the jump to be possible.
+			// Test ideal elevations instead of current.
+			fixed_t movementNeeded = (JUMP_DIST << FRACBITS) - linkDist;
+
+			if (!fromNavMoves) {
+				// target sector must be lowered for the jump to be possible
+				end.Z += movementNeeded;
+			}
+			else if (!toNavMoves) {
+				start.Z -= movementNeeded;
+			}
+			else {
+				// Both sectors can move. Too complicated!
+			}
+		}
 
 		for (int i = -2; i <= 2; i++) {
 
@@ -94,7 +114,7 @@ bool SectorNavMeshGenerator::is_potential_jump_link(NavSector& fromNav, NavSecto
 					continue; // may move out of the way in the future
 				}
 
-				return false; // hit an immovable wall
+				return false; // hit an immovable wall or ceiling/floor
 			}
 		}
 	}

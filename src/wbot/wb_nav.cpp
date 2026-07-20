@@ -668,9 +668,7 @@ void SectorNavMesh::relink_pending_sector() {
 		}
 	}
 	
-	if (linksAdded > 0) {		Printf("Relinked sector %d (+%d links)\n", secid, linksAdded); }
-	else if (linksAdded < 0) {	Printf("Relinked sector %d (-%d links)\n", secid, -linksAdded); }
-	else {						Printf("Relinked sector %d\n", secid); }
+	Printf("Relinked sector %d (%+d links)\n", secid, linksAdded);
 
 	pending_sector_relinks.erase(pending_sector_relinks.begin() + idx);
 }

@@ -282,6 +282,59 @@ bool TraceRadius(FVector3 start, FVector3 end, fixed_t radius, bool ignoreMonste
 	return minFrac < FRACUNIT;
 }
 
+vector<TraceIsect> TraceIntersections(FVector2 start, FVector2 end) {
+	FVector2 delta = end - start;
+	fixed_t maxDist = delta.Length();
+	delta.MakeUnit();
+	delta *= FRACUNIT;
+
+	fixed_t StartX = start.X;
+	fixed_t StartY = start.Y;
+	fixed_t Vx = delta.X;
+	fixed_t Vy = delta.Y;
+
+	FPathTraverse path(start.X, start.Y, end.X, end.Y, PT_ADDLINES);
+	intercept_t* in;
+
+	vector<TraceIsect> intersections;
+
+	while ((in = path.Next())) {
+		line_t* wall = in->d.line;
+
+		fixed_t dist = FixedMul(maxDist, in->frac);
+		fixed_t hitx = StartX + FixedMul(Vx, dist);
+		fixed_t hity = StartY + FixedMul(Vy, dist);
+
+		TraceIsect isect;
+		isect.line = wall;
+
+		if (wall->backsector == NULL) {
+			isect.sector = in->d.line->frontsector;
+		}
+		else {
+			int lineside = P_PointOnLineSide(StartX, StartY, in->d.line);
+			isect.sector = lineside ? wall->backsector : wall->frontsector;
+		}
+
+		intersections.push_back(isect);
+	}
+
+	return intersections;
+}
+
+bool TraceImpassable(FVector2 start, FVector2 end) {
+	FPathTraverse path(start.X, start.Y, end.X, end.Y, PT_ADDLINES);
+	intercept_t* in;
+
+	while ((in = path.Next())) {
+		line_t* wall = in->d.line;
+		if (!wall->backsector || (wall->flags & ML_BLOCKING))
+			return true;
+	}
+
+	return false;
+}
+
 bool IsPropBlocker(AActor* actor) {
 	if (!(actor->flags & (MF_SOLID)))
 		return false;
@@ -301,8 +354,10 @@ void wbot_handle_line_activation(line_t* line, AActor* activator) {
 				g_wb_mapinfo.remove_invalid_goals(i);
 		}
 		
-		g_wb_mapinfo.remove_invalid_goals(line->backsector - sectors);
-		g_wb_mapinfo.remove_invalid_goals(line->frontsector - sectors);
+		if (line->backsector)
+			g_wb_mapinfo.remove_invalid_goals(line->backsector - sectors);
+		if (line->frontsector)
+			g_wb_mapinfo.remove_invalid_goals(line->frontsector - sectors);
 	}
 
 	for (int i = 0; i < MAXPLAYERS; i++) {
@@ -350,7 +405,7 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 				continue;
 
 			if (player->player->bIsBot)	set_ori(player, 2987, -2708, ANGLE_1 * 0);
-			else						set_ori(player, 2488, -2763, ANGLE_1 * 40);
+			else						set_ori(player, 4217, 5217, ANGLE_1 * 40);
 
 			if (player->player->bIsBot) {
 				CWootBot* bot = (CWootBot*)player->player->pSkullBot;

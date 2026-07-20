@@ -5,6 +5,11 @@
 
 struct FTraceResults;
 
+struct TraceIsect {
+	line_t* line;
+	sector_t* sector;
+};
+
 char* VarArgs(const char* format, ...);
 
 AActor* getAnyPlayer();
@@ -48,6 +53,12 @@ int draw_debug_line(FVector3 start, FVector3 end, AActor* actor);
 bool TraceLine(FVector3 start, FVector3 end, bool ignoreMonsters=true, AActor* ignoreEnt=NULL, FTraceResults* tr=NULL);
 
 bool TraceRadius(FVector3 start, FVector3 end, fixed_t radius, bool ignoreMonsters=true, AActor* ignoreEnt=NULL, FTraceResults* tr=NULL);
+
+// returns all walls/sectors intersected by the given line
+std::vector<TraceIsect> TraceIntersections(FVector2 start, FVector2 end);
+
+// returns true if the trace intersects any impassable walls
+bool TraceImpassable(FVector2 start, FVector2 end);
 
 bool IsPropBlocker(AActor* actor);
 
