@@ -24,6 +24,12 @@ void CBotRouteController::Think() {
 
 	UpdateRoute();
 
+	if (m_route.size() > 1 && !m_navLink) {
+		CancelRoute();
+		DebugPrint("My route contains invalid links! Sectors must have changed...\n");
+		return; // route broke due to invalid links - can happen when sectors are relinked
+	}
+
 	// update route speed and node touch distance in dangerous areas
 	if (BeCareful()) {
 		return; // going too fast
@@ -219,7 +225,7 @@ bool CBotRouteController::HandleBlockedPaths() {
 		NavSectorLink* nextLink = m_navLink->target->getLink(m_route[2]);
 		sector_t* nextNextSector = subsectors[m_route[2]].sector;
 
-		if (!nextLink->walkable() && (nextNextSector->floordata || nextNextSector->ceilingdata)) {
+		if (nextLink && !nextLink->walkable() && (nextNextSector->floordata || nextNextSector->ceilingdata)) {
 			pBot->stateFlags |= FL_WBOT_WAIT_DOOR;
 			return true; // wait until the door/elevator is done moving
 		}
@@ -398,6 +404,9 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link) {
 		return;
 	}
 
+	// getting desperate now
+	pBot->m_nextThink = level.time + 10;
+
 	// clearing previous blocked links and try again, maybe paths got unblocked
 	if (curGoal->blockers.size() > 1 || !curGoal->blockers.count(link->id)) {
 		curGoal->blockers.clear();
@@ -411,8 +420,6 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link) {
 	DebugPrint("Goals aborted. Failed to reach a subgoal.\n");
 	CancelRoute();
 	pBot->m_goals.clear();
-
-	pBot->m_nextThink = level.time + 10;
 }
 
 void CBotRouteController::CancelRoute() {

@@ -46,6 +46,9 @@ public:
 	bool subsector_does_damage(subsector_t* sec);
 	void sort_sector_trigger_goals(); // call after navigation mesh is created
 
+	// remove trigger goals for single-use lines that have been used
+	void remove_invalid_goals(int secid);
+
 private:
 	void add_stair_sector_info();
 	void find_linedef_sectors();

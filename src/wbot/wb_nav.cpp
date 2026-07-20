@@ -256,7 +256,18 @@ fixed_t NavSector::getCeilZ() {
 }
 
 void SectorNavMesh::init() {
-	mesh = SectorNavMeshGenerator::generate();
+	propBlockers.clear();
+
+	// find all immovable and invulnerable props
+	TThinkerIterator<AActor> it;
+	AActor* actor;
+	while ((actor = it.Next())) {
+		if (IsPropBlocker(actor))
+			propBlockers.push_back(actor);
+		//Printf("Prop '%s' %d\n", actor->GetClass()->TypeName.GetChars(), actor->health);
+	}
+
+	mesh = SectorNavMeshGenerator::generate(propBlockers);
 	g_wb_mapinfo.sort_sector_trigger_goals();
 }
 
@@ -625,4 +636,46 @@ bool SectorNavMesh::get_key_goals_for_line(AActor* actor, line_t* line, vector<B
 	return true;
 }
 
+void SectorNavMesh::relink_sector(sector_t* sec) {
+	for (sector_t* pend : pending_sector_relinks) {
+		if (pend == sec) {
+			return;
+		}
+	}
+
+	pending_sector_relinks.push_back(sec);
+}
+
+void SectorNavMesh::relink_pending_sector() {
+	if (pending_sector_relinks.empty())
+		return;
+
+	// iterate once per tick
+	static int t = 0;
+	t++;
+
+	int idx = (t % pending_sector_relinks.size());
+	sector_t* sec = pending_sector_relinks[idx];
+	int secid = sec - sectors;
+
+	if (sec->floordata || sec->ceilingdata) {
+		return;
+	}
+
+	int linksAdded = 0;
+
+	g_wb_mapinfo.sector_info[secid].moveFlags = 0;
+
+	for (int i = 0; i < numsubsectors; i++) {
+		if (subsectors[i].sector == sec) {
+			linksAdded += SectorNavMeshGenerator::relink_node(mesh, i, propBlockers);
+		}
+	}
+	
+	if (linksAdded > 0) {		Printf("Relinked sector %d (+%d links)\n", secid, linksAdded); }
+	else if (linksAdded < 0) {	Printf("Relinked sector %d (-%d links)\n", secid, -linksAdded); }
+	else {						Printf("Relinked sector %d\n", secid); }
+
+	pending_sector_relinks.erase(pending_sector_relinks.begin() + idx);
+}
 

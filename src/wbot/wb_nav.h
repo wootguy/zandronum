@@ -69,6 +69,8 @@ struct NavSector {
 class SectorNavMesh {
 public:
 	NavSector* mesh = NULL;
+	std::vector<AActor*> propBlockers;
+	std::vector<sector_t*> pending_sector_relinks; // sectors that will be relinked as soon as they stop moving
 
 	int pathTests; // number of blocked path checks
 	bool verbose;
@@ -87,6 +89,10 @@ public:
 	int get_nav_id(fixed_t x, fixed_t y);
 	int get_nav_id(AActor* actor); // get key required to use the linedef. Returns false if keys don't exist anywhere in the map.
 	int get_route_distance(std::vector<int>& route);
+
+	// call to create or remove links on nodes that no longer move
+	void relink_sector(sector_t* sec);
+	void relink_pending_sector();
 
 private:
 	float path_cost(int a, int b);

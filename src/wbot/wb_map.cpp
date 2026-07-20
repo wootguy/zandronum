@@ -629,3 +629,24 @@ bool BotMapInfo::is_link_bordered_by_walls(subsector_t& sub, int segIdx, int& le
 
 	return leftSubIsWall && rightSubIsWall;
 }
+
+void BotMapInfo::remove_invalid_goals(int secid) {
+	BotSectorInfo& info = sector_info[secid];
+
+	if (!info.moveFlags)
+		return; // doesn't move, which means nothing triggers it
+
+	for (int i = 0; i < info.triggers.size(); i++) {
+		BotGoal& goal = info.triggers[i];
+
+		if (!goal.valid()) {
+			info.triggers.erase(info.triggers.begin() + i);
+			i--;
+		}
+	}
+
+	if (info.triggers.empty()) {
+		// TODO: don't unlink perpetually moving sectors like crushers
+		g_wb_nav.relink_sector(&sectors[secid]);
+	}
+}

@@ -1,5 +1,6 @@
 #include "wb_util.h"
 #include "wb_bot.h"
+#include "wb_map.h"
 #include "r_utility.h"
 #include "p_spec.h"
 #include "p_local.h"
@@ -292,6 +293,18 @@ bool IsPropBlocker(AActor* actor) {
 }
 
 void wbot_handle_line_activation(line_t* line, AActor* activator) {
+	if (!line->special) {
+		// line can no longer be activated. Remove trigger from possibly affected sectors
+		int tag = line->args[0];
+		for (int i = 0; i < numsectors; i++) {
+			if (sectors[i].tag == tag)
+				g_wb_mapinfo.remove_invalid_goals(i);
+		}
+		
+		g_wb_mapinfo.remove_invalid_goals(line->backsector - sectors);
+		g_wb_mapinfo.remove_invalid_goals(line->frontsector - sectors);
+	}
+
 	for (int i = 0; i < MAXPLAYERS; i++) {
 		AActor* player = players[i].mo;
 		if (!playeringame[i] || !player || !player->player->bIsBot)
@@ -336,8 +349,8 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 			if (!playeringame[i] || !player)
 				continue;
 
-			if (player->player->bIsBot)	set_ori(player, -1511, 592, ANGLE_1 * 0);
-			else						set_ori(player, -1425, 1167, ANGLE_1 * 270);
+			if (player->player->bIsBot)	set_ori(player, 2987, -2708, ANGLE_1 * 0);
+			else						set_ori(player, 2488, -2763, ANGLE_1 * 40);
 
 			if (player->player->bIsBot) {
 				CWootBot* bot = (CWootBot*)player->player->pSkullBot;
@@ -352,6 +365,15 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 	// clear all enemies for general pathfinding tests
 	if (!strcmp(msg, "y")) {
 		kill_all_shootables();
+	}
+
+	if (strstr(msg, "goto ") == msg) {
+		int id = atoi(msg + 5);
+		if (id >= 0 && id < numsubsectors) {
+			NavSector& nav = g_wb_nav.mesh[id];
+			FVector3 pos = nav.pos3D();
+			P_Teleport(players[ulPlayer].mo, pos.X, pos.Y, pos.Z, 0, true, true, true);
+		}
 	}
 
 	// give weapons/ammo for combat testing
@@ -389,6 +411,8 @@ void wbot_tick() {
 		testModo = false;
 		new CWootBot(NULL, NULL, BOTS_FindFreePlayerSlot());
 	}
+
+	g_wb_nav.relink_pending_sector();
 }
 
 CCMD(addbotw)
