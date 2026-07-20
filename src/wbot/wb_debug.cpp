@@ -41,7 +41,9 @@ void wbot_debug(CWootBot* pBot) {
 			routeStr += "\nLink: " + to_string(link->id) + " -> " + to_string(link->target->id);
 		}
 	}
-	routeStr += "\nSpeed: " + to_string(pBot->m_routeController.m_routeSpeed);
+
+	int curSpeed = pBot->GetSpeed2D();
+	routeStr += "\nSpeed: " + to_string(curSpeed) + " -> " + to_string(pBot->m_routeController.m_routeSpeed);
 	if (pBot->m_speedMult != 1.0f)
 		routeStr += " * " + to_string((int)pBot->m_speedMult) + "." + to_string((int)(pBot->m_speedMult * 10) % 10);
 
@@ -113,6 +115,7 @@ void wbot_debug(CWootBot* pBot) {
 	if (pBot->stateFlags & FL_WBOT_JUMPING) { stateStr += " JUMP"; }
 	if (pBot->stateFlags & FL_WBOT_FLYING) { stateStr += " FLY"; }
 	if (pBot->stateFlags & FL_WBOT_RUSHING) { stateStr += " RUSH"; }
+	if (pBot->stateFlags & FL_WBOT_SLOW_DOWN) { stateStr += " SLOW_DOWN"; }
 	if (pPlayer->cheats & (CF_FROZEN | CF_TOTALLYFROZEN)) { stateStr += " FROZEN"; }
 
 	string btnStr = "Buttons: ";

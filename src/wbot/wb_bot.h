@@ -14,6 +14,7 @@ struct NavSectorLink;
 #define FL_WBOT_FLYING		8 // bot is jumping, falling, or above a gap in the floor
 #define FL_WBOT_RUSHING		16 // bot is hurrying to reach a sector before a timed event ends
 #define FL_WBOT_ON_ELEV		32 // bot is standing on a platform that is moving or about to move
+#define FL_WBOT_SLOW_DOWN	64 // bot is trying to reduce their speed
 
 class CWootBot : public CSkullBot {
 public:
@@ -29,6 +30,7 @@ public:
 	int m_cliffDist = 9999;
 	FVector2 lastPos = FVector2(0, 0);	// used to detect being stuck
 	bool m_wasDead;
+	int rushLinkId;				// link ID that the bot is rushing for
 
 	// debug state
 	bool m_debug = false;		// print thoughts to chat
@@ -47,6 +49,7 @@ public:
 	// goal management
 	bool FindGoal(); // find something to do in the map
 	bool PushGoal(BotGoal& goal, NavSectorLink* purposeLink); // returns false if this is already the current goal
+	bool SelectGoal(std::vector<BotGoal>& goals, NavSectorLink* purposeLink, bool randomize);
 	void PopGoal();
 	inline bool HasGoal() { return m_goals.size(); };
 	inline BotGoal* CurrentGoal() { return m_goals.size() ? &m_goals[m_goals.size() - 1] : NULL; }

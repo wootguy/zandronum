@@ -7,6 +7,7 @@
 #include "d_event.h"
 #include "a_keys.h"
 #include "p_lnspec.h"
+#include "p_trace.h"
 #include <algorithm>
 
 using namespace std;
@@ -19,11 +20,14 @@ void CBotRouteController::Think() {
 	m_nodeRadius = 32;
 	pBot->m_forwardMove = 0;
 	pBot->m_sideMove = 0;
-	pBot->stateFlags &= ~(FL_WBOT_WAIT_ELEV | FL_WBOT_WAIT_DOOR);
+	pBot->stateFlags &= ~(FL_WBOT_WAIT_ELEV | FL_WBOT_WAIT_DOOR | FL_WBOT_SLOW_DOWN);
 
 	UpdateRoute();
 
-	BeCareful(); // updates route speed and node touch distance in dangerous areas
+	// update route speed and node touch distance in dangerous areas
+	if (BeCareful()) {
+		return; // going too fast
+	}
 
 	if ((pBot->stateFlags & FL_WBOT_JUMPING) && m_route.size() > 1) {
 		JumpThink(); // perform a jump
@@ -57,8 +61,11 @@ void CBotRouteController::Think() {
 	if (pBot->StuckThink(500)) {
 		DebugPrint("I got stuck! Cancelling route.\n");
 
-		if (m_route.size() > 1) {
-			stuckPath = m_navLink ? m_navLink->id : -1;
+		BotGoal* goal = pBot->CurrentGoal();
+
+		if (m_navLink && goal) {
+			// don't try to take this path again
+			goal->blockers.insert(m_navLink->id);
 		}
 
 		CancelRoute();
@@ -109,10 +116,12 @@ void CBotRouteController::UpdateRoute() {
 	m_navLink = m_route.size() > 1 ? m_navIdeal->getLink(m_route[1]) : NULL;
 }
 
-void CBotRouteController::BeCareful() {
+bool CBotRouteController::BeCareful() {
+	bool headingTowardsCliff = false;
+	bool shouldBeCareful = false;
+
 	// be careful near cliffs
 	if (!(pBot->stateFlags & FL_WBOT_JUMPING)) {
-		bool headingTowardsCliff = false;
 		if (m_route.size() > 1) {
 			NavSector& idealNav = g_wb_nav.mesh[m_route[0]];
 			NavSector& targetNav = g_wb_nav.mesh[m_route[1]];
@@ -123,12 +132,29 @@ void CBotRouteController::BeCareful() {
 		if (pBot->m_cliffDist < SAFE_CLIFF_DIST * 0.5f || headingTowardsCliff) {
 			m_routeSpeed *= 0.5f;
 			m_nodeRadius = 8;
+			shouldBeCareful = true;
 		}
 		else if (pBot->m_cliffDist < SAFE_CLIFF_DIST * 0.75f) {
 			m_routeSpeed *= 0.75f;
 			m_nodeRadius = 16;
+			shouldBeCareful = true;
 		}
 	}
+
+	if (shouldBeCareful && pBot->GetSpeed2D() > m_routeSpeed) {
+		pBot->stateFlags |= FL_WBOT_SLOW_DOWN;
+
+		FVector2 pos(pActor->x, pActor->y);
+		FVector2 velDir(pActor->velx, pActor->vely);
+		velDir.MakeUnit();
+		velDir *= 100 << FRACBITS;
+
+		pBot->MoveTo(pos - velDir, 0, RUN_SPEED);
+
+		return true;
+	}
+
+	return false;
 }
 
 void CBotRouteController::JumpThink() {
@@ -341,7 +367,7 @@ void CBotRouteController::RouteSlipThink() {
 
 void CBotRouteController::BlockedPathThink(NavSectorLink* link) {
 	link->blocked(pActor); // debug here
-	string blockMsg = VarArgs("Link %d blocked!", link->id);
+	DebugPrint(VarArgs("Link %d blocked!\n", link->id));
 
 	BotGoal* curGoal = pBot->CurrentGoal();
 	curGoal->blockers.insert(link->id);
@@ -349,40 +375,26 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link) {
 	// don't try to route through previous paths we've been trying to unblock
 	unordered_set<int> allBlockedPaths = GetBlockedPaths();
 
-	// nothing is moving, try unblocking it ourselves.
-	vector<BotGoal>& targTriggers = link->target->getTriggers();
-	for (BotGoal& goal : targTriggers) {
-		if (!goal.valid())
-			continue;
-		int subid = goal.getNavId();
+	bool randomizeGoal = false;
+	if ((pBot->stateFlags & FL_WBOT_RUSHING) && link->id == pBot->rushLinkId) {
+		// failed to reach the target sector in time. Try a different unblock goal if there are multiple.
+		randomizeGoal = true;
+	}
 
-		if (subid == link->parent->id || RouteToSector(subid).size()) {
-			DebugPrint(VarArgs("%s Adding unblock subgoal.\n", blockMsg.c_str()));
-			if (pBot->PushGoal(goal, link)) {
-				return;
-			}
-		}
+	// nothing is moving, try unblocking it ourselves.
+	if (pBot->SelectGoal(link->target->getTriggers(), link, randomizeGoal)) {
+		return;
 	}
 
 	// if we're on an elevator, try triggering it.
-	vector<BotGoal>& thisTriggers = link->parent->getTriggers();
-	for (BotGoal& goal : thisTriggers) {
-		if (!goal.valid())
-			continue;
-		int subid = goal.getNavId();
-
-		if (subid == link->parent->id || RouteToSector(subid).size()) {
-			DebugPrint(VarArgs("%s Adding unblock subgoal.\n", blockMsg.c_str()));
-			if (pBot->PushGoal(goal, link)) {
-				return;
-			}
-		}
+	if (pBot->SelectGoal(link->parent->getTriggers(), link, randomizeGoal)) {
+		return;
 	}
 
 	// nothing can unblock the path that stopped us. Try routing around it.
 	m_route = RouteToSector(curGoal->getNavId());
 	if (m_route.size()) {
-		DebugPrint(VarArgs("%s Routing around the blocked path.\n", blockMsg.c_str()));
+		DebugPrint("Routing around the blocked path.\n");
 		return;
 	}
 
@@ -391,12 +403,12 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link) {
 		curGoal->blockers.clear();
 		m_route = RouteToSector(curGoal->getNavId());
 		if (m_route.size()) {
-			DebugPrint(VarArgs("%s Forgetting blocked paths and trying again...\n", blockMsg.c_str()));
+			DebugPrint("Forgetting blocked paths and trying again...");
 			return;
 		}
 	}
 
-	DebugPrint(VarArgs("%s Goals aborted. Failed to reach a subgoal.\n", blockMsg.c_str()));
+	DebugPrint("Goals aborted. Failed to reach a subgoal.\n");
 	CancelRoute();
 	pBot->m_goals.clear();
 

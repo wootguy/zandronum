@@ -49,6 +49,8 @@ bool TraceLine(FVector3 start, FVector3 end, bool ignoreMonsters=true, AActor* i
 
 bool TraceRadius(FVector3 start, FVector3 end, fixed_t radius, bool ignoreMonsters=true, AActor* ignoreEnt=NULL, FTraceResults* tr=NULL);
 
+bool IsPropBlocker(AActor* actor);
+
 // Hooks
 void wbot_handle_chat_command(ULONG ulPlayer, const char* msg);
 void wbot_handle_line_activation(line_t* line, AActor* activator);

@@ -340,6 +340,9 @@ int BotMapInfo::get_linedef_move_flag(line_t* line) {
 }
 
 int BotMapInfo::get_linedef_goal_action(line_t* line) {
+	if (!line)
+		return -1;
+
 	if (line->activation & SPAC_Impact) {
 		return WBOT_GOAL_ACTION_SHOOT;
 	}
@@ -353,8 +356,10 @@ int BotMapInfo::get_linedef_goal_action(line_t* line) {
 		return WBOT_GOAL_ACTION_TOUCH;
 	}
 
-	Printf("Don't know how to activate line %d\n", line - lines);
-	return WBOT_GOAL_ACTION_USE;
+	if (line->activation)
+		Printf("Don't know how to activate line %d\n", line - lines);
+	
+	return -1;
 }
 
 bool BotMapInfo::subsector_does_damage(subsector_t* sub) {
@@ -506,9 +511,13 @@ void BotMapInfo::find_linedef_sectors() {
 		lineSeg.v1 = line.v1;
 		lineSeg.v2 = line.v2;
 
+		sector_t* bestSector = line.frontsector;
+
+		int lineAction = get_linedef_goal_action(&line);
+		bool doubleSidedCrossLine = lineAction == WBOT_GOAL_ACTION_CROSS && (line.flags & ML_TWOSIDED);
+
 		for (int s = 0; s < numsubsectors; s++) {
 			subsector_t& sub = subsectors[s];
-
 			float mostOverlap = 0;
 
 			for (int k = 0; k < sub.numlines; k++) {
@@ -516,8 +525,17 @@ void BotMapInfo::find_linedef_sectors() {
 				if (seg.linedef != &line) {
 					continue;
 				}
-				if (seg.frontsector != line.frontsector) {
-					continue; // only want the sector in front of the line
+
+				if (doubleSidedCrossLine) {
+					// pick the side that allows crossing so that bot doesn't try to cross lines from the bottom of a cliff
+					if (!is_seg_potentially_crossable(&seg)) {
+						continue;
+					}
+				}
+				else {
+					if (seg.frontsector != bestSector) {
+						continue; // only want the sector in front of the line
+					}
 				}
 
 				LinkSeg linkseg = GetSegmentOverlap(&seg, &lineSeg);

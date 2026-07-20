@@ -189,13 +189,8 @@ NavSector* SectorNavMeshGenerator::generate() {
 	TThinkerIterator<AActor> it;
 	AActor* actor;
 	while ((actor = it.Next())) {
-		if (!(actor->flags & (MF_SOLID)))
-			continue;
-
-		if (actor->player || (actor->flags3 & (MF3_ISMONSTER | MF_SHOOTABLE)))
-			continue;
-
-		propBlockers.push_back(actor);
+		if (IsPropBlocker(actor))
+			propBlockers.push_back(actor);
 		//Printf("Prop '%s' %d\n", actor->GetClass()->TypeName.GetChars(), actor->health);
 	}
 

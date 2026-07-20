@@ -35,6 +35,7 @@ public:
 	inline bool HasRoute() { return m_route.size(); };
 
 	std::unordered_set<int> GetBlockedPaths();	// paths blocked during path to current goal
+	std::vector<int> RouteToSector(int subid);
 
 private:
 	CWootBot* pBot = NULL;
@@ -48,9 +49,8 @@ private:
 	bool HandleBlockedPaths();					// returns true if move should be cancelled
 	bool ElevatorThink(bool linkBlocked);		// returns true if the bot is waiting on an elevator
 	void RouteSlipThink();						// bot slipped off its route
-	void BeCareful();							// slow down around cliffs
+	bool BeCareful();							// slow down around cliffs, true if should abort movement
 	void BlockedPathThink(NavSectorLink* link);	// a path in the route is blocked
 
-	std::vector<int> RouteToSector(int subid);
 	void DebugPrint(const char* msg);
 };

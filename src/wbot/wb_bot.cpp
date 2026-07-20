@@ -91,11 +91,13 @@ void CWootBot::Reset() {
 	pActor->target = NULL;
 	m_routeController = CBotRouteController(this);
 	m_combatController = CBotCombatController(this);
+	m_goals.clear();
 	m_lastUse = 0;
 	stateFlags = 0;
 	m_forwardMove = 0;
 	m_sideMove = 0;
 	m_nextThink = 0;
+	rushLinkId = -1;
 }
 
 void CWootBot::DebugPrint(const char* msg) {
@@ -246,7 +248,7 @@ bool CWootBot::TraceAhead(int dist, FVector3 offset, bool ignoreMonsters, FTrace
 
 	return Trace((fixed_t)start.X, (fixed_t)start.Y, (fixed_t)start.Z, pActor->Sector,
 		(fixed_t)forward.X, (fixed_t)forward.Y, 0, testDist, ignoreMonsters ? 0 : 0xffffffff,
-		ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, pActor, *tr);
+		ML_BLOCKEVERYTHING, pActor, *tr);
 }
 
 bool CWootBot::MoveTo(FVector2 pos, int radius, int speed) {
@@ -256,16 +258,37 @@ bool CWootBot::MoveTo(FVector2 pos, int radius, int speed) {
 	FVector2 wantDir = pos - FVector2(pActor->x, pActor->y);
 	wantDir.MakeUnit();
 
-	// jump over short walls and open doors
+	// jump over walls and activate things in front of us
 	FTraceResults tr;
-	if (TraceAhead(32, FVector3(0, 0, STEP_HEIGHT << FRACBITS), true, &tr)) {
-		m_lButtons |= BT_JUMP;
+	int useDist = (pActor->UseRange >> FRACBITS) - 1;
+	if (TraceAhead(useDist, FVector3(0, 0, STEP_HEIGHT << FRACBITS), true, &tr)) {
+		int d = (tr.Fraction / (float)FRACUNIT) * useDist;
 
-		// only use walls that aren't already moving, so doors aren't closed while moving
-		if (tr.Line && tr.Line->backsector) {
-			if (!tr.Line->backsector->floordata && !tr.Line->backsector->ceilingdata) {
+		// jump if not too far and this isn't an impassable wall
+		if (tr.Line->backsector && d < 32) {
+			fixed_t curZ = pActor->Sector->floorplane.ZatPoint(pActor->x, pActor->y);
+			fixed_t backZ = tr.Line->backsector->floorplane.ZatPoint(tr.X, tr.Y);
+			int jumpHeight = (backZ - curZ) >> FRACBITS;
+
+			// ...and it's possible and necessary to jump up
+			if (jumpHeight > STEP_HEIGHT && jumpHeight <= JUMP_HEIGHT)
+				m_lButtons |= BT_JUMP;
+		}
+
+		// only use walls that aren't already moving, so doors aren't closed while opening
+		bool lineIsMoving = tr.Line && tr.Line->backsector &&
+			(tr.Line->backsector->floordata || tr.Line->backsector->ceilingdata);
+
+		if (!lineIsMoving) {
+			// activate any triggered line to fix face rubbing on walls when the bot is failing
+			// to get to a tiny sector in front of a door/button.
+			int action = g_wb_mapinfo.get_linedef_goal_action(tr.Line);
+
+			if (action == WBOT_GOAL_ACTION_USE)
 				Use();
-			}
+
+			if (action == WBOT_GOAL_ACTION_SHOOT)
+				Attack();
 		}
 	}
 
@@ -442,7 +465,8 @@ FVector3 CWootBot::GetVelocity() {
 }
 
 int CWootBot::GetSpeed2D() {
-	return (int)FVector2(pActor->velx, pActor->vely).Length() >> FRACBITS;
+	// TODO: why is this conversion to cmd speeds weird?
+	return (FVector2(pActor->velx, pActor->vely).Length() / FRACUNIT) * 8.0f;
 }
 
 bool CWootBot::FindGoal() {
@@ -508,6 +532,37 @@ bool CWootBot::PushGoal(BotGoal& goal, NavSectorLink* purposeLink) {
 	return m_routeController.RouteToGoal();
 }
 
+bool CWootBot::SelectGoal(vector<BotGoal>& goals, NavSectorLink* purposeLink, bool randomize) {
+	BotGoal* bestGoal = NULL;
+	vector<BotGoal*> validGoals;
+
+	for (int i = 0; i < goals.size(); i++) {
+		BotGoal& goal = goals[i];
+		if (!goal.valid())
+			continue;
+		int subid = goal.getNavId();
+
+		if (subid == purposeLink->parent->id || m_routeController.RouteToSector(subid).size()) {
+			if (randomize) {
+				validGoals.push_back(&goal);
+			} else {
+				bestGoal = &goal;
+				break;
+			}
+		}
+	}
+
+	if (randomize && validGoals.size()) {
+		bestGoal = validGoals[rand() % validGoals.size()];
+	}
+
+	if (bestGoal && PushGoal(*bestGoal, purposeLink)) {
+		return true;
+	}
+
+	return false;
+}
+
 void CWootBot::PopGoal() {
 	if (m_goals.empty()) {
 		m_routeController.CancelRoute();
@@ -517,6 +572,7 @@ void CWootBot::PopGoal() {
 
 	BotGoal& goal = m_goals[m_goals.size() - 1];
 
+	rushLinkId = -1;
 	stateFlags &= ~FL_WBOT_RUSHING;
 
 	int purposeLinkId = goal.purposeLink ? goal.purposeLink->id : -1;
@@ -524,6 +580,7 @@ void CWootBot::PopGoal() {
 	if (purposeNav && (purposeNav->getMoveFlags() & FL_SECTOR_MOVE_TIMED)) {
 		// the purpose of this goal was to move a timed sector. Better hurry before that sector resets!
 		stateFlags |= FL_WBOT_RUSHING;
+		rushLinkId = goal.purposeLink->id;
 	}
 
 	DebugPrint(VarArgs("Finished goal: %s\n", goal.desc().c_str()));
@@ -543,7 +600,7 @@ void CWootBot::PopGoal() {
 
 void CWootBot::Use(int ticsBetweenUses) {
 	if (level.time - m_lastUse < ticsBetweenUses) {
-		m_lButtons &= ~BT_USE;
+		return;
 	}
 
 	m_lButtons |= BT_USE;

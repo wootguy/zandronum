@@ -281,6 +281,16 @@ bool TraceRadius(FVector3 start, FVector3 end, fixed_t radius, bool ignoreMonste
 	return minFrac < FRACUNIT;
 }
 
+bool IsPropBlocker(AActor* actor) {
+	if (!(actor->flags & (MF_SOLID)))
+		return false;
+
+	if (actor->player || (actor->flags3 & (MF3_ISMONSTER | MF_SHOOTABLE)))
+		return false;
+
+	return true;
+}
+
 void wbot_handle_line_activation(line_t* line, AActor* activator) {
 	for (int i = 0; i < MAXPLAYERS; i++) {
 		AActor* player = players[i].mo;
@@ -326,11 +336,8 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 			if (!playeringame[i] || !player)
 				continue;
 
-			if (player->player->bIsBot)	set_ori(player, -352, 592, ANGLE_1 * 0);
-			else						set_ori(player, 953, -4618, ANGLE_1 * 180);
-
-			//if (player->player->bIsBot)	set_ori(player, -190, 286, ANGLE_1 * 0);
-			//else						set_ori(player, 49, 99, ANGLE_1 * 180);
+			if (player->player->bIsBot)	set_ori(player, -1511, 592, ANGLE_1 * 0);
+			else						set_ori(player, -1425, 1167, ANGLE_1 * 270);
 
 			if (player->player->bIsBot) {
 				CWootBot* bot = (CWootBot*)player->player->pSkullBot;
