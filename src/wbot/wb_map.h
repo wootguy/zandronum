@@ -41,7 +41,7 @@ public:
 	LinkSeg get_neighbor_subsector(subsector_t* ignoreSector, seg_t* borderSeg);
 	bool is_link_bordered_by_walls(subsector_t& sub, int segIdx, int& leftSubId, int& rightSubId);
 	bool is_seg_potentially_crossable(seg_t* seg);
-	bool can_cross_seg_now(seg_t* seg);
+	int segment_walkability(seg_t* seg); // returns LinkBlockReason
 	int get_linedef_goal_action(line_t* line);
 	bool subsector_does_damage(subsector_t* sec);
 	void sort_sector_trigger_goals(); // call after navigation mesh is created

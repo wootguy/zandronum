@@ -15,6 +15,14 @@
 
 struct NavSector;
 
+enum LinkBlockReason {
+	LINK_BLOCK_CLEAR,		// can walk into the next sector
+	LINK_BLOCK_TOO_HIGH,	// too high to jump up to the next sector
+	LINK_BLOCK_TOO_LOW,		// next sector doesn't have enough vertical space
+	LINK_BLOCK_TOO_NARROW,	// the link doesn't have enough space between walls
+	LINK_BLOCK_CANT_JUMP,	// the jump is too high/far or blocked
+};
+
 struct NavSectorLink {
 	int id;		// link ID, not associated with any bsp structure
 	NavSector* parent;
@@ -35,8 +43,7 @@ struct NavSectorLink {
 	FVector2 GetJumpStartPos(); // find the best place to begin the jump
 	FVector2 GetJumpEndPos(); // find the closest point to land
 	
-	// true if this link can be moved thru, else it is too high or blocked.
-	bool blocked(AActor* actor, bool recurse=true);
+	int blocked(AActor* actor, bool recurse=true); // returns LinkBlockReason
 	bool walkable();
 	bool jumpable();
 	bool isJumpValid(); // checks if jump height and distance is valid currently

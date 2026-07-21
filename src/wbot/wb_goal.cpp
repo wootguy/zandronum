@@ -12,17 +12,39 @@ std::string BotGoal::desc() {
 		thingName = actor->GetClass()->TypeName.GetChars();
 	}
 	else if (lineid) {
-		thingName = "Linedef " + to_string(lineid);
+		thingName = "Line " + to_string(lineid);
 	}
 
-	thingName += " in sector " + to_string(getNavId());
+	thingName += " in " + to_string(getNavId());
 
 	string blockerStr;
+	int numBlock = 0;
 	for (const int& id : blockers) {
 		blockerStr += " " + to_string(id);
+		if (++numBlock >= 4) {
+			break;
+		}
 	}
-	if (blockerStr.size()) {
-		thingName += "   (blocked at " + blockerStr + ")";
+	if (numBlock < blockers.size()) {
+		thingName += "\n        blockers: " + blockerStr + " (+" + to_string(blockers.size() - numBlock) + ")";
+	}
+	else if (numBlock > 0) {
+		thingName += "\n        blockers: " + blockerStr;
+	}
+
+	string unblockStr;
+	int numunBlock = 0;
+	for (auto item : unblockAttempts) {
+		unblockStr += " [" + to_string(item.first) + "->" + to_string(item.second) + "]";
+		if (++numunBlock >= 4) {
+			break;
+		}
+	}
+	if (numunBlock < unblockAttempts.size()) {
+		thingName += "\n        unblocks: " + unblockStr + " (+" + to_string(unblockStr.size() - numunBlock) + ")";
+	}
+	else if (numunBlock > 0) {
+		thingName += "\n        unblocks: " + unblockStr;
 	}
 
 	switch (action) {

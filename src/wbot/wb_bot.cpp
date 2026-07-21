@@ -35,6 +35,10 @@ CWootBot::CWootBot(const char* pszName, const char* pszTeamName, ULONG ulPlayerN
 }
 
 void CWootBot::Think() {
+	if (gamestate == GS_INTERMISSION) {
+		return;
+	}
+
 	if (m_wasDead && m_pPlayer->health > 0) {
 		Reset();
 		m_wasDead = false;
@@ -513,6 +517,21 @@ bool CWootBot::FindGoal() {
 	return m_routeController.HasRoute();
 }
 
+bool CWootBot::PushLevelEndGoal() {
+	m_routeController.CancelRoute();
+
+	for (int i = 0; i < numlines; i++) {
+		line_t& line = lines[i];
+		if (line.special == Exit_Normal || line.special == Exit_Secret) {
+			if (PushGoal(BotGoal(g_wb_mapinfo.get_linedef_goal_action(&line), i), NULL)) {
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
 bool CWootBot::PushGoal(BotGoal& goal, NavSectorLink* purposeLink) {
 	if (!m_goals.empty()) {
 		BotGoal& lastGoal = m_goals[m_goals.size() - 1];
@@ -548,7 +567,16 @@ bool CWootBot::PushGoal(BotGoal& goal, NavSectorLink* purposeLink) {
 		}
 	}
 
-	return m_routeController.RouteToGoal();
+	if (m_routeController.RouteToGoal()) {
+		if (purposeLink && m_goals.size() > 1 && goal.lineid >= 0) {
+			BotGoal& parentGoal = m_goals[m_goals.size() - 2];
+			parentGoal.unblockAttempts[goal.lineid] = purposeLink->id;
+		}
+
+		return true;
+	}
+
+	return false;
 }
 
 bool CWootBot::SelectGoal(vector<BotGoal>& goals, NavSectorLink* purposeLink, bool randomize, BotGoal* ignoreGoal) {
@@ -556,12 +584,21 @@ bool CWootBot::SelectGoal(vector<BotGoal>& goals, NavSectorLink* purposeLink, bo
 	vector<BotGoal*> validGoals;
 
 	int unblockSector = purposeLink->target->id;
+	BotGoal* curGoal = CurrentGoal();
 
 	for (int i = 0; i < goals.size(); i++) {
 		BotGoal& goal = goals[i];
 		if (!goal.valid())
 			continue;
 		int subid = goal.getNavId();
+
+		if (curGoal) {
+			auto unblockAttempt = curGoal->unblockAttempts.find(goal.lineid);
+			if (unblockAttempt != curGoal->unblockAttempts.end() && unblockAttempt->second == purposeLink->id) {
+				// already tried this goal and the path was still blocked after completing it.
+				continue;
+			}
+		}
 
 		vector<int> route = m_routeController.RouteToSector(subid, unblockSector);
 

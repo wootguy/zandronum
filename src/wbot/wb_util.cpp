@@ -426,7 +426,7 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 				continue;
 
 			if (player->player->bIsBot)	set_ori(player, 2641, 4735, ANGLE_1 * 0);
-			else						set_ori(player, 2608, 4545, ANGLE_1 * 40);
+			else						set_ori(player, 1228, -110, ANGLE_1 * 40);
 
 			if (player->player->bIsBot) {
 				CWootBot* bot = (CWootBot*)player->player->pSkullBot;
@@ -435,6 +435,19 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 				//bot->m_freezeOnRouteChange = true;
 				//bot->m_speedMult = 0.6f;
 			}
+		}
+	}
+
+	if (!strcmp(msg, "w")) {
+		kill_all_shootables();
+
+		for (int i = 0; i < MAXPLAYERS; i++) {
+			AActor* player = players[i].mo;
+			if (!playeringame[i] || !player || !player->player->bIsBot)
+				continue;
+
+			CWootBot* bot = (CWootBot*)player->player->pSkullBot;
+			bot->PushLevelEndGoal();
 		}
 	}
 

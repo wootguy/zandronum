@@ -61,7 +61,7 @@ private:
 	bool ElevatorThink(bool linkBlocked);		// returns true if the bot is waiting on an elevator
 	void RouteSlipThink();						// bot slipped off its route
 	bool BeCareful();							// slow down around cliffs, true if should abort movement
-	void BlockedPathThink(NavSectorLink* link);	// a path in the route is blocked
+	void BlockedPathThink(NavSectorLink* link, int blockReason);	// a path in the route is blocked
 	void HandleStuckPath();						// bot failed to move thru a path
 
 	void DebugPrint(const char* msg);

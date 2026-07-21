@@ -1,6 +1,7 @@
 #pragma once
 #include "bots.h"
 #include <unordered_set>
+#include <unordered_map>
 
 struct NavSectorLink;
 
@@ -15,10 +16,14 @@ enum BotGoalAction {
 struct BotGoal {
 	int action = -1; // WBOT_GOAL_ACTION_*
 	int lineid = -1; // lindef id to interact with
-	std::unordered_set<int> blockers; // path IDs that block A* from reaching routing to this goal
 	int dist = 0; // distance from the goal to the purpose sector
-	NavSectorLink* purposeLink = NULL; // link this goal is meant to unblock
 	TObjPtr<AActor> actor = NULL; // actor to interact with
+
+	// per-bot data
+	std::unordered_set<int> blockers; // paths that can't be used while reacching this goal
+	std::unordered_map<int, int> unblockAttempts; // maps a line to a path it was meant to unblock. Don't try that line again if the path is still blocked.
+	
+	NavSectorLink* purposeLink = NULL; // link this goal is meant to unblock
 
 	BotGoal() {}
 	BotGoal(int action, int lineid) : action(action), lineid(lineid) {}

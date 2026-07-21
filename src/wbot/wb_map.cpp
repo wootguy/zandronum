@@ -173,7 +173,7 @@ bool BotMapInfo::is_seg_potentially_crossable(seg_t* seg) {
 	return true;
 }
 
-bool BotMapInfo::can_cross_seg_now(seg_t* seg)
+int BotMapInfo::segment_walkability(seg_t* seg)
 {
 	fixed_t x = (seg->v1->x + seg->v2->x) / 2;
 	fixed_t y = (seg->v1->y + seg->v2->y) / 2;
@@ -185,7 +185,7 @@ bool BotMapInfo::can_cross_seg_now(seg_t* seg)
 	int maxHeight = canJump ? JUMP_HEIGHT : STEP_HEIGHT;
 
 	if ((backFloor - frontFloor) > (maxHeight << FRACBITS)) {
-		return false; // too high to step
+		return LINK_BLOCK_TOO_HIGH; // too high to step
 	}
 
 	fixed_t backCeil = seg->backsector->ceilingplane.ZatPoint(x, y);
@@ -196,10 +196,10 @@ bool BotMapInfo::can_cross_seg_now(seg_t* seg)
 	fixed_t borderHeight = std::min(backCeil - frontFloor, frontCeil - backFloor);
 
 	if (backHeight < fduckHeight || borderHeight < fduckHeight) {
-		return false; // not enough space in target sector
+		return LINK_BLOCK_TOO_LOW; // not enough space in target sector
 	}
 
-	return true;
+	return LINK_BLOCK_CLEAR;
 }
 
 LinkSeg BotMapInfo::get_neighbor_subsector(subsector_t* ignoreSector, seg_t* borderSeg) {

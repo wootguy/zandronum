@@ -27,28 +27,29 @@ FVector3 NavSectorLink::pos3D() {
 	return FVector3(overlapCenter.X, overlapCenter.Y, parent->getFloorZ());
 }
 
-bool NavSectorLink::blocked(AActor* actor, bool recurse) {
+int NavSectorLink::blocked(AActor* actor, bool recurse) {
 	g_wb_nav.pathTests++;
 
-	if (!g_wb_mapinfo.can_cross_seg_now(seg)) {
+	int walkability = g_wb_mapinfo.segment_walkability(seg);
+	if (walkability != LINK_BLOCK_CLEAR) {
 		line_t* line = seg->linedef;
 
 		if (line && line->args[0] == 0 && g_wb_mapinfo.get_linedef_move_flag(line)) {
 			if (line->special == Door_LockedRaise && !P_CheckKeys(actor, line->args[3], false)) {
-				return true; // don't have the keys required to use this
+				return walkability; // don't have the keys required to use this
 			}
 
 			// border is an untagged linedef, which means it moves the target sector,
 			// which probably unblocks the path. TODO: not always!
-			return false;
+			return LINK_BLOCK_CLEAR;
 		}
 
-		return true;
+		return walkability;
 	}
 
 	// check if jumps are valid for dynamic links that depend on from/to sector states
 	if (!jumpable()) {
-		return true;
+		return LINK_BLOCK_CANT_JUMP;
 	}
 	
 	if (recurse && linkWidth <= PLAYER_WIDTH) {
@@ -78,17 +79,17 @@ bool NavSectorLink::blocked(AActor* actor, bool recurse) {
 		
 		if (expandedWidth > PLAYER_WIDTH) {
 			// wide enough if you consider the neighbor sectors
-			return false;
+			return LINK_BLOCK_CLEAR;
 		}
 
-		return true;
+		return LINK_BLOCK_TOO_NARROW;
 	}
 
-	return false;
+	return LINK_BLOCK_CLEAR;
 }
 
 bool NavSectorLink::walkable() {
-	return g_wb_mapinfo.can_cross_seg_now(seg) && jumpable();
+	return g_wb_mapinfo.segment_walkability(seg) == LINK_BLOCK_CLEAR && jumpable();
 }
 
 bool NavSectorLink::jumpable() {
@@ -422,7 +423,7 @@ float SectorNavMesh::path_cost(NavSectorLink& link, bool timeSensitive) {
 		}
 	}
 
-	if (!g_wb_mapinfo.can_cross_seg_now(link.seg)) {
+	if (g_wb_mapinfo.segment_walkability(link.seg) != LINK_BLOCK_CLEAR) {
 		fixed_t elevDist = fabs(target.getFloorZ() - parent.getFloorZ());
 		if (elevDist > (JUMP_HEIGHT << FRACBITS)) {
 			cost += elevDist * (4 << FRACBITS); // avoid elevators

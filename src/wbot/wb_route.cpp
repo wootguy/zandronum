@@ -79,6 +79,18 @@ void CBotRouteController::UpdateRoute() {
 			// inside the target sector. Advance the route.
 			m_route.erase(m_route.begin());
 			pretendRouteSector = -1;
+
+			// complete unblock attempts for the previous path
+			BotGoal* curGoal = pBot->CurrentGoal();
+			if (m_navLink && curGoal) {
+				auto& attempts = curGoal->unblockAttempts;
+				for (auto it = attempts.begin(); it != attempts.end(); ) {
+					if (it->second == m_navLink->id)
+						it = attempts.erase(it);
+					else
+						++it;
+				}
+			}
 		}
 		else {
 			FVector2 center = g_wb_nav.mesh[m_route[1]].pos();
@@ -247,9 +259,9 @@ void CBotRouteController::JumpThink() {
 bool CBotRouteController::HandleBlockedPaths() {
 	sector_t* nextSector = subsectors[m_route[1]].sector;
 	bool nextOnElevator = nextSector && nextSector->floordata;
-	bool linkBlocked = m_navLink->blocked(pActor);
+	int linkBlockReason = m_navLink->blocked(pActor);
 
-	if (ElevatorThink(linkBlocked)) {
+	if (ElevatorThink(linkBlockReason != LINK_BLOCK_CLEAR)) {
 		return true;
 	}
 
@@ -267,8 +279,8 @@ bool CBotRouteController::HandleBlockedPaths() {
 	}
 
 	// handle severe blockages
-	if (linkBlocked) {
-		BlockedPathThink(m_navLink);
+	if (linkBlockReason != LINK_BLOCK_CLEAR) {
+		BlockedPathThink(m_navLink, linkBlockReason);
 		return true;
 	}
 	else if (!nextOnElevator && m_route.size() > 2 && m_navTarget->touches(pActor)) {
@@ -286,8 +298,9 @@ bool CBotRouteController::HandleBlockedPaths() {
 				return true; // wait until the door/elevator is done moving
 			}
 
-			if (nextLink->blocked(pActor)) {
-				BlockedPathThink(nextLink);
+			int blockReason = nextLink->blocked(pActor);
+			if (blockReason != LINK_BLOCK_CLEAR) {
+				BlockedPathThink(nextLink, blockReason);
 				return true;
 			}
 		}
@@ -411,7 +424,7 @@ void CBotRouteController::RouteSlipThink() {
 	CancelRoute();
 }
 
-void CBotRouteController::BlockedPathThink(NavSectorLink* link) {
+void CBotRouteController::BlockedPathThink(NavSectorLink* link, int blockReason) {
 	link->blocked(pActor); // debug here
 	DebugPrint(VarArgs("Link %d blocked!\n", link->id));
 
@@ -427,13 +440,38 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link) {
 		randomizeGoal = true;
 	}
 
+	int targetMovement = link->target->getMoveFlags();
+	int parentMovement = link->parent->getMoveFlags();
+	bool tryTargetTrigger = targetMovement != 0;
+	bool tryParentTrigger = parentMovement != 0;
+
+	// don't trigger things if it won't help unblock the path
+	switch (blockReason) {
+	case LINK_BLOCK_TOO_HIGH:
+		if (!(targetMovement & FL_SECTOR_MOVE_FLOOR_DOWN)) {
+			tryTargetTrigger = false;
+		}
+		if (!(parentMovement & FL_SECTOR_MOVE_FLOOR_UP)) {
+			tryParentTrigger = false;
+		}
+		break;
+	case LINK_BLOCK_TOO_LOW:
+		tryParentTrigger = false;
+		break;
+	default:
+		tryParentTrigger = false;
+		tryTargetTrigger = false;
+		break;
+	}
+
+
 	// nothing is moving, try unblocking it ourselves.
-	if (pBot->SelectGoal(link->target->getTriggers(), link, randomizeGoal, &pBot->rushTrigger)) {
+	if (tryTargetTrigger && pBot->SelectGoal(link->target->getTriggers(), link, randomizeGoal, &pBot->rushTrigger)) {
 		return;
 	}
 
 	// if we're on an elevator, try triggering it.
-	if (pBot->SelectGoal(link->parent->getTriggers(), link, randomizeGoal, &pBot->rushTrigger)) {
+	if (tryParentTrigger && pBot->SelectGoal(link->parent->getTriggers(), link, randomizeGoal, &pBot->rushTrigger)) {
 		return;
 	}
 
@@ -531,7 +569,7 @@ bool CBotRouteController::RouteToGoal() {
 			}
 		}
 
-		DebugPrint(VarArgs("Routing to goal: %s\n", goal->desc().c_str()));
+		//DebugPrint(VarArgs("Routing to goal: %s\n", goal->desc().c_str()));
 		return true;
 	}
 
