@@ -126,58 +126,69 @@ FVector2 NavSectorLink::GetJumpStartPos() {
 	FVector2 b(seg->v2->x, seg->v2->y);
 	
 	// bring points inward a bit to avoid getting too close to a cliff or wall
-	FVector2 dir = b - a;
-	dir.MakeUnit();
-	a += dir * (8 << FRACBITS);
-	b -= dir * (8 << FRACBITS);
+	fixed_t dist = (b - a).Length();
+	FVector2 dir = (b - a).Unit();
+	fixed_t nudgeDist = std::min(dist / 2, 32 << FRACBITS);
+	a += dir * nudgeDist;
+	b -= dir * nudgeDist;
 
 	return ClosestPointOnSegment(target->pos(), a, b);
 }
 
-FVector2 NavSectorLink::GetJumpBackupPos() {
+FVector2 NavSectorLink::GetJumpEndPos() {
+	FVector2 jumpPos = GetJumpStartPos();
+	FVector2 center = target->pos();
+
+	// move the landing point from the center to the nearest ledge
+	FVector2 ledgeDir = (jumpPos - center).Unit();
+
+	FVector2 edgePos;
+	if (TraceSectorEdge(center, center + ledgeDir * (1000 << FRACBITS), edgePos)) {
+		return edgePos;
+	}
+
+	return center;
+}
+
+
+FVector2 NavSectorLink::GetJumpBackupPos(AActor* jumper) {
 	FVector2 startPos = GetJumpStartPos();
 
 	// back up the starting position to get a running start for the jump
-	FVector2 jumpDir = target->pos() - startPos;
-	jumpDir.MakeUnit();
+	FVector2 jumpDir = (target->pos() - startPos).Unit();
 
 	fixed_t maxBackupDist = 256 << FRACBITS;
 	FVector2 backupStartPos = startPos - (jumpDir * FRACUNIT); // avoid clipping against the backoff line
 	FVector2 backupPos = startPos - jumpDir * maxBackupDist;
+	fixed_t startZ = parent->getFloorZ();
+	int isects = 0;
 
-	// clip against current sector to prevent slipping into another sector while getting ready
-	subsector_t& sub = subsectors[parent->id];
-	float closestDist = FLT_MAX;
+	for (TraceIsect& isect : TraceIntersections(backupStartPos, backupPos)) {
+		fixed_t sectorZ = isect.sector->floorplane.ZatPoint((fixed_t)isect.pos.X, (fixed_t)isect.pos.Y);
+		int heightDiff = (sectorZ - startZ) >> FRACBITS;
 
-	for (int i = 0; i < sub.numlines; i++) {
-		seg_t& seg = sub.firstline[i];
-		FVector2 a1(seg.v1->x, seg.v1->y);
-		FVector2 a2(seg.v2->x, seg.v2->y);
-
-		if (DoLinesIntersect(a1, a2, backupStartPos, backupPos)) {
-			FVector2 isect = LineIntersect(a1, a2, backupStartPos, backupPos);
-			float dist = (isect - backupStartPos).Length();
-			if (dist < closestDist) {
-				closestDist = dist;
-				backupPos.X = isect.X;
-				backupPos.Y = isect.Y;
+		if (IsImpassable(isect.line) || heightDiff > STEP_HEIGHT) {
+			if (isects++ == 0) {
+				backupPos = isect.pos;
 			}
+			break;
 		}
+
+		backupPos = isect.pos;
 	}
 
-	// nudge it away from the intersection point a bit in case its against a wall
-	backupPos += jumpDir * FRACUNIT;
-
-	// final test to see if any walls are in the way
-	// TODO: need a better radius trace
-	if (false) {
-		fixed_t z = parent->getFloorZ() + (STEP_HEIGHT << FRACUNIT);
-		FVector3 start(startPos.X, startPos.Y, z);
-		FVector3 end(backupPos.X, backupPos.Y, z);
-		FTraceResults tr;
-		TraceRadius(start, end, PLAYER_WIDTH / 2, true, NULL, &tr);
-		backupPos = FVector2(tr.X, tr.Y);
+	// clip against walls for our radius
+	FTraceResults tr;
+	FVector2 backupDelta = backupPos - backupStartPos;
+	fixed_t traceZ = startZ + (STEP_HEIGHT << FRACBITS);
+	if (TraceRadius(FVector3(backupStartPos, traceZ), FVector3(backupPos, traceZ), PLAYER_WIDTH / 2, false, jumper, &tr)) {
+		float frac = tr.Fraction / (float)FRACUNIT;
+		backupPos = backupStartPos + backupDelta * frac;
 	}
+
+	fixed_t backupDist = (backupPos - backupStartPos).Length();
+	fixed_t nudgeDist = std::min(8 << FRACBITS, backupDist);
+	backupPos += jumpDir * nudgeDist;
 
 	return backupPos;
 }
@@ -301,32 +312,35 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 
 		for (int k = 0; k < nav.links.size() && spritesDrawn < maxSprites; k++) {
 			NavSectorLink& link = nav.links[k];
-			NavSector& linkNav = *link.target;
 			
 			if (!link.blocked(player)) {
 				FVector3 linkPos = link.pos3D();
 
 				if (link.isJump) {
-					FVector2 jumpStart = link.GetJumpStartPos();
-					linkPos.X = jumpStart.X;
-					linkPos.Y = jumpStart.Y;
-					FVector3 jumpPos = linkPos + FVector3(0, 0, 56 << FRACBITS);
-					FVector3 landPos = linkNav.pos3D() + FVector3(0, 0, 56 << FRACBITS);
+					FVector3 jumpStart = FVector3(link.GetJumpStartPos(), 0);
+					FVector3 jumpStartFloor = jumpStart;
+					FVector3 jumpEnd = FVector3(link.GetJumpEndPos(), 0);
+					FVector3 jumpEndFloor = jumpEnd;
+					jumpEndFloor.Z = link.target->getFloorZ();
+					jumpStartFloor.Z = link.parent->getFloorZ();
+					jumpStart.Z = link.parent->getFloorZ() + (56 << FRACBITS);
+					jumpEnd.Z = link.target->getFloorZ() + (56 << FRACBITS);
 					
-					FVector2 backupPos = link.GetJumpBackupPos();
-					FVector3 backupStart = linkPos + FVector3(0, 0, 56 << FRACBITS);
-					FVector3 backupEnd = FVector3(backupPos.X, backupPos.Y, linkPos.Z + (56 << FRACBITS));
+					FVector2 backupPos = link.GetJumpBackupPos(player);
+					FVector3 backupEnd = FVector3(backupPos.X, backupPos.Y, jumpStart.Z);
 
-					spritesDrawn += draw_debug_line(nav.pos3D(), linkPos, actor);
-					spritesDrawn += draw_debug_line(linkPos, jumpPos, actor);
-					spritesDrawn += draw_debug_line(jumpPos, landPos, actor);
-					spritesDrawn += draw_debug_line(landPos, linkNav.pos3D(), actor);
+					spritesDrawn += draw_debug_line(nav.pos3D(), jumpStartFloor, actor);
+					spritesDrawn += draw_debug_line(jumpStartFloor, jumpStart, actor);
+					spritesDrawn += draw_debug_line(jumpStart, jumpEnd, actor);
+					spritesDrawn += draw_debug_line(jumpEnd, jumpEndFloor, actor);
+					spritesDrawn += draw_debug_line(jumpEndFloor, link.target->pos3D(), actor);
 
-					spritesDrawn += draw_debug_line(backupStart, backupEnd, actor);
+					if (link.jumpDist > (PLAYER_WIDTH << FRACBITS))
+						spritesDrawn += draw_debug_line(jumpStart, backupEnd, actor);
 				}
 				else {
 					spritesDrawn += draw_debug_line(nav.pos3D(), linkPos, actor);
-					spritesDrawn += draw_debug_line(linkPos, linkNav.pos3D(), actor);
+					spritesDrawn += draw_debug_line(linkPos, link.target->pos3D(), actor);
 				}
 			}
 		}
@@ -399,7 +413,7 @@ float SectorNavMesh::path_cost(NavSectorLink& link, bool timeSensitive) {
 
 		if (link.isJump) {
 			// jumps are error-prone. If you must take one, choose the shortest
-			cost += dist * (100 << FRACBITS);
+			cost += dist * (4 << FRACBITS);
 
 			if (!link.isJumpValid()) {
 				// jumps that can't be made yet are even more error prone

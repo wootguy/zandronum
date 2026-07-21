@@ -559,7 +559,7 @@ void BotMapInfo::add_sector_info() {
 			for (int k = 0; k < numlines; k++) {
 				line_t& line = lines[k];
 
-				if (line.args[0] != sec.tag)
+				if (!line.args[0] || line.args[0] != sec.tag)
 					continue;
 
 				int flags = get_linedef_move_flag(&line);
@@ -575,7 +575,7 @@ void BotMapInfo::add_sector_info() {
 		for (int k = 0; k < sec.linecount; k++) {
 			line_t* line = sec.lines[k];
 
-			if ((line->args[0] && line->args[0] != sec.tag) || line->backsector != &sec)
+			if (line->args[0] || line->backsector != &sec)
 				continue;
 
 			int flags = get_linedef_move_flag(line);

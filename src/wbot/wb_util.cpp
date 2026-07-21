@@ -260,11 +260,10 @@ bool TraceLine(FVector3 start, FVector3 end, bool ignoreMonsters, AActor* ignore
 }
 
 bool TraceRadius(FVector3 start, FVector3 end, fixed_t radius, bool ignoreMonsters, AActor* ignoreEnt, FTraceResults* tr) {
-	FVector2 delta = end - start;
-	delta.MakeUnit();
-	FVector3 rightDir(delta.Y, -delta.X, 0);
-	fixed_t rightStep = radius / 2;
+	FVector2 dir = (end - start).Unit() * FRACUNIT;
+	FVector3 rightDir(dir.Y, -dir.X, 0);
 	fixed_t minFrac = FRACUNIT;
+	int rightStep = radius / 2;
 
 	static FTraceResults dummy;
 	FTraceResults* out = tr ? tr : &dummy;
@@ -273,8 +272,8 @@ bool TraceRadius(FVector3 start, FVector3 end, fixed_t radius, bool ignoreMonste
 		FTraceResults temp;
 		TraceLine(start + rightDir * i * rightStep, end + rightDir * i * rightStep, ignoreMonsters, ignoreEnt, &temp);
 		
-		if (tr->Fraction < minFrac) {
-			minFrac = tr->Fraction;
+		if (temp.Fraction < minFrac) {
+			minFrac = temp.Fraction;
 			*out = temp;
 		}
 	}
@@ -285,8 +284,7 @@ bool TraceRadius(FVector3 start, FVector3 end, fixed_t radius, bool ignoreMonste
 vector<TraceIsect> TraceIntersections(FVector2 start, FVector2 end) {
 	FVector2 delta = end - start;
 	fixed_t maxDist = delta.Length();
-	delta.MakeUnit();
-	delta *= FRACUNIT;
+	delta = delta.Unit() * FRACUNIT;
 
 	fixed_t StartX = start.X;
 	fixed_t StartY = start.Y;
@@ -300,13 +298,11 @@ vector<TraceIsect> TraceIntersections(FVector2 start, FVector2 end) {
 
 	while ((in = path.Next())) {
 		line_t* wall = in->d.line;
-
 		fixed_t dist = FixedMul(maxDist, in->frac);
-		fixed_t hitx = StartX + FixedMul(Vx, dist);
-		fixed_t hity = StartY + FixedMul(Vy, dist);
 
 		TraceIsect isect;
 		isect.line = wall;
+		isect.pos = FVector2(StartX + FixedMul(Vx, dist), StartY + FixedMul(Vy, dist));
 
 		if (wall->backsector == NULL) {
 			isect.sector = in->d.line->frontsector;
@@ -327,12 +323,37 @@ bool TraceImpassable(FVector2 start, FVector2 end) {
 	intercept_t* in;
 
 	while ((in = path.Next())) {
-		line_t* wall = in->d.line;
-		if (!wall->backsector || (wall->flags & ML_BLOCKING))
+		if (IsImpassable(in->d.line))
 			return true;
 	}
 
 	return false;
+}
+
+bool TraceSectorEdge(FVector2 start, FVector2 end, FVector2& edge) {
+	FPathTraverse path(start.X, start.Y, end.X, end.Y, PT_ADDLINES);
+	intercept_t* in = path.Next();
+
+	if (in) {
+		FVector2 delta = end - start;
+		fixed_t dist = FixedMul((fixed_t)delta.Length(), in->frac);
+		FVector2 dir = delta.Unit() * FRACUNIT;
+
+		fixed_t StartX = start.X;
+		fixed_t StartY = start.Y;
+		fixed_t Vx = dir.X;
+		fixed_t Vy = dir.Y;
+
+		edge = FVector2(StartX + FixedMul(Vx, dist), StartY + FixedMul(Vy, dist));
+		return true;
+	}
+
+	edge = end;
+	return false;
+}
+
+bool IsImpassable(line_t* line) {
+	return !line->backsector || (line->flags & ML_BLOCKING);
 }
 
 bool IsPropBlocker(AActor* actor) {
@@ -404,8 +425,8 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 			if (!playeringame[i] || !player)
 				continue;
 
-			if (player->player->bIsBot)	set_ori(player, 2987, -2708, ANGLE_1 * 0);
-			else						set_ori(player, 4217, 5217, ANGLE_1 * 40);
+			if (player->player->bIsBot)	set_ori(player, 2641, 4735, ANGLE_1 * 0);
+			else						set_ori(player, 2608, 4545, ANGLE_1 * 40);
 
 			if (player->player->bIsBot) {
 				CWootBot* bot = (CWootBot*)player->player->pSkullBot;

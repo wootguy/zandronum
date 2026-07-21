@@ -108,11 +108,14 @@ void wbot_debug(CWootBot* pBot) {
 		navInfo += "\nAngles: " + to_string(yaw) + " " + to_string(pitch);
 	}
 
+	int jumpState = pBot->m_routeController.jumpState;
 	string stateStr = "State:";
+	if (jumpState == WBOT_JUMP_PREP) { stateStr += " JUMP_PREP"; }
+	if (jumpState == WBOT_JUMP_RUN) { stateStr += " JUMP_RUN"; }
+	if (jumpState == WBOT_JUMP_FLY) { stateStr += " JUMP_FLY"; }
 	if (pBot->stateFlags & FL_WBOT_WAIT_ELEV) { stateStr += " WAIT_ELEV"; }
 	if (pBot->stateFlags & FL_WBOT_ON_ELEV) { stateStr += " ON_ELEV"; }
 	if (pBot->stateFlags & FL_WBOT_WAIT_DOOR) { stateStr += " WAIT_DOOR"; }
-	if (pBot->stateFlags & FL_WBOT_JUMPING) { stateStr += " JUMP"; }
 	if (pBot->stateFlags & FL_WBOT_FLYING) { stateStr += " FLY"; }
 	if (pBot->stateFlags & FL_WBOT_RUSHING) { stateStr += " RUSH"; }
 	if (pBot->stateFlags & FL_WBOT_SLOW_DOWN) { stateStr += " SLOW_DOWN"; }

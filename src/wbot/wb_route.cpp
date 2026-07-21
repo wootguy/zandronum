@@ -22,6 +22,15 @@ void CBotRouteController::Think() {
 	pBot->m_sideMove = 0;
 	pBot->stateFlags &= ~(FL_WBOT_WAIT_ELEV | FL_WBOT_WAIT_DOOR | FL_WBOT_SLOW_DOWN);
 
+	if (jumpState) {
+		// may go thru different sectors while preparing a jump, so don't get confused
+		JumpThink();
+		if (pBot->StuckThink(500)) {
+			HandleStuckPath();
+		}
+		return;
+	}
+
 	UpdateRoute();
 
 	if (m_route.size() > 1 && !m_navLink) {
@@ -35,10 +44,7 @@ void CBotRouteController::Think() {
 		return; // going too fast
 	}
 
-	if ((pBot->stateFlags & FL_WBOT_JUMPING) && m_route.size() > 1) {
-		JumpThink(); // perform a jump
-	}
-	else if (m_route.size() > 1) {
+	if (m_route.size() > 1) {
 		// allow slipping off the route into adjacent sectors while heading towards the target sector
 		bool onTrack = m_navid == m_route[0]
 			|| m_navCur->getLink(m_route[1]) || m_navCur->getLink(m_route[0])
@@ -59,21 +65,11 @@ void CBotRouteController::Think() {
 		FVector2 centerGoal = m_navIdeal->pos();
 		if (pBot->MoveTo(centerGoal, m_nodeRadius, m_routeSpeed)) {
 			m_route.clear(); // don't reset pretendsector in case a goal is inside it
-			pBot->stateFlags &= ~FL_WBOT_JUMPING;
 		}
 	}
 
 	if (pBot->StuckThink(500)) {
-		DebugPrint("I got stuck! Cancelling route.\n");
-
-		BotGoal* goal = pBot->CurrentGoal();
-
-		if (m_navLink && goal) {
-			// don't try to take this path again
-			goal->blockers.insert(m_navLink->id);
-		}
-
-		CancelRoute();
+		HandleStuckPath();
 	}
 }
 
@@ -83,7 +79,6 @@ void CBotRouteController::UpdateRoute() {
 			// inside the target sector. Advance the route.
 			m_route.erase(m_route.begin());
 			pretendRouteSector = -1;
-			pBot->stateFlags &= ~FL_WBOT_JUMPING;
 		}
 		else {
 			FVector2 center = g_wb_nav.mesh[m_route[1]].pos();
@@ -115,6 +110,11 @@ void CBotRouteController::UpdateRoute() {
 		}
 	}
 
+	if (pBot->rushNav == m_navid) {
+		pBot->rushNav = -1;
+		pBot->stateFlags &= ~FL_WBOT_RUSHING;
+	}
+
 	m_navCur = &g_wb_nav.mesh[m_navid];
 	m_navIdeal = &g_wb_nav.mesh[m_route[0]];
 	m_navTarget = &g_wb_nav.mesh[m_route.size() > 1 ? m_route[1] : m_route[0]];
@@ -126,36 +126,27 @@ bool CBotRouteController::BeCareful() {
 	bool shouldBeCareful = false;
 
 	// be careful near cliffs
-	if (!(pBot->stateFlags & FL_WBOT_JUMPING)) {
-		if (m_route.size() > 1) {
-			NavSector& idealNav = g_wb_nav.mesh[m_route[0]];
-			NavSector& targetNav = g_wb_nav.mesh[m_route[1]];
-			NavSectorLink* link = idealNav.getLink(m_route[1]);
-			headingTowardsCliff = targetNav.hasCliffs && link->linkWidth < 32;
-		}
+	if (m_route.size() > 1) {
+		NavSector& idealNav = g_wb_nav.mesh[m_route[0]];
+		NavSector& targetNav = g_wb_nav.mesh[m_route[1]];
+		NavSectorLink* link = idealNav.getLink(m_route[1]);
+		headingTowardsCliff = targetNav.hasCliffs && link->linkWidth < 32;
+	}
 
-		if (pBot->m_cliffDist < SAFE_CLIFF_DIST * 0.5f || headingTowardsCliff) {
-			m_routeSpeed *= 0.5f;
-			m_nodeRadius = 8;
-			shouldBeCareful = true;
-		}
-		else if (pBot->m_cliffDist < SAFE_CLIFF_DIST * 0.75f) {
-			m_routeSpeed *= 0.75f;
-			m_nodeRadius = 16;
-			shouldBeCareful = true;
-		}
+	if (pBot->m_cliffDist < SAFE_CLIFF_DIST * 0.5f || headingTowardsCliff) {
+		m_routeSpeed *= 0.5f;
+		m_nodeRadius = 8;
+		shouldBeCareful = true;
+	}
+	else if (pBot->m_cliffDist < SAFE_CLIFF_DIST * 0.75f) {
+		m_routeSpeed *= 0.75f;
+		m_nodeRadius = 16;
+		shouldBeCareful = true;
 	}
 
 	if (shouldBeCareful && pBot->GetSpeed2D() > m_routeSpeed) {
 		pBot->stateFlags |= FL_WBOT_SLOW_DOWN;
-
-		FVector2 pos(pActor->x, pActor->y);
-		FVector2 velDir(pActor->velx, pActor->vely);
-		velDir.MakeUnit();
-		velDir *= 100 << FRACBITS;
-
-		pBot->MoveTo(pos - velDir, 0, RUN_SPEED);
-
+		pBot->StopMoving();
 		return true;
 	}
 
@@ -163,31 +154,93 @@ bool CBotRouteController::BeCareful() {
 }
 
 void CBotRouteController::JumpThink() {
-	// just try to land in the right spot
-	pBot->MoveTo(m_navTarget->pos(), 0, m_routeSpeed);
+	switch (jumpState) {
+	case WBOT_JUMP_PREP: {
+		int dist = pBot->GetDistance(jumpBackupPos) >> FRACBITS;
+		int startSpeed = RUN_SPEED * 0.2f;
+		m_routeSpeed = RUN_SPEED;
+		if (dist < 64) {
+			m_routeSpeed = RUN_SPEED * 0.2f;
+		}
+		else if (dist < 256) {
+			m_routeSpeed = RUN_SPEED * 0.5f;
+		}
+		int curSpeed = pBot->GetSpeed2D();
 
-	if (m_navTarget->getFloorZ() > pActor->z + (JUMP_HEIGHT << FRACBITS)) {
-		pBot->stateFlags &= ~FL_WBOT_JUMPING; // missed the jump
+		// move to the running-start position
+		if (pBot->MoveTo(jumpBackupPos, 16, m_routeSpeed) && curSpeed < startSpeed) {
+			jumpState = WBOT_JUMP_RUN;
+		}
+		break;
+	}
+	case WBOT_JUMP_RUN: {
+		// run to the jumping off point
+		bool inStartSector = g_wb_nav.get_nav_id(pActor) == m_navLink->parent->id;
+		if (pBot->MoveTo(jumpStartPos, 32, m_routeSpeed) || inStartSector) {
+			jumpState = WBOT_JUMP_FLY;
+		}
+		break;
+	}
+	case WBOT_JUMP_FLY: {
+		FVector2 target = m_navTarget->pos();
+		fixed_t jumpDist = (target - FVector2(pActor->x, pActor->y)).Length();
+		bool bigJump = jumpDist > 100 << FRACBITS;
+		if (m_navTarget->getFloorZ() > m_navIdeal->getFloorZ() + (STEP_HEIGHT << FRACBITS))
+			bigJump = true;
 
-		BotGoal* curgoal = pBot->CurrentGoal();
-		if (curgoal) {
-			// don't try the jump again, there are probably other ones to try
-			// and many jumps just don't work
-			curgoal->blockers.insert(m_navLink->id);
+		if (bigJump && (pBot->stateFlags & FL_WBOT_FLYING)) {
+			// bot is off a ledge now, start the jump
+			pBot->m_lButtons |= BT_JUMP;
 		}
 
-		return;
+		if (g_wb_nav.get_nav_id(pActor) == m_navTarget->id) {
+			pBot->StopMoving(); // flying over the target sector, try not to fall off now
+
+			if (pPlayer->onground) {
+				jumpState = WBOT_JUMP_NONE;
+				return; // completed the jump
+			}
+		} 
+		else if (pPlayer->onground) {
+			// haven't jumped yet, keep moving towards the cliff
+			pBot->MoveTo(jumpEndPos, 0, m_routeSpeed);
+		}
+		else {
+			// try to land in the right spot
+			FVector3 landPos = FVector3(jumpEndPos, m_navTarget->getFloorZ());
+			FVector3 pos(pActor->z, pActor->y, pActor->z);
+			FVector3 idealDir = (landPos - pos).Unit();
+			FVector3 velDir = FVector3(pActor->velx, pActor->vely, pActor->velz).Unit();
+
+			if (idealDir.Z > velDir.Z) {
+				// falling short, keep building speed
+				pBot->MoveTo(jumpEndPos, 0, m_routeSpeed);
+				pBot->m_lButtons |= BT_CROUCH; // just in case
+			}
+			else {
+				// overshooting the target, try to slow down
+				pBot->StopMoving();
+			}
+		}
+
+		if (m_navTarget->getFloorZ() > pActor->z + (JUMP_HEIGHT << FRACBITS)) {
+			jumpState = WBOT_JUMP_NONE; // missed the jump
+
+			BotGoal* curgoal = pBot->CurrentGoal();
+			if (curgoal) {
+				// don't try the jump again, there are probably other ones to try
+				// and many jumps just don't work
+				curgoal->blockers.insert(m_navLink->id);
+			}
+
+			return;
+		}
+		break;
 	}
-
-	FVector2 target = m_navTarget->pos();
-	fixed_t jumpDist = (target - FVector2(pActor->x, pActor->y)).Length();
-	bool bigJump = jumpDist > 100 << FRACBITS;
-	if (m_navTarget->getFloorZ() > m_navIdeal->getFloorZ() + (STEP_HEIGHT << FRACBITS))
-		bigJump = true;
-
-	if (bigJump && (pBot->stateFlags & FL_WBOT_FLYING)) {
-		// bot is off a ledge now, start the jump
-		pBot->m_lButtons |= BT_JUMP;
+	default:
+		DebugPrint("Invalid jump state\n");
+		jumpState = 0;
+		break;
 	}
 }
 
@@ -208,6 +261,7 @@ bool CBotRouteController::HandleBlockedPaths() {
 		}
 		else {
 			pBot->stateFlags |= FL_WBOT_WAIT_DOOR;
+			pBot->StopMoving();
 			return true; // wait until the door/elevator is done moving
 		}
 	}
@@ -222,16 +276,20 @@ bool CBotRouteController::HandleBlockedPaths() {
 		// handling. Helps in case of doors with tiny sectors in front of them which the
 		// bot can't fully get inside.
 		NavSectorLink* nextLink = m_navLink->target->getLink(m_route[2]);
-		sector_t* nextNextSector = subsectors[m_route[2]].sector;
 
-		if (nextLink && !nextLink->walkable() && (nextNextSector->floordata || nextNextSector->ceilingdata)) {
-			pBot->stateFlags |= FL_WBOT_WAIT_DOOR;
-			return true; // wait until the door/elevator is done moving
-		}
+		if (nextLink && !nextLink->isJump) {
+			sector_t* nextNextSector = subsectors[m_route[2]].sector;
 
-		if (nextLink && nextLink->blocked(pActor)) {
-			BlockedPathThink(nextLink);
-			return true;
+			if (!nextLink->walkable() && (nextNextSector->floordata || nextNextSector->ceilingdata)) {
+				pBot->stateFlags |= FL_WBOT_WAIT_DOOR;
+				pBot->StopMoving();
+				return true; // wait until the door/elevator is done moving
+			}
+
+			if (nextLink->blocked(pActor)) {
+				BlockedPathThink(nextLink);
+				return true;
+			}
 		}
 	}
 
@@ -311,23 +369,12 @@ void CBotRouteController::MoveThruLink() {
 		pBot->m_lButtons |= BT_CROUCH;
 	}
 
-	if (m_navLink->isJump) {
-		FVector2 startPos = m_navLink->GetJumpBackupPos();
-		int dist = pBot->GetDistance(startPos) >> FRACBITS;
-		m_routeSpeed = RUN_SPEED;
-		int startSpeed = RUN_SPEED * 0.2f;
-		if (dist < 64) {
-			m_routeSpeed = RUN_SPEED * 0.2f;
-		}
-		else if (dist < 256) {
-			m_routeSpeed = RUN_SPEED * 0.5f;
-		}
-		int curSpeed = pBot->GetSpeed2D();
-
-		if (pBot->MoveTo(startPos, 18, m_routeSpeed) && curSpeed < startSpeed) {
-			// close enough to the link edge				
-			pBot->stateFlags |= FL_WBOT_JUMPING;
-		}
+	if (m_navLink->isJump && m_navLink->jumpDist > (PLAYER_WIDTH << FRACBITS)) {
+		// get a running start for the jump
+		jumpState = WBOT_JUMP_PREP;
+		jumpBackupPos = m_navLink->GetJumpBackupPos(pActor);
+		jumpStartPos = m_navLink->GetJumpStartPos();
+		jumpEndPos = m_navLink->GetJumpEndPos();
 	}
 	else {
 		// move to the next link
@@ -349,12 +396,6 @@ void CBotRouteController::MoveThruLink() {
 }
 
 void CBotRouteController::RouteSlipThink() {
-	if ((pBot->stateFlags & FL_WBOT_JUMPING) && (pBot->stateFlags & FL_WBOT_FLYING)) {
-		// don't abort the route until the jump is complete
-		pBot->MoveTo(m_navTarget->pos(), 0, m_routeSpeed);
-		return;
-	}
-
 	if (m_navid != m_route[0]) {
 		// update route if slipped off into a sector adjacent to the previous
 		// not done earlier for a reason i forgot on doom2 map24 tightrope area.
@@ -381,7 +422,7 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link) {
 	unordered_set<int> allBlockedPaths = GetBlockedPaths();
 
 	bool randomizeGoal = false;
-	if ((pBot->stateFlags & FL_WBOT_RUSHING) && link->id == pBot->rushLinkId) {
+	if ((pBot->stateFlags & FL_WBOT_RUSHING) && link->target->id == pBot->rushNav) {
 		// failed to reach the target sector in time. Try a different unblock goal if there are multiple.
 		randomizeGoal = true;
 	}
@@ -411,7 +452,7 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link) {
 		curGoal->blockers.clear();
 		m_route = RouteToSector(curGoal->getNavId());
 		if (m_route.size()) {
-			DebugPrint("Forgetting blocked paths and trying again...");
+			DebugPrint("Forgetting blocked paths and trying again...\n");
 			return;
 		}
 	}
@@ -419,6 +460,19 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link) {
 	DebugPrint("Goals aborted. Failed to reach a subgoal.\n");
 	CancelRoute();
 	pBot->m_goals.clear();
+}
+
+void CBotRouteController::HandleStuckPath() {
+	DebugPrint("I got stuck! Cancelling route.\n");
+
+	BotGoal* goal = pBot->CurrentGoal();
+
+	if (m_navLink && goal) {
+		// don't try to take this path again
+		goal->blockers.insert(m_navLink->id);
+	}
+
+	CancelRoute();
 }
 
 void CBotRouteController::CancelRoute() {
@@ -432,7 +486,7 @@ void CBotRouteController::CancelRoute() {
 	m_route.clear();
 	pretendRouteSector = -1;
 	pBot->stuckCounter = 0;
-	pBot->stateFlags &= ~FL_WBOT_JUMPING;
+	jumpState = 0;
 }
 
 unordered_set<int> CBotRouteController::GetBlockedPaths() {

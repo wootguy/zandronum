@@ -8,6 +8,7 @@ struct FTraceResults;
 struct TraceIsect {
 	line_t* line;
 	sector_t* sector;
+	FVector2 pos;
 };
 
 char* VarArgs(const char* format, ...);
@@ -59,6 +60,11 @@ std::vector<TraceIsect> TraceIntersections(FVector2 start, FVector2 end);
 
 // returns true if the trace intersects any impassable walls
 bool TraceImpassable(FVector2 start, FVector2 end);
+
+// trace until the first intersected sector edge
+bool TraceSectorEdge(FVector2 start, FVector2 end, FVector2& edge);
+
+bool IsImpassable(line_t* line);
 
 bool IsPropBlocker(AActor* actor);
 

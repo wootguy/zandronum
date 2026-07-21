@@ -97,7 +97,7 @@ void CWootBot::Reset() {
 	m_forwardMove = 0;
 	m_sideMove = 0;
 	m_nextThink = 0;
-	rushLinkId = -1;
+	rushNav = -1;
 }
 
 void CWootBot::DebugPrint(const char* msg) {
@@ -119,10 +119,13 @@ void CWootBot::IdleThink() {
 	m_forwardMove = 0;
 	m_sideMove = 0;
 	pActor->pitch = 0;
-	m_lButtons |= BT_CROUCH;
 
-	if (rand() % 20 == 0) {
-		pActor->angle = (rand() % 360) * ANGLE_1;
+	if (StopMoving()) {
+		m_lButtons |= BT_CROUCH;
+
+		if (rand() % 20 == 0) {
+			pActor->angle = (rand() % 360) * ANGLE_1;
+		}
 	}
 }
 
@@ -297,7 +300,7 @@ bool CWootBot::MoveTo(FVector2 pos, int radius, int speed) {
 	FVector2 avoidLedgeDir = AvoidLedges(pActor, m_cliffDist);
 	FVector2 moveDir = wantDir + avoidCornersDir;
 
-	if (!(stateFlags & FL_WBOT_JUMPING)) {
+	if (!m_routeController.jumpState) {
 		if (m_cliffDist < 0) {
 			// do whatever it takes to get back on solid ground.
 			// For best results, speed should be 0.5 or less, so correction force can recover from any velocity
@@ -322,6 +325,21 @@ bool CWootBot::MoveTo(FVector2 pos, int radius, int speed) {
 
 	fixed_t dist = P_AproxDistance(pActor->x - (fixed_t)pos.X, pActor->y - (fixed_t)pos.Y);
 	return dist < (radius << FRACBITS);
+}
+
+bool CWootBot::StopMoving() {
+	FVector2 pos(pActor->x, pActor->y);
+	FVector2 vel(pActor->velx, pActor->vely);
+	FVector2 opposingPos = pos - (vel.Unit() * (100 << FRACBITS));
+
+	int speed = GetSpeed2D();
+
+	if (speed > 0) {
+		MoveTo(opposingPos, 0, std::min(RUN_SPEED, speed*4));
+	}
+	// else wait for friction to stop us
+
+	return speed == 0;
 }
 
 FVector2 CWootBot::AvoidCornersVector(FVector2 wantDir) {
@@ -576,7 +594,7 @@ void CWootBot::PopGoal() {
 
 	BotGoal& goal = m_goals[m_goals.size() - 1];
 
-	rushLinkId = -1;
+	rushNav = -1;
 	stateFlags &= ~FL_WBOT_RUSHING;
 
 	int purposeLinkId = goal.purposeLink ? goal.purposeLink->id : -1;
@@ -584,7 +602,7 @@ void CWootBot::PopGoal() {
 	if (purposeNav && (purposeNav->getMoveFlags() & FL_SECTOR_MOVE_TIMED)) {
 		// the purpose of this goal was to move a timed sector. Better hurry before that sector resets!
 		stateFlags |= FL_WBOT_RUSHING;
-		rushLinkId = goal.purposeLink->id;
+		rushNav = goal.purposeLink->target->id;
 	}
 
 	DebugPrint(VarArgs("Finished goal: %s\n", goal.desc().c_str()));

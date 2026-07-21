@@ -10,6 +10,13 @@ class CWootBot;
 struct NavSector;
 struct NavSectorLink;
 
+enum BotJumpState {
+	WBOT_JUMP_NONE, // not jumping
+	WBOT_JUMP_PREP, // carefully move to the starting position for a running start
+	WBOT_JUMP_RUN,	// run towards the jumpoff point
+	WBOT_JUMP_FLY,	// flying through the air
+};
+
 
 class CBotRouteController {
 public:
@@ -24,6 +31,11 @@ public:
 	NavSector* m_navIdeal = NULL;		// current node in the route
 	NavSector* m_navTarget = NULL;		// next node in the route
 	NavSectorLink* m_navLink = NULL;	// link from the ideal nav to the target
+
+	FVector2 jumpBackupPos = FVector2(0, 0);		// position to move to for a running start
+	FVector2 jumpStartPos = FVector2(0,0);			// position where the jump begins
+	FVector2 jumpEndPos = FVector2(0,0);			// position where the jump begins
+	int jumpState = WBOT_JUMP_NONE;
 
 	CBotRouteController(CWootBot* pBot);
 
@@ -50,6 +62,7 @@ private:
 	void RouteSlipThink();						// bot slipped off its route
 	bool BeCareful();							// slow down around cliffs, true if should abort movement
 	void BlockedPathThink(NavSectorLink* link);	// a path in the route is blocked
+	void HandleStuckPath();						// bot failed to move thru a path
 
 	void DebugPrint(const char* msg);
 };

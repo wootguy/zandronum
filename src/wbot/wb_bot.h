@@ -8,13 +8,12 @@
 struct FTraceResults;
 struct NavSectorLink;
 
-#define FL_WBOT_WAIT_ELEV	1 // bot is waiting for an elevator to lift/descend
-#define FL_WBOT_WAIT_DOOR	2 // bot is waiting for a door or platform to move out of the way
-#define FL_WBOT_JUMPING		4 // bot is jumping across a gap
-#define FL_WBOT_FLYING		8 // bot is jumping, falling, or above a gap in the floor
-#define FL_WBOT_RUSHING		16 // bot is hurrying to reach a sector before a timed event ends
-#define FL_WBOT_ON_ELEV		32 // bot is standing on a platform that is moving or about to move
-#define FL_WBOT_SLOW_DOWN	64 // bot is trying to reduce their speed
+#define FL_WBOT_WAIT_ELEV	(1<<0) // bot is waiting for an elevator to lift/descend
+#define FL_WBOT_WAIT_DOOR	(1<<1) // bot is waiting for a door or platform to move out of the way
+#define FL_WBOT_FLYING		(1<<2) // bot is jumping, falling, or above a gap in the floor
+#define FL_WBOT_RUSHING		(1<<3) // bot is hurrying to reach a sector before a timed event ends
+#define FL_WBOT_ON_ELEV		(1<<4) // bot is standing on a platform that is moving or about to move
+#define FL_WBOT_SLOW_DOWN	(1<<5) // bot is trying to reduce their speed
 
 class CWootBot : public CSkullBot {
 public:
@@ -30,7 +29,7 @@ public:
 	int m_cliffDist = 9999;
 	FVector2 lastPos = FVector2(0, 0);	// used to detect being stuck
 	bool m_wasDead;
-	int rushLinkId;				// link ID that the bot is rushing for
+	int rushNav;				// subsector/nav ID that the bot is rushing for
 
 	// debug state
 	bool m_debug = false;		// print thoughts to chat
@@ -56,6 +55,7 @@ public:
 	
 	void AimAtPos(FVector3 pos);
 	bool MoveTo(FVector2 pos, int radius=32, int speed=100);
+	bool StopMoving(); // try to stop movement. Returns true if stationary.
 	FVector2 AvoidCornersVector(FVector2 wantDir); // direction to move to avoid hitting corners
 	FVector2 AvoidLedges(AActor* actor, int& cliffDist); // direction to move to avoid falling off a ledge
 	void UpdatePositionFlags();
@@ -64,6 +64,7 @@ public:
 	void DeadThink();	// dead
 	void IdleThink();	// nothing to do	
 	bool StuckThink(int maxStuck=1000);	// true if stuck longer than the given time
+	bool HandleStuckPath();
 	void GoalActionThink(); // do something with the goal object, after routing to it
 
 	bool TraceAhead(int dist, FVector3 offset, bool ignoreMonsters, FTraceResults* tr);

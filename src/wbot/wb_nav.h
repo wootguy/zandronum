@@ -31,8 +31,9 @@ struct NavSectorLink {
 
 	FVector2 pos();
 	FVector3 pos3D();
-	FVector2 GetJumpBackupPos(); // find the best place to begin running for a jump
+	FVector2 GetJumpBackupPos(AActor* jumper); // find the best place to begin running for a jump
 	FVector2 GetJumpStartPos(); // find the best place to begin the jump
+	FVector2 GetJumpEndPos(); // find the closest point to land
 	
 	// true if this link can be moved thru, else it is too high or blocked.
 	bool blocked(AActor* actor, bool recurse=true);
