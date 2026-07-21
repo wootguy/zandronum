@@ -443,6 +443,17 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 		kill_all_shootables();
 	}
 
+	if (!strcmp(msg, "reset")) {
+		for (int i = 0; i < MAXPLAYERS; i++) {
+			AActor* player = players[i].mo;
+			if (!playeringame[i] || !player || !player->player->bIsBot)
+				continue;
+
+			CWootBot* bot = (CWootBot*)player->player->pSkullBot;
+			bot->Reset();
+		}
+	}
+
 	if (strstr(msg, "goto ") == msg) {
 		int id = atoi(msg + 5);
 		if (id >= 0 && id < numsubsectors) {

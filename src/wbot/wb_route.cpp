@@ -428,12 +428,12 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link) {
 	}
 
 	// nothing is moving, try unblocking it ourselves.
-	if (pBot->SelectGoal(link->target->getTriggers(), link, randomizeGoal)) {
+	if (pBot->SelectGoal(link->target->getTriggers(), link, randomizeGoal, &pBot->rushTrigger)) {
 		return;
 	}
 
 	// if we're on an elevator, try triggering it.
-	if (pBot->SelectGoal(link->parent->getTriggers(), link, randomizeGoal)) {
+	if (pBot->SelectGoal(link->parent->getTriggers(), link, randomizeGoal, &pBot->rushTrigger)) {
 		return;
 	}
 
@@ -444,22 +444,8 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link) {
 		return;
 	}
 
-	// getting desperate now
-	pBot->m_nextThink = level.time + 10;
-
-	// clearing previous blocked links and try again, maybe paths got unblocked
-	if (curGoal->blockers.size() > 1 || !curGoal->blockers.count(link->id)) {
-		curGoal->blockers.clear();
-		m_route = RouteToSector(curGoal->getNavId());
-		if (m_route.size()) {
-			DebugPrint("Forgetting blocked paths and trying again...\n");
-			return;
-		}
-	}
-
-	DebugPrint("Goals aborted. Failed to reach a subgoal.\n");
-	CancelRoute();
-	pBot->m_goals.clear();
+	// try a different route/unblocker for the parent goal with new blockers
+	pBot->FailGoal();
 }
 
 void CBotRouteController::HandleStuckPath() {
@@ -549,9 +535,7 @@ bool CBotRouteController::RouteToGoal() {
 		return true;
 	}
 
-	DebugPrint(VarArgs("Failed goal (no route): %s\n", goal->desc().c_str()));
-	pBot->m_goals.pop_back();
-	pBot->m_nextThink = level.time + 10;
+	pBot->FailGoal();
 	return false;
 }
 

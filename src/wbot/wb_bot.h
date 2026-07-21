@@ -30,6 +30,7 @@ public:
 	FVector2 lastPos = FVector2(0, 0);	// used to detect being stuck
 	bool m_wasDead;
 	int rushNav;				// subsector/nav ID that the bot is rushing for
+	BotGoal rushTrigger;		// goal which caused the bot to start rushing
 
 	// debug state
 	bool m_debug = false;		// print thoughts to chat
@@ -48,8 +49,9 @@ public:
 	// goal management
 	bool FindGoal(); // find something to do in the map
 	bool PushGoal(BotGoal& goal, NavSectorLink* purposeLink); // returns false if this is already the current goal
-	bool SelectGoal(std::vector<BotGoal>& goals, NavSectorLink* purposeLink, bool randomize);
-	void PopGoal();
+	bool SelectGoal(std::vector<BotGoal>& goals, NavSectorLink* purposeLink, bool randomize, BotGoal* ignoreGoal);
+	void CompleteGoal();
+	void FailGoal(); // aborts the current goal and moves its blocked paths to the parent goal
 	inline bool HasGoal() { return m_goals.size(); };
 	inline BotGoal* CurrentGoal() { return m_goals.size() ? &m_goals[m_goals.size() - 1] : NULL; }
 	

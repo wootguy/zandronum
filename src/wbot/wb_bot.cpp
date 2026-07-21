@@ -98,6 +98,7 @@ void CWootBot::Reset() {
 	m_sideMove = 0;
 	m_nextThink = 0;
 	rushNav = -1;
+	rushTrigger = BotGoal();
 }
 
 void CWootBot::DebugPrint(const char* msg) {
@@ -155,7 +156,7 @@ void CWootBot::GoalActionThink() {
 	default:
 		DebugPrint(VarArgs("Unknown goal action type %d\n", goal.action));
 	case WBOT_GOAL_ACTION_MOVE_TO:
-		PopGoal(); // nothing to do
+		CompleteGoal(); // nothing to do
 		break;
 	case WBOT_GOAL_ACTION_USE: {
 		int useDist = (pActor->UseRange >> FRACBITS) - 1;
@@ -167,7 +168,7 @@ void CWootBot::GoalActionThink() {
 	case WBOT_GOAL_ACTION_TOUCH:
 		if (MoveTo(goal.pos(), goal.touchDistance(pActor))) {
 			if (goal.lineid == -1)
-				PopGoal(); // only lines are hooked and pop goals automatically
+				CompleteGoal(); // only lines are hooked and pop goals automatically
 		}
 		break;
 	case WBOT_GOAL_ACTION_CROSS: {
@@ -186,7 +187,7 @@ void CWootBot::GoalActionThink() {
 		}
 		else {
 			DebugPrint("Can't cross an actor as a goal!\n");
-			PopGoal();
+			CompleteGoal();
 		}
 		break;
 	}
@@ -550,7 +551,7 @@ bool CWootBot::PushGoal(BotGoal& goal, NavSectorLink* purposeLink) {
 	return m_routeController.RouteToGoal();
 }
 
-bool CWootBot::SelectGoal(vector<BotGoal>& goals, NavSectorLink* purposeLink, bool randomize) {
+bool CWootBot::SelectGoal(vector<BotGoal>& goals, NavSectorLink* purposeLink, bool randomize, BotGoal* ignoreGoal) {
 	BotGoal* bestGoal = NULL;
 	vector<BotGoal*> validGoals;
 
@@ -565,7 +566,7 @@ bool CWootBot::SelectGoal(vector<BotGoal>& goals, NavSectorLink* purposeLink, bo
 		vector<int> route = m_routeController.RouteToSector(subid, unblockSector);
 
 		if (subid == purposeLink->parent->id || route.size()) {
-			if (randomize) {
+			if (randomize && (!ignoreGoal || !goal.matches(*ignoreGoal))) {
 				validGoals.push_back(&goal);
 			} else {
 				bestGoal = &goal;
@@ -585,7 +586,7 @@ bool CWootBot::SelectGoal(vector<BotGoal>& goals, NavSectorLink* purposeLink, bo
 	return false;
 }
 
-void CWootBot::PopGoal() {
+void CWootBot::CompleteGoal() {
 	if (m_goals.empty()) {
 		m_routeController.CancelRoute();
 		DebugPrint("No goal to pop\n");
@@ -603,9 +604,10 @@ void CWootBot::PopGoal() {
 		// the purpose of this goal was to move a timed sector. Better hurry before that sector resets!
 		stateFlags |= FL_WBOT_RUSHING;
 		rushNav = goal.purposeLink->target->id;
+		rushTrigger = goal;
 	}
 
-	DebugPrint(VarArgs("Finished goal: %s\n", goal.desc().c_str()));
+	DebugPrint(VarArgs("Completed %s '%s'\n", m_goals.size() == 1 ? "goal" : "subgoal", goal.desc().c_str()));
 	m_goals.pop_back();
 
 	if (m_goals.size()) {
@@ -618,6 +620,25 @@ void CWootBot::PopGoal() {
 	}
 	else
 		m_routeController.CancelRoute();
+}
+
+void CWootBot::FailGoal() {
+	BotGoal& curGoal = m_goals[m_goals.size() - 1];
+	m_routeController.CancelRoute();
+
+	DebugPrint(VarArgs("FAILED %s '%s'\n", m_goals.size() == 1 ? "goal" : "subgoal", curGoal.desc().c_str()));
+
+	if (m_goals.size() == 1) {
+		m_goals.clear();
+		return;
+	}
+
+	// bubble up the blockers from this goal and try another route to the parent goal
+	BotGoal& prevGoal = m_goals[m_goals.size() - 2];
+	prevGoal.blockers.insert(curGoal.blockers.begin(), curGoal.blockers.end());
+	m_goals.pop_back();
+
+	m_nextThink = level.time + 7; // failing lots of goals at once could cause lag
 }
 
 void CWootBot::Use(int ticsBetweenUses) {
@@ -662,6 +683,6 @@ void CWootBot::HandleLineActivation(line_t* line, AActor* activator) {
 			m_goals.pop_back();
 		}
 
-		PopGoal(); // only final pop does rerouting logic
+		CompleteGoal(); // only final pop does rerouting logic
 	}
 }

@@ -20,6 +20,7 @@ struct BotGoal {
 	NavSectorLink* purposeLink = NULL; // link this goal is meant to unblock
 	TObjPtr<AActor> actor = NULL; // actor to interact with
 
+	BotGoal() {}
 	BotGoal(int action, int lineid) : action(action), lineid(lineid) {}
 	BotGoal(int action, AActor* actor) : action(action), actor(actor) {}
 
