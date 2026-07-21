@@ -24,12 +24,14 @@ struct BotGoal {
 	std::unordered_map<int, int> unblockAttempts; // maps a line to a path it was meant to unblock. Don't try that line again if the path is still blocked.
 	
 	NavSectorLink* purposeLink = NULL; // link this goal is meant to unblock
+	bool required = false; // if true, fail the parent goal and other required subgoals when this fails
 
 	BotGoal() {}
 	BotGoal(int action, int lineid) : action(action), lineid(lineid) {}
 	BotGoal(int action, AActor* actor) : action(action), actor(actor) {}
 
 	std::string desc();
+	std::string descLong();
 	int getNavId();
 	FVector3 pos();
 	int touchDistance(AActor* toucher); // how close the player needs to be to consider this goal as touched

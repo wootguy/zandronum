@@ -28,9 +28,10 @@ public:
 	int stuckCounter = 0;				// increases while trying to move with nothing happening
 	int m_cliffDist = 9999;
 	FVector2 lastPos = FVector2(0, 0);	// used to detect being stuck
-	bool m_wasDead;
-	int rushNav;				// subsector/nav ID that the bot is rushing for
+	bool m_wasDead = false;
+	int rushNav = -1;				// subsector/nav ID that the bot is rushing for
 	BotGoal rushTrigger;		// goal which caused the bot to start rushing
+	bool m_followPlayer = false; // set true to follow player automatically
 
 	// debug state
 	bool m_debug = false;		// print thoughts to chat
@@ -50,7 +51,8 @@ public:
 	bool FindGoal(); // find something to do in the map
 	bool PushLevelEndGoal(); // try to beat the map
 	bool PushGoal(BotGoal& goal, NavSectorLink* purposeLink); // returns false if this is already the current goal
-	bool SelectGoal(std::vector<BotGoal>& goals, NavSectorLink* purposeLink, bool randomize, BotGoal* ignoreGoal);
+	bool PushKeyGoals(line_t* line);
+	bool SelectGoal(std::vector<BotGoal>& goals, NavSectorLink* purposeLink);
 	void CompleteGoal();
 	void FailGoal(); // aborts the current goal and moves its blocked paths to the parent goal
 	inline bool HasGoal() { return m_goals.size(); };

@@ -39,9 +39,9 @@ struct NavSectorLink {
 
 	FVector2 pos();
 	FVector3 pos3D();
-	FVector2 GetJumpBackupPos(AActor* jumper); // find the best place to begin running for a jump
-	FVector2 GetJumpStartPos(); // find the best place to begin the jump
-	FVector2 GetJumpEndPos(); // find the closest point to land
+	FVector2 GetJumpBackupPos(FVector2 targetPos, AActor* jumper); // find the best place to begin running for a jump
+	FVector2 GetJumpStartPos(FVector2 targetPos); // find the best place to begin the jump
+	FVector2 GetJumpEndPos(FVector2 targetPos); // find the closest point to land
 	
 	int blocked(AActor* actor, bool recurse=true); // returns LinkBlockReason
 	bool walkable();
@@ -65,6 +65,9 @@ struct NavSector {
 	bool touches(AActor* actor);
 
 	int getMoveFlags();
+	bool isMoving();
+	bool isFloorMoving();
+	bool isCeilMoving();
 	std::vector<BotGoal>& getTriggers();
 
 	sector_t* sector();

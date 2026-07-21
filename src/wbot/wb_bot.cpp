@@ -493,6 +493,9 @@ int CWootBot::GetSpeed2D() {
 }
 
 bool CWootBot::FindGoal() {
+	if (!m_followPlayer)
+		return false;
+
 	int thisSubId = g_wb_nav.get_nav_id(pActor);
 
 	AActor* player = NULL;
@@ -549,22 +552,14 @@ bool CWootBot::PushGoal(BotGoal& goal, NavSectorLink* purposeLink) {
 		}
 	}
 
-	DebugPrint(VarArgs("New goal: %s\n", goal.desc().c_str()));
+	DebugPrint(VarArgs("New goal '%s'\n", goal.desc().c_str()));
 	m_goals.push_back(goal);
 	m_goals[m_goals.size() - 1].purposeLink = purposeLink;
 
 	// also add key goals needed to use this line, if missing
-	line_t* line = goal.lineid >= 0 ? &lines[goal.lineid] : NULL;
-	if (line && line->special == Door_LockedRaise && !P_CheckKeys(pActor, line->args[3], false)) {
-		vector<BotGoal> keyGoals;
-		unordered_set<int> allBlockedPaths = m_routeController.GetBlockedPaths();
-		g_wb_nav.get_key_goals_for_line(pActor, line, keyGoals, &allBlockedPaths);
-
-		DebugPrint(VarArgs("    Adding locked line subgoals.\n"));
-
-		for (BotGoal& keyGoal : keyGoals) {
-			m_goals.push_back(keyGoal);
-		}
+	if (goal.lineid >= 0 && !PushKeyGoals(&lines[goal.lineid])) {
+		m_goals.pop_back();
+		return false;
 	}
 
 	if (m_routeController.RouteToGoal()) {
@@ -579,7 +574,26 @@ bool CWootBot::PushGoal(BotGoal& goal, NavSectorLink* purposeLink) {
 	return false;
 }
 
-bool CWootBot::SelectGoal(vector<BotGoal>& goals, NavSectorLink* purposeLink, bool randomize, BotGoal* ignoreGoal) {
+bool CWootBot::PushKeyGoals(line_t* line) {
+	if (line->special == Door_LockedRaise && !P_CheckKeys(pActor, line->args[3], false)) {
+		vector<BotGoal> keyGoals;
+		unordered_set<int> allBlockedPaths = m_routeController.GetBlockedPaths();
+		g_wb_nav.get_key_goals_for_line(pActor, line, keyGoals, &allBlockedPaths);
+
+		for (BotGoal& keyGoal : keyGoals) {
+			m_goals.push_back(keyGoal);
+			DebugPrint(VarArgs("New key subgoal '%s'\n", keyGoal.desc().c_str()));
+
+			if (!m_routeController.RouteToGoal()) {
+				return false;
+			}
+		}
+	}
+
+	return true;
+}
+
+bool CWootBot::SelectGoal(vector<BotGoal>& goals, NavSectorLink* purposeLink) {
 	BotGoal* bestGoal = NULL;
 	vector<BotGoal*> validGoals;
 
@@ -603,21 +617,10 @@ bool CWootBot::SelectGoal(vector<BotGoal>& goals, NavSectorLink* purposeLink, bo
 		vector<int> route = m_routeController.RouteToSector(subid, unblockSector);
 
 		if (subid == purposeLink->parent->id || route.size()) {
-			if (randomize && (!ignoreGoal || !goal.matches(*ignoreGoal))) {
-				validGoals.push_back(&goal);
-			} else {
-				bestGoal = &goal;
-				break;
+			if (PushGoal(goal, purposeLink)) {
+				return true;
 			}
 		}
-	}
-
-	if (randomize && validGoals.size()) {
-		bestGoal = validGoals[rand() % validGoals.size()];
-	}
-
-	if (bestGoal && PushGoal(*bestGoal, purposeLink)) {
-		return true;
 	}
 
 	return false;
@@ -670,10 +673,16 @@ void CWootBot::FailGoal() {
 		return;
 	}
 
+	bool bubbleFailure = curGoal.required;
+
 	// bubble up the blockers from this goal and try another route to the parent goal
 	BotGoal& prevGoal = m_goals[m_goals.size() - 2];
 	prevGoal.blockers.insert(curGoal.blockers.begin(), curGoal.blockers.end());
 	m_goals.pop_back();
+
+	if (bubbleFailure) {
+		FailGoal(); // fail until hitting an optional/parent goal
+	}
 
 	m_nextThink = level.time + 7; // failing lots of goals at once could cause lag
 }

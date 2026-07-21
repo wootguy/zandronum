@@ -122,7 +122,7 @@ bool NavSectorLink::isJumpValid() {
 	return true;
 }
 
-FVector2 NavSectorLink::GetJumpStartPos() {
+FVector2 NavSectorLink::GetJumpStartPos(FVector2 targetPos) {
 	FVector2 a(seg->v1->x, seg->v1->y);
 	FVector2 b(seg->v2->x, seg->v2->y);
 	
@@ -133,30 +133,29 @@ FVector2 NavSectorLink::GetJumpStartPos() {
 	a += dir * nudgeDist;
 	b -= dir * nudgeDist;
 
-	return ClosestPointOnSegment(target->pos(), a, b);
+	return ClosestPointOnSegment(targetPos, a, b);
 }
 
-FVector2 NavSectorLink::GetJumpEndPos() {
-	FVector2 jumpPos = GetJumpStartPos();
-	FVector2 center = target->pos();
+FVector2 NavSectorLink::GetJumpEndPos(FVector2 targetPos) {
+	FVector2 jumpPos = GetJumpStartPos(targetPos);
 
 	// move the landing point from the center to the nearest ledge
-	FVector2 ledgeDir = (jumpPos - center).Unit();
+	FVector2 ledgeDir = (jumpPos - targetPos).Unit();
 
 	FVector2 edgePos;
-	if (TraceSectorEdge(center, center + ledgeDir * (1000 << FRACBITS), edgePos)) {
+	if (TraceSectorEdge(targetPos, targetPos + ledgeDir * (1000 << FRACBITS), edgePos)) {
 		return edgePos;
 	}
 
-	return center;
+	return targetPos;
 }
 
 
-FVector2 NavSectorLink::GetJumpBackupPos(AActor* jumper) {
-	FVector2 startPos = GetJumpStartPos();
+FVector2 NavSectorLink::GetJumpBackupPos(FVector2 targetPos, AActor* jumper) {
+	FVector2 startPos = GetJumpStartPos(targetPos);
 
 	// back up the starting position to get a running start for the jump
-	FVector2 jumpDir = (target->pos() - startPos).Unit();
+	FVector2 jumpDir = (targetPos - startPos).Unit();
 
 	fixed_t maxBackupDist = 256 << FRACBITS;
 	FVector2 backupStartPos = startPos - (jumpDir * FRACUNIT); // avoid clipping against the backoff line
@@ -244,6 +243,19 @@ int NavSector::getMoveFlags() {
 	return g_wb_mapinfo.sector_info[subsectors[id].sector - sectors].moveFlags;
 }
 
+bool NavSector::isMoving() {
+	sector_t* sec = sector();
+	return sec->floordata || sec->ceilingdata;
+}
+
+bool NavSector::isFloorMoving() {
+	return sector()->floordata;
+}
+
+bool NavSector::isCeilMoving() {
+	return sector()->ceilingdata;
+}
+
 std::vector<BotGoal>& NavSector::getTriggers() {
 	return g_wb_mapinfo.sector_info[subsectors[id].sector - sectors].triggers;
 }
@@ -268,6 +280,7 @@ fixed_t NavSector::getCeilZ() {
 
 void SectorNavMesh::init() {
 	propBlockers.clear();
+	pending_sector_relinks.clear();
 
 	// find all immovable and invulnerable props
 	TThinkerIterator<AActor> it;
@@ -316,18 +329,19 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 			
 			if (!link.blocked(player)) {
 				FVector3 linkPos = link.pos3D();
+				FVector2 targetPos = link.target->pos();
 
 				if (link.isJump) {
-					FVector3 jumpStart = FVector3(link.GetJumpStartPos(), 0);
+					FVector3 jumpStart = FVector3(link.GetJumpStartPos(targetPos), 0);
 					FVector3 jumpStartFloor = jumpStart;
-					FVector3 jumpEnd = FVector3(link.GetJumpEndPos(), 0);
+					FVector3 jumpEnd = FVector3(link.GetJumpEndPos(targetPos), 0);
 					FVector3 jumpEndFloor = jumpEnd;
 					jumpEndFloor.Z = link.target->getFloorZ();
 					jumpStartFloor.Z = link.parent->getFloorZ();
 					jumpStart.Z = link.parent->getFloorZ() + (56 << FRACBITS);
 					jumpEnd.Z = link.target->getFloorZ() + (56 << FRACBITS);
 					
-					FVector2 backupPos = link.GetJumpBackupPos(player);
+					FVector2 backupPos = link.GetJumpBackupPos(targetPos, player);
 					FVector3 backupEnd = FVector3(backupPos.X, backupPos.Y, jumpStart.Z);
 
 					spritesDrawn += draw_debug_line(nav.pos3D(), jumpStartFloor, actor);
@@ -641,6 +655,7 @@ bool SectorNavMesh::get_key_goals_for_line(AActor* actor, line_t* line, vector<B
 
 		BotGoal goal = BotGoal(WBOT_GOAL_ACTION_TOUCH, bestKey);
 		goal.dist = bestKeyDist;
+		goal.required = true;
 		keyGoals.push_back(goal);
 	}
 

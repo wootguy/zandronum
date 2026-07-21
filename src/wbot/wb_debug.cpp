@@ -164,7 +164,7 @@ void wbot_debug(CWootBot* pBot) {
 
 	string goalStr = "Goals:";
 	for (int i = 0; i < pBot->m_goals.size(); i++) {
-		goalStr += "\n   " + pBot->m_goals[i].desc();
+		goalStr += "\n   " + pBot->m_goals[i].descLong();
 	}
 
 	string botInfo = enemyStr + "\n" + weaponStr + "\n" + routeStr + "\n"

@@ -415,6 +415,27 @@ void wbot_map_init() {
 	}
 }
 
+void wbot_add_bot() {
+	if (gamestate != GS_LEVEL)
+		return;
+
+	// Don't allow bots in network mode, unless we're the host.
+	if (NETWORK_InClientMode())
+	{
+		Printf("Only the host can add bots!\n");
+		return;
+	}
+
+	ULONG ulPlayerIdx = BOTS_FindFreePlayerSlot();
+	if (ulPlayerIdx == MAXPLAYERS)
+	{
+		Printf("The maximum number of players/bots has been reached.\n");
+		return;
+	}
+
+	new CWootBot(NULL, NULL, ulPlayerIdx);
+}
+
 void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 	// test a specific route
 	if (!strcmp(msg, "r")) {
@@ -425,12 +446,13 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 			if (!playeringame[i] || !player)
 				continue;
 
-			if (player->player->bIsBot)	set_ori(player, 2641, 4735, ANGLE_1 * 0);
-			else						set_ori(player, 1228, -110, ANGLE_1 * 40);
+			if (player->player->bIsBot)	set_ori(player, 983, -597, ANGLE_1 * 0);
+			else						set_ori(player, 983, -1053, ANGLE_1 * 40);
 
 			if (player->player->bIsBot) {
 				CWootBot* bot = (CWootBot*)player->player->pSkullBot;
 				bot->Reset();
+				bot->m_followPlayer = true;
 				player->player->cheats &= ~CF_FROZEN;
 				//bot->m_freezeOnRouteChange = true;
 				//bot->m_speedMult = 0.6f;
@@ -451,6 +473,21 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 		}
 	}
 
+	if (!strcmp(msg, "follow")) {
+		for (int i = 0; i < MAXPLAYERS; i++) {
+			AActor* player = players[i].mo;
+			if (!playeringame[i] || !player || !player->player->bIsBot)
+				continue;
+
+			CWootBot* bot = (CWootBot*)player->player->pSkullBot;
+			bot->m_followPlayer = true;
+		}
+	}
+
+	if (!strcmp(msg, "add")) {
+		wbot_add_bot();
+	}
+
 	// clear all enemies for general pathfinding tests
 	if (!strcmp(msg, "y")) {
 		kill_all_shootables();
@@ -464,6 +501,21 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 
 			CWootBot* bot = (CWootBot*)player->player->pSkullBot;
 			bot->Reset();
+			bot->m_followPlayer = false;
+		}
+	}
+
+	if (!strcmp(msg, "restart")) {
+		G_ChangeLevel(level.mapname, 0, CHANGELEVEL_NOINTERMISSION);
+	}
+
+	if (!strcmp(msg, "kill")) {
+		for (int i = 0; i < MAXPLAYERS; i++) {
+			AActor* player = players[i].mo;
+			if (!playeringame[i] || !player || !player->player->bIsBot)
+				continue;
+
+			P_DamageMobj(player, player, player, player->health * 2, FName());
 		}
 	}
 
@@ -515,24 +567,6 @@ void wbot_tick() {
 	g_wb_nav.relink_pending_sector();
 }
 
-CCMD(addbotw)
-{
-	if (gamestate != GS_LEVEL)
-		return;
-
-	// Don't allow bots in network mode, unless we're the host.
-	if (NETWORK_InClientMode())
-	{
-		Printf("Only the host can add bots!\n");
-		return;
-	}
-
-	ULONG ulPlayerIdx = BOTS_FindFreePlayerSlot();
-	if (ulPlayerIdx == MAXPLAYERS)
-	{
-		Printf("The maximum number of players/bots has been reached.\n");
-		return;
-	}
-
-	new CWootBot(NULL, NULL, ulPlayerIdx);
+CCMD(addbotw) {
+	wbot_add_bot();
 }

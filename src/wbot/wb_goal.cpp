@@ -17,36 +17,6 @@ std::string BotGoal::desc() {
 
 	thingName += " in " + to_string(getNavId());
 
-	string blockerStr;
-	int numBlock = 0;
-	for (const int& id : blockers) {
-		blockerStr += " " + to_string(id);
-		if (++numBlock >= 4) {
-			break;
-		}
-	}
-	if (numBlock < blockers.size()) {
-		thingName += "\n        blockers: " + blockerStr + " (+" + to_string(blockers.size() - numBlock) + ")";
-	}
-	else if (numBlock > 0) {
-		thingName += "\n        blockers: " + blockerStr;
-	}
-
-	string unblockStr;
-	int numunBlock = 0;
-	for (auto item : unblockAttempts) {
-		unblockStr += " [" + to_string(item.first) + "->" + to_string(item.second) + "]";
-		if (++numunBlock >= 4) {
-			break;
-		}
-	}
-	if (numunBlock < unblockAttempts.size()) {
-		thingName += "\n        unblocks: " + unblockStr + " (+" + to_string(unblockStr.size() - numunBlock) + ")";
-	}
-	else if (numunBlock > 0) {
-		thingName += "\n        unblocks: " + unblockStr;
-	}
-
 	switch (action) {
 	case WBOT_GOAL_ACTION_MOVE_TO:
 		return "Move to " + thingName;
@@ -61,6 +31,42 @@ std::string BotGoal::desc() {
 	}
 
 	return "??? " + thingName;
+}
+
+std::string BotGoal::descLong() {
+	string descStr = desc();
+
+	string blockerStr;
+	int numBlock = 0;
+	for (const int& id : blockers) {
+		blockerStr += " " + to_string(id);
+		if (++numBlock >= 4) {
+			break;
+		}
+	}
+	if (numBlock < blockers.size()) {
+		descStr += "\n        blockers: " + blockerStr + " (+" + to_string(blockers.size() - numBlock) + ")";
+	}
+	else if (numBlock > 0) {
+		descStr += "\n        blockers: " + blockerStr;
+	}
+
+	string unblockStr;
+	int numunBlock = 0;
+	for (auto item : unblockAttempts) {
+		unblockStr += " [" + to_string(item.first) + "->" + to_string(item.second) + "]";
+		if (++numunBlock >= 4) {
+			break;
+		}
+	}
+	if (numunBlock < unblockAttempts.size()) {
+		descStr += "\n        unblocks: " + unblockStr + " (+" + to_string(unblockStr.size() - numunBlock) + ")";
+	}
+	else if (numunBlock > 0) {
+		descStr += "\n        unblocks: " + unblockStr;
+	}
+
+	return descStr;
 }
 
 int BotGoal::getNavId() {

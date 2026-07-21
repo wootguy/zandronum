@@ -257,8 +257,8 @@ void CBotRouteController::JumpThink() {
 }
 
 bool CBotRouteController::HandleBlockedPaths() {
-	sector_t* nextSector = subsectors[m_route[1]].sector;
-	bool nextOnElevator = nextSector && nextSector->floordata;
+	int nextSecFlags = m_navLink->target->getMoveFlags();
+	bool nextOnElevator = nextSecFlags & (FL_SECTOR_MOVE_FLOOR_UP | FL_SECTOR_MOVE_FLOOR_DOWN);
 	int linkBlockReason = m_navLink->blocked(pActor);
 
 	if (ElevatorThink(linkBlockReason != LINK_BLOCK_CLEAR)) {
@@ -266,9 +266,9 @@ bool CBotRouteController::HandleBlockedPaths() {
 	}
 
 	// wait for doors to open
-	if (!m_navLink->walkable() && (nextSector->floordata || nextSector->ceilingdata)) {
+	if (!m_navLink->walkable() && m_navLink->target->isMoving()) {
 		// door is raising or elevator is lowering in the next sector
-		if (m_navLink->isJump && !nextSector->floordata && !m_navLink->isJumpValid()) {
+		if (m_navLink->isJump && !m_navLink->target->isFloorMoving() && !m_navLink->isJumpValid()) {
 			// a door opening isn't going to make the jump doable if the floor is too high
 		}
 		else {
@@ -385,9 +385,10 @@ void CBotRouteController::MoveThruLink() {
 	if (m_navLink->isJump && m_navLink->jumpDist > (PLAYER_WIDTH << FRACBITS)) {
 		// get a running start for the jump
 		jumpState = WBOT_JUMP_PREP;
-		jumpBackupPos = m_navLink->GetJumpBackupPos(pActor);
-		jumpStartPos = m_navLink->GetJumpStartPos();
-		jumpEndPos = m_navLink->GetJumpEndPos();
+		FVector2 targetPos = m_navLink->target->pos();
+		jumpBackupPos = m_navLink->GetJumpBackupPos(targetPos, pActor);
+		jumpStartPos = m_navLink->GetJumpStartPos(targetPos);
+		jumpEndPos = m_navLink->GetJumpEndPos(targetPos);
 	}
 	else {
 		// move to the next link
@@ -434,12 +435,6 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link, int blockReason)
 	// don't try to route through previous paths we've been trying to unblock
 	unordered_set<int> allBlockedPaths = GetBlockedPaths();
 
-	bool randomizeGoal = false;
-	if ((pBot->stateFlags & FL_WBOT_RUSHING) && link->target->id == pBot->rushNav) {
-		// failed to reach the target sector in time. Try a different unblock goal if there are multiple.
-		randomizeGoal = true;
-	}
-
 	int targetMovement = link->target->getMoveFlags();
 	int parentMovement = link->parent->getMoveFlags();
 	bool tryTargetTrigger = targetMovement != 0;
@@ -456,7 +451,9 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link, int blockReason)
 		}
 		break;
 	case LINK_BLOCK_TOO_LOW:
-		tryParentTrigger = false;
+		if (!(parentMovement & FL_SECTOR_MOVE_FLOOR_DOWN)) {
+			tryParentTrigger = false;
+		}
 		break;
 	default:
 		tryParentTrigger = false;
@@ -466,12 +463,12 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link, int blockReason)
 
 
 	// nothing is moving, try unblocking it ourselves.
-	if (tryTargetTrigger && pBot->SelectGoal(link->target->getTriggers(), link, randomizeGoal, &pBot->rushTrigger)) {
+	if (tryTargetTrigger && pBot->SelectGoal(link->target->getTriggers(), link)) {
 		return;
 	}
 
 	// if we're on an elevator, try triggering it.
-	if (tryParentTrigger && pBot->SelectGoal(link->parent->getTriggers(), link, randomizeGoal, &pBot->rushTrigger)) {
+	if (tryParentTrigger && pBot->SelectGoal(link->parent->getTriggers(), link)) {
 		return;
 	}
 

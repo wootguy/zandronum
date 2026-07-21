@@ -26,8 +26,7 @@ bool SectorNavMeshGenerator::is_potential_jump_link(NavSector& fromNav, NavSecto
 		return false;
 	}
 
-	FVector2 linkDelta = fromLink.pos() - toLink.pos();
-	fixed_t linkDist = linkDelta.Length();
+	fixed_t linkDist = (fromLink.pos() - toLink.pos()).Length();
 
 	// increase link distance for drops, decrease for jumps
 	int maxJumpDist = (JUMP_DIST << FRACBITS) - jumpHeight;
@@ -42,24 +41,53 @@ bool SectorNavMeshGenerator::is_potential_jump_link(NavSector& fromNav, NavSecto
 	FVector2 e2v1(toLink.seg->v1->x, toLink.seg->v1->y);
 	FVector2 e2v2(toLink.seg->v2->x, toLink.seg->v2->y);
 
-	FVector2 edge1 = (e1v2 - e1v1).Unit();
-	FVector2 edge2 = (e2v2 - e2v1).Unit();
+	FVector2 dir1 = (e1v2 - e1v1).Unit();
+	FVector2 dir2 = (e2v2 - e2v1).Unit();
 
-	FVector2 normalA(edge1.Y, -edge1.X);
-	FVector2 normalB(edge2.Y, -edge2.X);
+	FVector2 normalA(dir1.Y, -dir1.X);
+	FVector2 normalB(dir2.Y, -dir2.X);
 
-	float dot = DotProduct(normalA, normalB);
-	if (dot > -0.5f) {
-		return false; // edges not facing each other enough
+	// flip normals if pointing inward
+	if (DotProduct(normalA, (e1v1 - fromNav.center).Unit()) < 0) {
+		normalA *= -1;
+	}
+	if (DotProduct(normalB, (e2v1 - toNav.center).Unit()) < 0) {
+		normalB *= -1;
 	}
 
-	float planeDist = DotProduct(normalA, linkDelta);
-	if (planeDist < 0) {
-		return false; // not in front of the segment
+	float normalDot = DotProduct(normalA, normalB);
+	if (normalDot > -0.5f) {
+		return false; // edges not facing each other enough
 	}
 
 	if (fromNav.getLink(toNav.id)) {
 		return false; // already have a link to this sector
+	}
+
+	FVector2 targetPos = toNav.pos();
+	FVector2 jumpStart = fromLink.GetJumpStartPos(targetPos);
+	FVector2 jumpEnd = fromLink.GetJumpEndPos(targetPos);
+	FVector2 jumpDir = (jumpEnd - jumpStart).Unit();
+	float jumpDirDot = DotProduct(normalA, jumpDir);
+	if (jumpDirDot < 0.5f) {
+		return false; // awkward jump direction
+	}	
+
+	for (NavSectorLink& link : fromNav.links) {
+		NavSector* neighbor = link.target;
+		if (link.isJump || link.isCliff)
+			continue;
+
+		for (NavSectorLink& neighborLink : neighbor->links) {
+			if (neighborLink.isJump || neighborLink.isCliff)
+				continue;
+
+			if (neighborLink.target->id == toNav.id && !neighborLink.isJump) {
+				// a neighbor has a walkable link to the jump target.
+				// This jump would hardly be a shortcut.
+				return false;
+			}
+		}
 	}
 
 	// check that the path is clear
@@ -200,19 +228,22 @@ void SectorNavMeshGenerator::calc_nav_centers(NavSector* mesh) {
 		subsector_t& sub = subsectors[i];
 		NavSector& nav = mesh[i];
 
-		int subCenterX = 0;
-		int subCenterY = 0;
+		float area = 0;
+		FVector2 centroid(0, 0);
 
-		for (int k = 0; k < sub.numlines; k++) {
-			seg_t& seg = sub.firstline[k];
-			subCenterX += seg.v1->x >> FRACBITS;
-			subCenterY += seg.v1->y >> FRACBITS;
+		for (int i = 0; i < sub.numlines; i++)
+		{
+			seg_t& seg = sub.firstline[i];
+			FVector2 a(seg.v1->x, seg.v1->y);
+			FVector2 b(seg.v2->x, seg.v2->y);
+
+			float cross = a.X * b.Y - b.X * a.Y;
+
+			area += cross;
+			centroid += (a + b) * cross;
 		}
 
-		nav.center = FVector2(
-			(subCenterX / (int)sub.numlines) << FRACBITS,
-			(subCenterY / (int)sub.numlines) << FRACBITS
-		);
+		nav.center = centroid / (6.0f * (area * 0.5f));
 	}
 }
 
