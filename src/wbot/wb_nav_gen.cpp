@@ -12,10 +12,38 @@ using namespace std;
 
 int g_total_links;
 
+bool SectorNavMeshGenerator::trace_jump(FVector3 start, FVector3 end, int fromMovement, int toMovement) {
+	const fixed_t rightStep = ((PLAYER_WIDTH / 2) / 2) << FRACBITS;
+	FVector2 start2d = FVector2(start.X, start.Y);
+	FVector2 end2d = FVector2(end.X, end.Y);
+	FVector2 jumpDir = (end2d - start2d).Unit();
+	FVector3 rightDir(jumpDir.Y, -jumpDir.X, 0);
+	bool fromNavMovesDown = fromMovement & FL_SECTOR_MOVE_FLOOR_DOWN;
+	FTraceResults tr;
+
+	for (int i = -2; i <= 2; i++) {
+		if (TraceLine(start + rightDir * i * rightStep, end + rightDir * i * rightStep, true, NULL, &tr)) {
+			if (tr.HitType == TRACE_HitWall && tr.Line && tr.Line->backsector) {
+				if (g_wb_mapinfo.sector_info[tr.Line->backsector - sectors].moveFlags) {
+					continue; // wall may move out of the way in the future
+				}
+			}
+			if (tr.HitType == TRACE_HitCeiling && fromNavMovesDown && start.Z > tr.Z) {
+				// sector may be fully lifted to the ceiling and so can't connect yet
+				continue; // may move out of the way in the future
+			}
+
+			return false; // hit an immovable wall or ceiling/floor
+		}
+	}
+
+	return true;
+}
+
 bool SectorNavMeshGenerator::is_potential_jump_link(NavSector& fromNav, NavSectorLink& fromLink, NavSector& toNav, NavSectorLink& toLink) {
-	fixed_t fromHeight = fromNav.getFloorZ();
-	fixed_t toHeight = toNav.getFloorZ();
-	fixed_t jumpHeight = toHeight - fromHeight;
+	fixed_t fromFloorZ = fromNav.getFloorZ();
+	fixed_t toFloorZ = toNav.getFloorZ();
+	fixed_t jumpHeight = toFloorZ - fromFloorZ;
 
 	int fromMovement = fromNav.getMoveFlags();
 	int toMovement = toNav.getMoveFlags();
@@ -68,6 +96,11 @@ bool SectorNavMeshGenerator::is_potential_jump_link(NavSector& fromNav, NavSecto
 	FVector2 jumpStart = fromLink.GetJumpStartPos(targetPos);
 	FVector2 jumpEnd = fromLink.GetJumpEndPos(targetPos);
 	FVector2 jumpDir = (jumpEnd - jumpStart).Unit();
+
+	// move inward a bit to avoid collision with the start/end lines
+	jumpStart += jumpDir * FRACUNIT;
+	jumpEnd -= jumpDir * FRACUNIT;
+
 	float jumpDirDot = DotProduct(normalA, jumpDir);
 	if (jumpDirDot < 0.5f) {
 		return false; // awkward jump direction
@@ -91,63 +124,58 @@ bool SectorNavMeshGenerator::is_potential_jump_link(NavSector& fromNav, NavSecto
 	}
 
 	// check that the path is clear
-	{
-		FTraceResults tr;
+	FVector3 start = FVector3(jumpStart, 56 << FRACBITS);
+	FVector3 end = FVector3(jumpEnd, 56 << FRACBITS);
 
-		FVector3 start = fromLink.pos3D() + FVector3(0, 0, 56 << FRACBITS);
-		FVector3 end = toNav.pos3D() + FVector3(0, 0, 56 << FRACBITS);
+	bool fromNavMovesUp = fromMovement & FL_SECTOR_MOVE_FLOOR_UP;
+	bool toNavMovesDown = toMovement & FL_SECTOR_MOVE_FLOOR_DOWN;
 
-		FVector2 dir = (end - start).Unit();
-		FVector3 rightDir(dir.Y, -dir.X, 0);
-		int radius = PLAYER_WIDTH / 2;
-		fixed_t rightStep = (radius / 2) << FRACBITS;
-		bool fromNavMoves = fromNav.getMoveFlags() != 0;
-		bool toNavMoves = toNav.getMoveFlags() != 0;
+	// First test if any impassable walls are intersected.
+	if (TraceImpassable(jumpStart, jumpEnd))
+		return false;
 
-		// First test if any impassable walls are intersected. Shift the points inward a bit to
-		// avoid collision with the start/end lines which we know are clear.
-		FVector2 dir2d = dir * FRACUNIT;
-		FVector2 start2d = fromLink.pos() + dir2d;
-		FVector2 end2d = toLink.pos() - dir2d;
-		if (TraceImpassable(start2d, end2d))
-			return false;
+	if (fromNav.id == 420 && toNav.id == 280)
+		Printf("");
 
-		if (jumpTooFarCurrently && jumpMayBeLowerLater) {
-			// One or both sectors must move for the jump to be possible.
-			// Test ideal elevations instead of current.
-			fixed_t movementNeeded = (JUMP_DIST << FRACBITS) - linkDist;
+	if (jumpTooFarCurrently && jumpMayBeLowerLater) {
+		// One or both sectors must move for the jump to be possible.
+		// Test ideal elevations instead of current.
+		fixed_t movementNeeded = linkDist - (JUMP_DIST << FRACBITS);
+		FVector3 moved(0, 0, movementNeeded);
+		FVector3 halfMoved(0, 0, movementNeeded / 2);
 
-			if (!fromNavMoves) {
-				// target sector must be lowered for the jump to be possible
-				end.Z += movementNeeded;
-			}
-			else if (!toNavMoves) {
-				start.Z -= movementNeeded;
-			}
-			else {
-				// Both sectors can move. Too complicated!
-			}
+		bool canRaiseStart = true;
+		bool canRaiseStartHalf = true;
+		if (!(fromMovement & FL_SECTOR_MOVE_CEIL_UP)) {
+			// if the ceiling in the start sector doesn't move, then it can only be lifted so high
+			// before jumping is impossible
+			fixed_t maxFloorZ = fromNav.getCeilZ() - (STAND_HEIGHT << FRACBITS);
+			canRaiseStart = maxFloorZ - fromFloorZ > movementNeeded;
+			canRaiseStartHalf = maxFloorZ - fromFloorZ > movementNeeded / 2;
 		}
 
-		for (int i = -2; i <= 2; i++) {
+		if (fromNavMovesUp && toNavMovesDown) {
+			// Both sectors can move. Try all combinations
+			if (trace_jump(start, end - moved, fromMovement, toMovement))
+				return true;
+			if (canRaiseStart && trace_jump(start + moved, end, fromMovement, toMovement))
+				return true;
+			if (canRaiseStartHalf && trace_jump(start + halfMoved, end - halfMoved, fromMovement, toMovement))
+				return true;
 
-			if (TraceLine(start + rightDir * i * rightStep, end + rightDir * i * rightStep, true, NULL, &tr)) {
-				if (tr.HitType == TRACE_HitWall && tr.Line && tr.Line->backsector) {
-					if (g_wb_mapinfo.sector_info[tr.Line->backsector - sectors].moveFlags) {
-						continue; // wall may move out of the way in the future
-					}
-				}
-				if (tr.HitType == TRACE_HitCeiling && fromNavMoves) {
-					// sector may be fully lifted to the ceiling and so can't connect yet
-					continue; // may move out of the way in the future
-				}
-
-				return false; // hit an immovable wall or ceiling/floor
-			}
+			return false;
+		}
+		else if (toNavMovesDown) {
+			// target sector must be lowered for the jump to be possible
+			return trace_jump(start, end - moved, fromMovement, toMovement);
+		}
+		else if (fromNavMovesUp) {
+			// start sector must be raised for the jump to be possible
+			return canRaiseStart && trace_jump(start + moved, end, fromMovement, toMovement);
 		}
 	}
 
-	return true;
+	return trace_jump(start, end, fromMovement, toMovement);
 }
 
 bool SectorNavMeshGenerator::create_jump_link(NavSector& fromNav, NavSectorLink& fromLink, NavSector& toNav, NavSectorLink& toLink) {

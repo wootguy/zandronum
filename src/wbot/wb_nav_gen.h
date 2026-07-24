@@ -14,6 +14,7 @@ private:
 	static void calc_nav_centers(NavSector* mesh);
 	static void add_jump_links(NavSector* mesh);
 	static void add_jump_links(NavSector* mesh, int nodeid);
+	static bool trace_jump(FVector3 start, FVector3 end, int fromMovement, int toMovement);
 	static bool is_potential_jump_link(NavSector& fromNav, NavSectorLink& fromLink, NavSector& toNav, NavSectorLink& toLink);
 	static bool create_jump_link(NavSector& fromNav, NavSectorLink& fromLink, NavSector& toNav, NavSectorLink& toLink);
 

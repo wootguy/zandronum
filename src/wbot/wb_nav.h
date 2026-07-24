@@ -1,8 +1,9 @@
 #pragma once
 #include "bots.h"
-#include "wb_bot.h"
+#include "wb_goal.h"
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 #define STEP_HEIGHT 24
 #define JUMP_HEIGHT 56
@@ -78,6 +79,37 @@ struct NavSector {
 	fixed_t getCeilZ();
 };
 
+enum RouteBlockHandling {
+	WBOT_ROUTE_BLOCK_IGNORE,	// don't test if routes are blocked (best performance)
+	WBOT_ROUTE_BLOCK_EXPENSIVE,	// increase the cost of blocked routes to strongly prefer unblocked routes, but use them anyway if there's no other path
+	WBOT_ROUTE_BLOCK_FORBID,	// forbid routing thru a blocked path
+};
+
+struct BotRouteLink {
+	int node = -1;
+	float dist = 0;
+	float cost = 0;
+
+	BotRouteLink() {}
+	BotRouteLink(int node, int dist, float cost) : node(node), dist(dist), cost(cost) {}
+};
+
+struct BotRoute {
+	std::vector<int> route;
+	float cost = 0;	// cost to run this path (e.g. running thru lava and unblocking paths is more expensive)
+	int dist = 0;	// distance in map units
+};
+
+struct RouteOpts {
+	int start = -1;					// starting subsector id
+	int end = -1;					// ending subsector id
+	bool timeSensitive = false;		// prefer running thru lava and jumping if the route would be shorter
+	int blockedPathHandling = WBOT_ROUTE_BLOCK_IGNORE;
+	AActor* actor = NULL;
+	std::unordered_set<int> blockedPaths;		// disallowed paths
+	std::unordered_set<int> blockedSubSectors;	// disallowd subsectors
+};
+
 class SectorNavMesh {
 public:
 	NavSector* mesh = NULL;
@@ -93,22 +125,22 @@ public:
 
 	// set timeSensitive=true if the most direct route should be preferred, even if the bot has
 	// to walk through lava or jump somewhere
-	std::vector<int> get_astar_route(int startSubSectorId, int endSubSectorId, std::unordered_set<int>* blockedPaths=NULL, int blockedSector=-1, bool timeSensitive=false);
+	BotRoute get_astar_route(const RouteOpts& opts);
 	
 	// get key required to use the linedef. Returns false if keys don't exist anywhere in the map.
 	bool get_key_goals_for_line(AActor* actor, line_t* linedef, std::vector<BotGoal>& keyGoals, std::unordered_set<int>* blockedPaths);
 
 	int get_nav_id(fixed_t x, fixed_t y);
 	int get_nav_id(AActor* actor); // get key required to use the linedef. Returns false if keys don't exist anywhere in the map.
-	int get_route_distance(std::vector<int>& route);
 
 	// call to create or remove links on nodes that no longer move
 	void relink_sector(sector_t* sec);
 	void relink_pending_sector();
 
 private:
-	float path_cost(int a, int b);
-	float path_cost(NavSectorLink& link, bool timeSensitive);
+	float node_heuristic(int a, int b); // how "close" node a is to b (may not be physical distance)
+	float path_dist(NavSectorLink& link);
+	float path_cost(NavSectorLink& link, float dist, const RouteOpts& opts);
 
 	bool create_jump_link(NavSector& fromNav, NavSectorLink& fromLink, NavSector& toNav, NavSectorLink& toLink);
 };

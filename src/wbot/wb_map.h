@@ -44,7 +44,6 @@ public:
 	int segment_walkability(seg_t* seg); // returns LinkBlockReason
 	int get_linedef_goal_action(line_t* line);
 	bool subsector_does_damage(subsector_t* sec);
-	void sort_sector_trigger_goals(); // call after navigation mesh is created
 
 	// remove trigger goals for single-use lines that have been used
 	void remove_invalid_goals(int secid);

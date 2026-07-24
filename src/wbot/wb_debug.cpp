@@ -24,19 +24,19 @@ void wbot_debug(CWootBot* pBot) {
 		routeStr += " (pretend " + to_string(pBot->m_routeController.pretendRouteSector) + " )";
 	}
 	routeStr += " -> ";
-	for (int i = 0; i < pBot->m_routeController.m_route.size() && i < 4; i++) {
+	for (int i = 0; i < pBot->m_routeController.m_route.route.size() && i < 4; i++) {
 		if (i != 0)
 			routeStr += " ";
-		routeStr += to_string(pBot->m_routeController.m_route[i]);
+		routeStr += to_string(pBot->m_routeController.m_route.route[i]);
 	}
-	if (pBot->m_routeController.m_route.size() > 4) {
-		routeStr += " (+" + to_string(pBot->m_routeController.m_route.size() - 4) + ")";
+	if (pBot->m_routeController.m_route.route.size() > 4) {
+		routeStr += " (+" + to_string(pBot->m_routeController.m_route.route.size() - 4) + ")";
 	}
-	routeStr += "\n                     " + to_string(g_wb_nav.get_route_distance(pBot->m_routeController.m_route)) + " units";
+	routeStr += "\n                     " + to_string(pBot->m_routeController.m_route.dist) + " units";
 
-	if (pBot->m_routeController.m_route.size() > 1) {
-		NavSector& nav = g_wb_nav.mesh[pBot->m_routeController.m_route[0]];
-		NavSectorLink* link = nav.getLink(pBot->m_routeController.m_route[1]);
+	if (pBot->m_routeController.m_route.route.size() > 1) {
+		NavSector& nav = g_wb_nav.mesh[pBot->m_routeController.m_route.route[0]];
+		NavSectorLink* link = nav.getLink(pBot->m_routeController.m_route.route[1]);
 		if (link) {
 			routeStr += "\nLink: " + to_string(link->id) + " -> " + to_string(link->target->id);
 		}
@@ -109,7 +109,10 @@ void wbot_debug(CWootBot* pBot) {
 	}
 
 	int jumpState = pBot->m_routeController.jumpState;
+	int walkState = pBot->m_routeController.walkNodeState;
 	string stateStr = "State:";
+	if (walkState == WBOT_WALK_NODE_EDGE) { stateStr += " WALK_EDGE"; }
+	if (walkState == WBOT_WALK_NODE_CENTER) { stateStr += " WALK_CENTER"; }
 	if (jumpState == WBOT_JUMP_PREP) { stateStr += " JUMP_PREP"; }
 	if (jumpState == WBOT_JUMP_RUN) { stateStr += " JUMP_RUN"; }
 	if (jumpState == WBOT_JUMP_FLY) { stateStr += " JUMP_FLY"; }

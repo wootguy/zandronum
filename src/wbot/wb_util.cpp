@@ -437,7 +437,7 @@ void wbot_add_bot() {
 }
 
 void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
-	// test a specific route
+	// route test case
 	if (!strcmp(msg, "r")) {
 		kill_all_shootables();
 
@@ -446,8 +446,8 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 			if (!playeringame[i] || !player)
 				continue;
 
-			if (player->player->bIsBot)	set_ori(player, 983, -597, ANGLE_1 * 0);
-			else						set_ori(player, 983, -1053, ANGLE_1 * 40);
+			if (player->player->bIsBot)	set_ori(player, -1344, 460, ANGLE_1 * 0);
+			else						set_ori(player, -1266, 791, ANGLE_1 * 40);
 
 			if (player->player->bIsBot) {
 				CWootBot* bot = (CWootBot*)player->player->pSkullBot;
@@ -460,6 +460,7 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 		}
 	}
 
+	// win the level
 	if (!strcmp(msg, "w")) {
 		kill_all_shootables();
 
@@ -473,6 +474,49 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 		}
 	}
 
+	// add a line use goal
+	if (strstr(msg, "use ") == msg) {
+		int id = atoi(msg + 4);
+
+		if (id >= 0 && id < numlines) {
+			line_t* line = &lines[id];
+
+			BotGoal useGoal(g_wb_mapinfo.get_linedef_goal_action(line), id);
+
+			for (int i = 0; i < MAXPLAYERS; i++) {
+				AActor* player = players[i].mo;
+				if (!playeringame[i] || !player || !player->player->bIsBot)
+					continue;
+
+				CWootBot* bot = (CWootBot*)player->player->pSkullBot;
+				bot->PushGoal(useGoal, NULL);
+			}
+		}
+	}
+
+	// use line test case
+	if (strstr(msg, "u") == msg) {
+		int id = 685;
+
+		if (id >= 0 && id < numlines) {
+			line_t* line = &lines[id];
+
+			BotGoal useGoal(g_wb_mapinfo.get_linedef_goal_action(line), id);
+
+			for (int i = 0; i < MAXPLAYERS; i++) {
+				AActor* player = players[i].mo;
+				if (!playeringame[i] || !player || !player->player->bIsBot)
+					continue;
+
+				CWootBot* bot = (CWootBot*)player->player->pSkullBot;
+				bot->Reset();
+				set_ori(player, 653, -1008, ANGLE_1 * 0);
+				bot->PushGoal(useGoal, NULL);
+			}
+		}
+	}
+
+	// follow player when done with goals
 	if (!strcmp(msg, "follow")) {
 		for (int i = 0; i < MAXPLAYERS; i++) {
 			AActor* player = players[i].mo;
@@ -493,7 +537,8 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 		kill_all_shootables();
 	}
 
-	if (!strcmp(msg, "reset")) {
+	// restart the bot
+	if (!strcmp(msg, "stop")) {
 		for (int i = 0; i < MAXPLAYERS; i++) {
 			AActor* player = players[i].mo;
 			if (!playeringame[i] || !player || !player->player->bIsBot)
@@ -519,6 +564,24 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 		}
 	}
 
+	// teleport the bot to the player
+	if (!strcmp(msg, "tp")) {
+		AActor* target = getAnyPlayer();
+
+		if (target) {
+			FVector3 pos(target->x + ((PLAYER_WIDTH+1) << FRACBITS), target->y, target->z);
+
+			for (int i = 0; i < MAXPLAYERS; i++) {
+				AActor* player = players[i].mo;
+				if (!playeringame[i] || !player || !player->player->bIsBot)
+					continue;
+
+				P_Teleport(player, pos.X, pos.Y, pos.Z, 0, true, true, true);
+			}
+		}
+	}
+
+	// go to a subsector
 	if (strstr(msg, "goto ") == msg) {
 		int id = atoi(msg + 5);
 		if (id >= 0 && id < numsubsectors) {

@@ -10,19 +10,19 @@
 using namespace std;
 
 unordered_map<string, WeaponInfo> g_wbot_weapon_info = {
-	{"Fist",			{0,  0,   0,   64}},
-	{"Chainsaw",		{1,  0,   0,   64}},
-	{"Pistol",			{2,  0,   200, 4000}},
-	{"Shotgun",			{3,  0,   200, 2000}},
-	{"Chaingun",		{4,  0,   400, 4000}},
-	{"Minigun",			{4,  0,   400, 4000}},
-	{"GrenadeLauncher",	{5,  200, 400, 2000}},
-	{"RocketLauncher",	{5,  200, 500, 4000}},
-	{"SuperShotgun",	{6,  0,   200, 2000}},
-	{"PlasmaRifle",		{7,  0,   400, 4000}},
-	{"Railgun",			{7,	 0,   400, 4000}},
-	{"BFG9000",			{8,  0,   200, 2000}},
-	{"BFG10K",			{8,  0,   200, 2000}},
+	{"Fist",			{0,  0,   0,   64,		0}},
+	{"Chainsaw",		{1,  0,   0,   64,		0}},
+	{"Pistol",			{2,  0,   200, 4000,	1}},
+	{"Shotgun",			{3,  0,   200, 2000,	1}},
+	{"Chaingun",		{4,  0,   400, 4000,	1}},
+	{"Minigun",			{4,  0,   400, 4000,	1}},
+	{"GrenadeLauncher",	{5,  200, 400, 2000,	1}},
+	{"RocketLauncher",	{5,  200, 500, 4000,	1}},
+	{"SuperShotgun",	{6,  0,   200, 2000,	2}},
+	{"PlasmaRifle",		{7,  0,   400, 4000,	1}},
+	{"Railgun",			{7,	 0,   400, 4000,	1}},
+	{"BFG9000",			{8,  0,   200, 2000,	40}},
+	{"BFG10K",			{8,  0,   200, 2000,	40}},
 };
 
 CBotCombatController::CBotCombatController(CWootBot* pBot)
@@ -112,8 +112,9 @@ void CBotCombatController::SelectBestWeapon() {
 		if (item->IsKindOf(RUNTIME_CLASS(AWeapon))) {
 			AWeapon* weapon = static_cast<AWeapon*>(item);
 
-			int prio = g_wbot_weapon_info[weapon->GetClass()->TypeName.GetChars()].priority;
-			bool hasAmmo = weapon->Ammo1 && weapon->Ammo1->Amount > 0 && weapon->Ammo1->Amount >= weapon->MinAmmo1;
+			WeaponInfo& info = g_wbot_weapon_info[weapon->GetClass()->TypeName.GetChars()];
+			int prio = info.priority;
+			bool hasAmmo = weapon->Ammo1 && weapon->Ammo1->Amount > 0 && weapon->Ammo1->Amount >= info.minAmmo;
 			if ((!weapon->AmmoType1 || hasAmmo) && prio > bestPriority) {
 				bestPriority = prio;
 				bestWeapon = weapon;

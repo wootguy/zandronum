@@ -103,6 +103,7 @@ void CWootBot::Reset() {
 	m_nextThink = 0;
 	rushNav = -1;
 	rushTrigger = BotGoal();
+	UpdatePositionFlags();
 }
 
 void CWootBot::DebugPrint(const char* msg) {
@@ -386,13 +387,15 @@ FVector2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
 
 	int targetNav = -1;
 	int idealNav = -1;
-	if (m_routeController.m_route.size() > 0) {
-		idealNav = m_routeController.m_route[0];
+	if (m_routeController.m_route.route.size() > 0) {
+		idealNav = m_routeController.m_route.route[0];
 		nav = &g_wb_nav.mesh[idealNav];
 	}
-	if (m_routeController.m_route.size() > 1) {
-		targetNav = m_routeController.m_route[1];
+	if (m_routeController.m_route.route.size() > 1) {
+		targetNav = m_routeController.m_route.route[1];
 	}
+
+	fixed_t ignoreZ = actor->z + (STEP_HEIGHT << FRACBITS); // can't fall off a cliff above us
 
 	// get nearby sectors in case nearest ledge is at the corner of the current
 	std::vector<NavSector*> sectors;
@@ -413,6 +416,10 @@ FVector2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
 	int worstLink = -1;
 
 	for (NavSector* testSec : sectors) {
+		if (testSec->getFloorZ() > ignoreZ) {
+			continue;
+		}
+
 		for (NavSectorLink& link : testSec->links) {
 			if (!link.isCliff)
 				continue;
@@ -448,10 +455,12 @@ FVector2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
 
 	FVector2 avoidForce(0, 0);
 
-	cliffDist = worstDist;
-
 	if (worstDist < SAFE_CLIFF_DIST) {
+		cliffDist = worstDist;
 		avoidForce = worstNormal;
+	}
+	else {
+		cliffDist = 9999;
 	}
 
 	//FVector3 headPos = FVector3(plrPos.X, plrPos.Y, pActor->z + (56 << FRACBITS));
@@ -594,11 +603,18 @@ bool CWootBot::PushKeyGoals(line_t* line) {
 }
 
 bool CWootBot::SelectGoal(vector<BotGoal>& goals, NavSectorLink* purposeLink) {
-	BotGoal* bestGoal = NULL;
-	vector<BotGoal*> validGoals;
-
 	int unblockSector = purposeLink->target->id;
 	BotGoal* curGoal = CurrentGoal();
+	BotGoal* bestGoal = NULL;
+
+	float bestCost = FLT_MAX;
+
+	RouteOpts opts;
+	opts.start = m_routeController.m_navid;
+	opts.blockedPaths = m_routeController.GetBlockedPaths();
+	opts.blockedSubSectors.insert(unblockSector);
+	opts.timeSensitive = stateFlags & FL_WBOT_RUSHING;
+	opts.blockedPathHandling = WBOT_ROUTE_BLOCK_EXPENSIVE;
 
 	for (int i = 0; i < goals.size(); i++) {
 		BotGoal& goal = goals[i];
@@ -614,13 +630,19 @@ bool CWootBot::SelectGoal(vector<BotGoal>& goals, NavSectorLink* purposeLink) {
 			}
 		}
 
-		vector<int> route = m_routeController.RouteToSector(subid, unblockSector);
+		opts.end = subid;
+		BotRoute route = g_wb_nav.get_astar_route(opts);
 
-		if (subid == purposeLink->parent->id || route.size()) {
-			if (PushGoal(goal, purposeLink)) {
-				return true;
+		if (subid == purposeLink->parent->id || route.route.size()) {
+			if (!bestGoal || route.cost < bestCost) {
+				bestCost = route.dist;
+				bestGoal = &goal;
 			}
 		}
+	}
+
+	if (bestGoal && PushGoal(*bestGoal, purposeLink)) {
+		return true;
 	}
 
 	return false;

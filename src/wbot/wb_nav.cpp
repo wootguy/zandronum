@@ -292,15 +292,6 @@ void SectorNavMesh::init() {
 	}
 
 	mesh = SectorNavMeshGenerator::generate(propBlockers);
-	g_wb_mapinfo.sort_sector_trigger_goals();
-}
-
-int SectorNavMesh::get_route_distance(std::vector<int>& route) {
-	int totalDist = 0;
-	for (int i = 1; i < route.size(); i++) {
-		totalDist += (int)(mesh[i].pos() - mesh[i - 1].pos()).Length() >> FRACBITS;
-	}
-	return totalDist;
 }
 
 void SectorNavMesh::draw_nodes(AActor* actor) {
@@ -394,32 +385,35 @@ int SectorNavMesh::get_nav_id(AActor* actor) {
 	return get_nav_id(actor->x, actor->y);
 }
 
-float SectorNavMesh::path_cost(int a, int b) {
+float SectorNavMesh::node_heuristic(int a, int b) {
 	NavSector& nodea = mesh[a];
 	NavSector& nodeb = mesh[b];
 	FVector2 delta = nodea.pos() - nodeb.pos();
 	return delta.Length();
 }
 
-float SectorNavMesh::path_cost(NavSectorLink& link, bool timeSensitive) {
+float SectorNavMesh::path_dist(NavSectorLink& link) {
 	NavSector& parent = *link.parent;
 	NavSector& target = *link.target;
-	float cost = 0;
-	float dist = 0;
 
 	if (link.isTeleport)
-		dist = (link.pos() - parent.pos()).Length();
-	else
-		dist = (parent.pos() - target.pos()).Length();
+		return (link.pos() - parent.pos()).Length();
 
-	cost += dist;
+	return (parent.pos() - target.pos()).Length();
+}
+
+
+float SectorNavMesh::path_cost(NavSectorLink& link, float dist, const RouteOpts& opts) {
+	NavSector& parent = *link.parent;
+	NavSector& target = *link.target;
+	float cost = dist;
 
 	if (link.linkWidth < PLAYER_WIDTH) {
 		// try to avoid tiny links. They gets the bot stuck on corners.
 		cost += 200 << FRACBITS;
 	}
 
-	if (!timeSensitive) {
+	if (!opts.timeSensitive) {
 		// avoid things that are hard to navigate if speed isn't important
 
 		if (target.doesDamage) {
@@ -444,40 +438,46 @@ float SectorNavMesh::path_cost(NavSectorLink& link, bool timeSensitive) {
 		}
 	}
 
+	if (opts.blockedPathHandling == WBOT_ROUTE_BLOCK_EXPENSIVE && link.blocked(opts.actor))
+		cost += 4000 << FRACBITS;
+
 	return cost;
 }
 
-vector<int> SectorNavMesh::get_astar_route(int startSubSectorId, int endSubSectorId, unordered_set<int>* blockedPaths, int blockedSector, bool timeSensitive)
+BotRoute SectorNavMesh::get_astar_route(const RouteOpts& opts)
 {
 	unordered_set<int> closedSet;
 	unordered_set<int> openSet;
 
 	unordered_map<int, float> gScore;
 	unordered_map<int, float> fScore;
-	unordered_map<int, int> cameFrom;
+	unordered_map<int, BotRouteLink> cameFrom;
 
-	vector<int> emptyRoute;
+	BotRoute emptyRoute;
 
 	if (verbose) {
-		Printf("START route from %d to %d\n", startSubSectorId, endSubSectorId);
+		Printf("START route from %d to %d\n", opts.start, opts.end);
 	}
 
-	if (startSubSectorId < 0 || endSubSectorId < 0 || startSubSectorId >= numsubsectors || endSubSectorId >= numsubsectors) {
+	if (opts.start < 0 || opts.end < 0 || opts.start >= numsubsectors || opts.end >= numsubsectors) {
 		Printf("AStarRoute: invalid start/end nodes\n");
 		return emptyRoute;
 	}
 
-	if (startSubSectorId == endSubSectorId) {
-		emptyRoute.push_back(startSubSectorId);
+	if (opts.start == opts.end) {
+		emptyRoute.route.push_back(opts.start);
 		return emptyRoute;
 	}
 
-	NavSector& start = mesh[startSubSectorId];
-	NavSector& goal = mesh[endSubSectorId];
+	NavSector& start = mesh[opts.start];
+	NavSector& goal = mesh[opts.end];
 
-	openSet.insert(startSubSectorId);
-	gScore[startSubSectorId] = 0;
-	fScore[startSubSectorId] = path_cost(start.id, goal.id);
+	openSet.insert(opts.start);
+	gScore[opts.start] = 0;
+	fScore[opts.start] = node_heuristic(start.id, goal.id);
+
+	bool hasBlockedPaths = opts.blockedPaths.size();
+	bool hasBlockedSubSectors = opts.blockedSubSectors.size();
 
 	const int maxIter = 8192;
 	int curIter = 0;
@@ -502,26 +502,30 @@ vector<int> SectorNavMesh::get_astar_route(int startSubSectorId, int endSubSecto
 
 		if (current == goal.id) {
 			// goal reached, build the route
-			vector<int> path;
-			path.push_back(current);
+			BotRoute route;
+			route.route.push_back(current);
 
 			int maxPathLen = 1000;
 			int i = 0;
 			while (cameFrom.count(current)) {
-				current = cameFrom[current];
-				path.push_back(current);
+				const BotRouteLink& from = cameFrom[current];
+				current = from.node;
+				route.cost += from.cost;
+				route.dist += ((int)from.dist) >> FRACBITS;
+				route.route.push_back(current);
 				if (++i > maxPathLen) {
 					Printf("AStarRoute exceeded max path length (%d)", maxPathLen);
 					break;
 				}
 			}
-			reverse(path.begin(), path.end());
+			reverse(route.route.begin(), route.route.end());
 
 			if (verbose) {
-				Printf("FINISH route calculation from %d to %d. Size is %d. visited %d nodes\n", startSubSectorId, endSubSectorId, path.size(), closedSet.size());
+				Printf("FINISH route calculation from %d to %d. Size is %d. visited %d nodes\n",
+					opts.start, opts.end, route.route.size(), closedSet.size());
 			}
 
-			return path;
+			return route;
 		}
 
 		openSet.erase(current);
@@ -536,37 +540,30 @@ vector<int> SectorNavMesh::get_astar_route(int startSubSectorId, int endSubSecto
 			if (closedSet.count(neighbor))
 				continue;
 
-			if (neighbor == blockedSector)
+			if (hasBlockedSubSectors && opts.blockedSubSectors.count(neighbor))
 				continue;
 
-			if (blockedPaths && blockedPaths->count(link.id))
+			if (hasBlockedPaths && opts.blockedPaths.count(link.id))
 				continue;
 
-			// discover a new node
-			openSet.insert(neighbor);
+			if (opts.blockedPathHandling == WBOT_ROUTE_BLOCK_FORBID && link.blocked(opts.actor))
+				continue;
 
-			// The distance from start to a neighbor
-			NavSector& neighborNode = mesh[neighbor];
+			float linkDist = path_dist(link);
+			float linkCost = path_cost(link, linkDist, opts);
+			float tentative_gScore = gScore[current] + linkCost;
 
-			float tentative_gScore = gScore[current];
-			tentative_gScore += path_cost(link, timeSensitive);
-
-			if (link.linkWidth < PLAYER_WIDTH) {
-				// try to avoid tiny links. They gets the bot stuck on corners.
-				tentative_gScore += 200 << FRACBITS;
-			}
-
-			float neighbor_gScore = 9e99;
-			if (gScore.count(neighbor))
-				neighbor_gScore = gScore[neighbor];
-
-			if (tentative_gScore >= neighbor_gScore)
+			auto neigborCost = gScore.find(neighbor);
+			if (neigborCost != gScore.end() && tentative_gScore >= neigborCost->second)
 				continue; // not a better path
 
 			// This path is the best until now. Record it!
-			cameFrom[neighbor] = current;
 			gScore[neighbor] = tentative_gScore;
-			fScore[neighbor] = tentative_gScore + path_cost(neighborNode.id, goal.id);
+			fScore[neighbor] = tentative_gScore + node_heuristic(mesh[neighbor].id, goal.id);
+			cameFrom[neighbor] = BotRouteLink(current, linkDist, linkCost);
+
+			// discover a new node
+			openSet.insert(neighbor);
 		}
 	}
 
@@ -595,15 +592,22 @@ bool SectorNavMesh::get_key_goals_for_line(AActor* actor, line_t* line, vector<B
 	unordered_map<PClass*, KeyRoute> mapKeys;
 	TThinkerIterator<AKey> it;
 	AKey* mapKey;
+	
+	RouteOpts opts;
+	opts.start = actorNavId;
+	if (blockedPaths)
+		opts.blockedPaths = *blockedPaths;
+
 	while ((mapKey = it.Next()) != NULL) {
 		if (mapKey->Owner)
 			continue; // key in someone's inventory
 
 		int keyNavId = get_nav_id(mapKey);
+		opts.end = keyNavId;
 
 		KeyRoute keyRoute;
 		keyRoute.key = mapKey;
-		keyRoute.routeSize = get_route_distance(get_astar_route(actorNavId, keyNavId, blockedPaths));
+		keyRoute.routeSize = get_astar_route(opts).dist;
 
 		mapKeys[mapKey->GetClass()] = keyRoute;
 	}

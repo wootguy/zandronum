@@ -12,6 +12,7 @@ struct WeaponInfo {
 	int minRange;
 	int idealRange;
 	int maxRange;
+	int minAmmo;
 };
 
 extern std::unordered_map<std::string, WeaponInfo> g_wbot_weapon_info;

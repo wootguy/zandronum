@@ -1,7 +1,9 @@
 #include "wb_goal.h"
 #include "wb_nav.h"
 #include "wb_map.h"
+#include "wb_util.h"
 #include "r_state.h"
+#include "r_utility.h"
 #include <string>
 
 using namespace std;
@@ -54,16 +56,17 @@ std::string BotGoal::descLong() {
 	string unblockStr;
 	int numunBlock = 0;
 	for (auto item : unblockAttempts) {
-		unblockStr += " [" + to_string(item.first) + "->" + to_string(item.second) + "]";
+		//unblockStr += " [" + to_string(item.first) + "->" + to_string(item.second) + "]";
+		unblockStr += " " + to_string(item.first);
 		if (++numunBlock >= 4) {
 			break;
 		}
 	}
 	if (numunBlock < unblockAttempts.size()) {
-		descStr += "\n        unblocks: " + unblockStr + " (+" + to_string(unblockStr.size() - numunBlock) + ")";
+		descStr += "\n        Used: " + unblockStr + " (+" + to_string(unblockStr.size() - numunBlock) + ")";
 	}
 	else if (numunBlock > 0) {
-		descStr += "\n        unblocks: " + unblockStr;
+		descStr += "\n        Used: " + unblockStr;
 	}
 
 	return descStr;
@@ -78,6 +81,28 @@ int BotGoal::getNavId() {
 
 		if (ret == -1)
 			Printf("Failed to find subsector for line %d\n", lineid);
+		else {
+			NavSector& node = g_wb_nav.mesh[ret];
+			if (node.links.empty() && (action == WBOT_GOAL_ACTION_USE || action == WBOT_GOAL_ACTION_SHOOT)) {
+				// line is in an unreachable sector.
+				// Try tracing in front of it to see if it can be activated from a sector nearby
+				fixed_t use_dist = 64 << FRACBITS; // TODO: get actor use range
+				line_t* line = &lines[lineid];
+				FVector2 center = getLineCenter(line);
+				FVector2 front = center + getLineBackDir(line) * -use_dist;
+				center += (front - center).Unit() * FRACUNIT; // nudge to prevent collision with this line
+				subsector_t* centersub = &subsectors[ret];
+				subsector_t* frontsub = R_PointInSubsector(front.X, front.Y);
+				fixed_t startZ = centersub->sector->floorplane.ZatPoint((fixed_t)center.X, (fixed_t)center.Y);
+				fixed_t endZ = frontsub->sector->floorplane.ZatPoint((fixed_t)front.X, (fixed_t)front.Y);
+
+				if (abs(startZ - endZ) < (JUMP_HEIGHT << FRACBITS) && !TraceImpassable(center, front)) {
+					// no impassable walls between the line sector and the one in front
+					// try routing to that subsector instead
+					ret = frontsub - subsectors;
+				}
+			}
+		}
 
 		return ret;
 	}

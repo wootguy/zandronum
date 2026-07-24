@@ -590,39 +590,6 @@ void BotMapInfo::add_sector_info() {
 	add_stair_sector_info();
 }
 
-void BotMapInfo::sort_sector_trigger_goals() {
-	for (int i = 0; i < numsectors; i++) {
-		BotSectorInfo& info = sector_info[i];
-
-		// try closest goals first
-		if (info.triggers.size()) {
-			for (int k = 0; k < info.triggers.size(); k++) {
-				BotGoal& goal = info.triggers[k];
-
-				// TODO: Create a mapping
-				int anySubNav = -1;
-				sector_t* sec = &sectors[i];
-				for (int s = 0; s < numsubsectors; s++) {
-					if (subsectors[s].sector == sec) {
-						anySubNav = s;
-						break;
-					}
-				}
-
-				int goalNav = goal.getNavId();
-				if (goalNav != -1) {
-					vector<int> route = g_wb_nav.get_astar_route(goalNav, anySubNav);
-					goal.dist = g_wb_nav.get_route_distance(route);
-				}
-			}
-
-			std::sort(info.triggers.begin(), info.triggers.end(), [](const BotGoal& a, const BotGoal& b) {
-				return a.dist < b.dist;
-			});
-		}
-	}
-}
-
 bool BotMapInfo::is_link_bordered_by_walls(subsector_t& sub, int segIdx, int& leftSubId, int& rightSubId) {
 	int leftIdx = (segIdx + sub.numlines - 1) % sub.numlines;
 	int rightIdx = (segIdx + 1) % sub.numlines;

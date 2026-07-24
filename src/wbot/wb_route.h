@@ -1,6 +1,7 @@
 #pragma once
 #include "bots.h"
 #include "wb_goal.h"
+#include "wb_nav.h"
 #include <unordered_set>
 #include <vector>
 
@@ -17,10 +18,14 @@ enum BotJumpState {
 	WBOT_JUMP_FLY,	// flying through the air
 };
 
+enum BotWalkNodeState {
+	WBOT_WALK_NODE_EDGE, // walking to the edge of the next node
+	WBOT_WALK_NODE_CENTER,	// walking to the center of the next node
+};
 
 class CBotRouteController {
 public:
-	std::vector<int> m_route;			// current route
+	BotRoute m_route;					// current route
 	int m_routeSpeed = 0;				// how fast to run between nodes
 	int m_nodeRadius = 0;				// node touch distance
 	int m_navid = -1;					// current navigation node/subsector id
@@ -36,6 +41,7 @@ public:
 	FVector2 jumpStartPos = FVector2(0,0);			// position where the jump begins
 	FVector2 jumpEndPos = FVector2(0,0);			// position where the jump begins
 	int jumpState = WBOT_JUMP_NONE;
+	int walkNodeState = WBOT_WALK_NODE_EDGE;
 
 	CBotRouteController(CWootBot* pBot);
 
@@ -43,10 +49,10 @@ public:
 
 	void CancelRoute();							// abort the current route
 	bool RouteToGoal();
-	inline bool HasRoute() { return m_route.size(); };
+	inline bool HasRoute() { return m_route.route.size(); };
 
 	std::unordered_set<int> GetBlockedPaths();	// paths blocked during path to current goal
-	std::vector<int> RouteToSector(int subid, int blockSector=-1);
+	BotRoute RouteToSector(int subid, int blockSector=-1);
 
 private:
 	CWootBot* pBot = NULL;
