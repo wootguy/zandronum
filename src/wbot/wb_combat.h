@@ -27,11 +27,15 @@ public:
 
 	void Think();
 
+	AWeapon* GetWeaponByName(const char* name);
+	bool SelectWeapon(const char* name); // false if not in inventory or no ammo
+
 private:
 	CWootBot* pBot = NULL;
 	APlayerPawn* pActor = NULL;
 	player_t* pPlayer = NULL;
 
+	void SelectWeapon(AWeapon* weapon);
 	void SelectBestWeapon();
 	AActor* BestEnemy();
 

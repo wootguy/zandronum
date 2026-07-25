@@ -114,17 +114,20 @@ void CBotCombatController::SelectBestWeapon() {
 
 			WeaponInfo& info = g_wbot_weapon_info[weapon->GetClass()->TypeName.GetChars()];
 			int prio = info.priority;
-			bool hasAmmo = weapon->Ammo1 && weapon->Ammo1->Amount > 0 && weapon->Ammo1->Amount >= info.minAmmo;
-			if ((!weapon->AmmoType1 || hasAmmo) && prio > bestPriority) {
+			bool hasAmmo = !weapon->Ammo1 || weapon->Ammo1->Amount >= info.minAmmo;
+			if (hasAmmo && prio > bestPriority) {
 				bestPriority = prio;
 				bestWeapon = weapon;
 			}
 		}
 	}
 
-	if (bestWeapon && pPlayer->ReadyWeapon != bestWeapon && pPlayer->PendingWeapon != bestWeapon) {
-		DebugPrint(VarArgs("Switching to best weapon '%s'\n", bestWeapon->GetClass()->TypeName.GetChars()));
-		pPlayer->PendingWeapon = bestWeapon;
+	SelectWeapon(bestWeapon);
+}
+
+void CBotCombatController::SelectWeapon(AWeapon* weapon) {
+	if (weapon && pPlayer->ReadyWeapon != weapon && pPlayer->PendingWeapon != weapon) {
+		pPlayer->PendingWeapon = weapon;
 		if (pPlayer->ReadyWeapon != NULL) {
 			P_DropWeapon(pPlayer);
 		}
@@ -132,6 +135,35 @@ void CBotCombatController::SelectBestWeapon() {
 			P_BringUpWeapon(pPlayer);
 		}
 	}
+}
+
+AWeapon* CBotCombatController::GetWeaponByName(const char* selname) {
+	for (AInventory* item = pActor->Inventory; item != NULL; item = item->Inventory) {
+		if (item->IsKindOf(RUNTIME_CLASS(AWeapon))) {
+			AWeapon* weapon = static_cast<AWeapon*>(item);
+			const char* wepname = weapon->GetClass()->TypeName.GetChars();
+
+			if (!strcmp(wepname, selname))
+				return weapon;
+		}
+	}
+
+	return NULL;
+}
+
+bool CBotCombatController::SelectWeapon(const char* selname) {
+	AWeapon* weapon = GetWeaponByName(selname);
+
+	if (weapon) {
+		WeaponInfo& info = g_wbot_weapon_info[selname];
+		bool hasAmmo = !weapon->Ammo1 || weapon->Ammo1->Amount >= info.minAmmo;
+		if (hasAmmo) {
+			SelectWeapon(weapon);
+			return true;
+		}
+	}
+
+	return false;
 }
 
 AActor* wbot_LookForEnemiesInBlock(AActor* lookee, int index, void* extparam)

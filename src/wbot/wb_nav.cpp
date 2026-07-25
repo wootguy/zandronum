@@ -35,7 +35,7 @@ int NavSectorLink::blocked(AActor* actor, bool recurse) {
 		line_t* line = seg->linedef;
 
 		if (line && line->args[0] == 0 && g_wb_mapinfo.get_linedef_move_flag(line)) {
-			if (line->special == Door_LockedRaise && !P_CheckKeys(actor, line->args[3], false)) {
+			if (actor && line->special == Door_LockedRaise && !P_CheckKeys(actor, line->args[3], false)) {
 				return walkability; // don't have the keys required to use this
 			}
 
@@ -479,7 +479,7 @@ float SectorNavMesh::path_cost(NavSectorLink& link, float dist, const RouteOpts&
 		// avoid things that are hard to navigate if speed isn't important
 
 		if (target.doesDamage) {
-			cost += dist * (4 << FRACBITS); // avoid damage sectors
+			cost += dist * (8 << FRACBITS); // avoid damage sectors
 		}
 
 		if (link.isJump) {
@@ -493,11 +493,10 @@ float SectorNavMesh::path_cost(NavSectorLink& link, float dist, const RouteOpts&
 		}
 	}
 
-	if (g_wb_mapinfo.segment_walkability(link.seg) != LINK_BLOCK_CLEAR) {
-		fixed_t elevDist = fabs(target.getFloorZ() - parent.getFloorZ());
-		if (elevDist > (JUMP_HEIGHT << FRACBITS)) {
-			cost += elevDist * (4 << FRACBITS); // avoid elevators
-		}
+	if (g_wb_mapinfo.segment_walkability(link.seg) == LINK_BLOCK_TOO_HIGH) {
+		// avoid elevators, so that jumping into a pit to take an elevator isn't preferred
+		// over walking around it
+		cost += (2000 << FRACBITS);
 	}
 
 	if (opts.blockedPathHandling == WBOT_ROUTE_BLOCK_EXPENSIVE && link.blocked(opts.actor))
@@ -726,6 +725,41 @@ bool SectorNavMesh::get_key_goals_for_line(AActor* actor, line_t* line, vector<B
 	}
 
 	return true;
+}
+
+vector<BotGoal> SectorNavMesh::get_weapon_goals(const char* wepname) {
+	TThinkerIterator<AWeapon> it;
+	AWeapon* weapon;
+
+	vector<BotGoal> goals;
+
+	while ((weapon = it.Next()) != NULL) {
+		if (weapon->Owner)
+			continue; // weapon in someone's inventory
+
+		if (!strcmp(weapon->GetClass()->TypeName.GetChars(), wepname))
+			goals.push_back(BotGoal(WBOT_GOAL_ACTION_TOUCH, weapon));
+	}
+
+	return goals;
+}
+
+vector<BotGoal> SectorNavMesh::get_ammo_goals(const char* ammoname, const char* ammoname2) {
+	TThinkerIterator<AAmmo> it;
+	AAmmo* ammo;
+
+	vector<BotGoal> goals;
+
+	while ((ammo = it.Next()) != NULL) {
+		if (ammo->Owner)
+			continue; // weapon in someone's inventory
+
+		const char* name = ammo->GetClass()->TypeName.GetChars();
+		if (!strcmp(name, ammoname) || (ammoname2 && !strcmp(name, ammoname2)))
+			goals.push_back(BotGoal(WBOT_GOAL_ACTION_TOUCH, ammo));
+	}
+
+	return goals;
 }
 
 void SectorNavMesh::relink_sector(sector_t* sec) {

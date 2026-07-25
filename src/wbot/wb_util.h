@@ -9,6 +9,7 @@ struct TraceIsect {
 	line_t* line;
 	sector_t* sector;
 	FVector2 pos;
+	fixed_t fraction;
 };
 
 char* VarArgs(const char* format, ...);
@@ -23,6 +24,8 @@ FVector2 getLineCenter(line_t* line);
 bool DoLinesIntersect(const FVector2& la1, const FVector2& la2, const FVector2& lb1, const FVector2& lb2);
 
 FVector2 LineIntersect(const FVector2& la1, const FVector2& la2, const FVector2& lb1, const FVector2& lb2);
+
+bool LineIntersectsZRange(const FVector3& a, const FVector3& b, float zMin, float zMax, FVector3& enter, FVector3& exit);
 
 FVector2 ClosestPointOnSegment(const FVector2& p, const FVector2& a, const FVector2& b);
 

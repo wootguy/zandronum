@@ -150,17 +150,14 @@ void wbot_debug(CWootBot* pBot) {
 		if (item->IsKindOf(RUNTIME_CLASS(AWeapon))) {
 			AWeapon* weapon = static_cast<AWeapon*>(item);
 
-			bool hasAmmo = weapon->Ammo1 && weapon->Ammo1->Amount > 0 && weapon->Ammo1->Amount >= weapon->MinAmmo1;
-			if (!weapon->AmmoType1 || hasAmmo) {
-				string wepname = weapon->GetClass()->TypeName.GetChars();
-				WeaponInfo& info = g_wbot_weapon_info[wepname];
-				weaponStr += "\n   " + wepname + " "
-					+ to_string(weapon->Ammo1 ? weapon->Ammo1->Amount : 0)
-					+ " p" + to_string(info.priority);
-				//+ ", [" + to_string(info.minRange) + "," + to_string(info.idealRange) + "," + to_string(info.maxRange) + "] range";
-				if (pPlayer->ReadyWeapon == weapon) {
-					weaponStr += " <--";
-				}
+			string wepname = weapon->GetClass()->TypeName.GetChars();
+			WeaponInfo& info = g_wbot_weapon_info[wepname];
+			weaponStr += "\n   " + wepname + " "
+				+ to_string(weapon->Ammo1 ? weapon->Ammo1->Amount : 0)
+				+ " p" + to_string(info.priority);
+			//+ ", [" + to_string(info.minRange) + "," + to_string(info.idealRange) + "," + to_string(info.maxRange) + "] range";
+			if (pPlayer->ReadyWeapon == weapon) {
+				weaponStr += " <--";
 			}
 		}
 	}

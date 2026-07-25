@@ -569,6 +569,7 @@ BotRoute CBotRouteController::RouteToSector(int subid, int blockSector) {
 	opts.blockedSubSectors.insert(blockSector);
 	opts.blockedSubSectors.erase(-1);
 	opts.timeSensitive = pBot->stateFlags & FL_WBOT_RUSHING;
+	opts.blockedPathHandling = WBOT_ROUTE_BLOCK_IGNORE;
 
 	return g_wb_nav.get_astar_route(opts);
 }
@@ -585,7 +586,7 @@ bool CBotRouteController::RouteToGoal() {
 	int goalNavId = goal->getNavId();
 	m_route = RouteToSector(goalNavId);
 
-	if (m_route.route.empty() && goal->actor) {
+	if (m_route.route.empty() && goal->actor && goalNavId != -1) {
 		// actor origin is in an unreachable sector, but it's collision box may be touching a reachable one
 		vector<int> subs = g_wb_mapinfo.GetTouchedSubsectors(goal->actor);
 
@@ -598,11 +599,34 @@ bool CBotRouteController::RouteToGoal() {
 			if (m_route.route.size())
 				break;
 		}
+
+		if (goal->action == WBOT_GOAL_ACTION_BOSS_BRAIN) {
+			unordered_map<int, IndirectShootPos> shootFroms = goal->FindBossBrainShootPositions();
+			for (auto item : shootFroms) {
+				int subid = item.first;
+				m_route = RouteToSector(subid);
+				if (m_route.route.size()) {
+					 // can route to this position
+					goal->shootAlignment = item.second;
+				}
+			}
+		}
 	}
 
 	std::vector<int>& route = m_route.route;
 
 	if (route.size()) {
+		if (goal->action == WBOT_GOAL_ACTION_BOSS_BRAIN && !pBot->m_combatController.GetWeaponByName("RocketLauncher")) {
+			// must have rocket launcher first
+			vector<BotGoal> rpgs = g_wb_nav.get_weapon_goals("RocketLauncher");
+			if (!pBot->SelectGoal(rpgs, NULL)) {
+				// can't route to any rpg
+				DebugPrint("Failed to find an RPG to kill the boss brain\n");
+				pBot->FailGoal();
+				return false;
+			}
+		}
+
 		if (goal->action == WBOT_GOAL_ACTION_CROSS) {
 			// add the back sector of the cross line to the route, in case its part of an elevator
 			// this way unblocking logic works (doom2 map06 gold key).

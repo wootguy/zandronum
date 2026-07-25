@@ -4,9 +4,13 @@
 #include "wb_util.h"
 #include "r_state.h"
 #include "r_utility.h"
+#include "p_trace.h"
 #include <string>
 
 using namespace std;
+
+#define ROCKET_EXPLODE_RADIUS 96 // reduced a bit, just in case
+#define ROCKET_RADIUS 20
 
 std::string BotGoal::desc() {
 	std::string thingName;
@@ -30,6 +34,8 @@ std::string BotGoal::desc() {
 		return "Cross " + thingName;
 	case WBOT_GOAL_ACTION_SHOOT:
 		return "Shoot " + thingName;
+	case WBOT_GOAL_ACTION_BOSS_BRAIN:
+		return "Rocket " + thingName;
 	}
 
 	return "??? " + thingName;
@@ -74,6 +80,8 @@ std::string BotGoal::descLong() {
 
 int BotGoal::getNavId() {
 	if (actor) {
+		if (shootAlignment.subid >= 0)
+			return shootAlignment.subid;
 		return g_wb_nav.get_nav_id(actor);
 	}
 	else if (lineid >= 0) {
@@ -145,4 +153,150 @@ bool BotGoal::valid() {
 		return lines[lineid].special != 0;
 	}
 	return actor != NULL;
+}
+
+void BotGoal::TestBossBrainShootRay(FVector3 brainPos, FVector3 rayStart, FVector3 rayDir,
+	bool isCeilTrace, unordered_map<int, IndirectShootPos>& shootNodes)
+{
+	FVector3 impactPos = rayStart;
+
+	if (!isCeilTrace) {
+		FVector3 impactPos = rayStart + rayDir * ((ROCKET_EXPLODE_RADIUS + 64) << FRACBITS);
+		if (!TraceLine(rayStart, impactPos, true)) {
+			return; // no impact
+		}
+	}
+
+	fixed_t maxDist = ((ROCKET_EXPLODE_RADIUS + ROCKET_RADIUS) << FRACBITS) + actor->radius;
+
+	if ((impactPos - brainPos).Length() > maxDist) {
+		return; // impact point not close enough to the target to do damage
+	}
+
+	// trace in the opposite direction to find a sector to shoot the impact point from
+	FTraceResults tr;
+	FVector3 shootPos = impactPos - rayDir * (4000 << FRACBITS);
+	TraceLine(impactPos, shootPos, true, NULL, &tr);
+	shootPos = FVector3(tr.X, tr.Y, tr.Z);
+	FVector3 shootDelta = shootPos - impactPos;
+	fixed_t shootLen = shootDelta.Length();
+
+	// find which sectors are interesected
+	std::unordered_set<sector_t*> isectors;
+	for (TraceIsect& isect : TraceIntersections(rayStart, shootPos)) {
+		isectors.insert(isect.sector);
+	}
+
+	// do intersection tests against subsectors to find something to route to
+	for (int k = 0; k < numsubsectors; k++) {
+		subsector_t& sub = subsectors[k];
+		sector_t* sec = sub.sector;
+		if (!isectors.count(sec))
+			continue; // sector not intersected
+
+		NavSector& nav = g_wb_nav.mesh[k];
+
+		// test if the shoot line intersects this subsector
+		int numisect = 0;
+		FVector2 segsect[2];
+		for (int s = 0; s < sub.numlines; s++) {
+			seg_t& seg = sub.firstline[s];
+			FVector2 v1(seg.v1->x, seg.v1->y);
+			FVector2 v2(seg.v2->x, seg.v2->y);
+			if (DoLinesIntersect(v1, v2, impactPos, shootPos)) {
+				segsect[numisect++] = LineIntersect(v1, v2, impactPos, shootPos);
+			}
+		}
+
+		if (numisect == 0)
+			continue; // no intersection
+
+		fixed_t floorZ = sec->floorplane.ZatPoint((fixed_t)segsect[0].X, (fixed_t)segsect[0].Y);
+		fixed_t maxZ = floorZ + ((VIEW_HEIGHT + 8) << FRACBITS);
+		fixed_t minZ = floorZ + ((VIEW_HEIGHT - 8) << FRACBITS);
+
+		float frac1 = FixedDiv((segsect[0] - impactPos).Length(), shootLen) / (float)FRACUNIT;
+		fixed_t z1 = (shootPos + shootDelta * frac1).Z;
+
+		IndirectShootPos shoot;
+		shoot.subid = k;
+		shoot.shootAt = impactPos;
+
+		if (numisect == 2) {
+			// line passes thru this subsector
+			float frac2 = FixedDiv((segsect[1] - impactPos).Length(), shootLen) / (float)FRACUNIT;
+			fixed_t z2 = (shootPos + shootDelta * frac2).Z;
+			
+			FVector3 start = impactPos + frac1 * shootDelta;
+			FVector3 end = impactPos + frac2 * shootDelta;
+			FVector3 goodStart, goodEnd;
+			if (LineIntersectsZRange(start, end, minZ, maxZ, goodStart, goodEnd)) {
+				// anywhere along this line is a good place to shoot from
+				shoot.shootFrom = goodStart + (goodEnd - goodStart) * 0.5f;
+				shootNodes[k] = shoot;
+			}
+		}
+		else if (numisect == 1) {
+			// line terminates in this sector
+			int subid = R_PointInSubsector(shootPos.X, shootPos.Y) - subsectors;
+
+			if (subid == k) {
+				// line hits the floor and an earlier point on the line is a good shooting height
+
+				FVector3 start = impactPos + frac1 * shootDelta;
+				FVector3 goodStart, goodEnd;
+				if (LineIntersectsZRange(start, shootPos, minZ, maxZ, goodStart, goodEnd)) {
+					// anywhere along this line is a good place to shoot from
+					shoot.shootFrom = goodStart + (goodEnd - goodStart) * 0.5f;
+					shootNodes[k] = shoot;
+				}
+			}
+		}
+	}
+}
+
+unordered_map<int, IndirectShootPos> BotGoal::FindBossBrainShootPositions() {
+	// boss brain is normally unreachable, but can be damaged by rockets
+	FVector3 actorPos(actor->x, actor->y, actor->z);
+	const int maxPitch = 20;
+
+	unordered_map<int, IndirectShootPos> shootFromNodes;
+
+	// test impacts against nearby walls
+	for (int h = 0; h < 128; h += 8) {
+		FVector3 abovePos = actorPos + FVector3(0, 0, h << FRACBITS);
+
+		for (int p = -maxPitch; p <= maxPitch; p++) {
+			float pitchRad = p * (M_PI / 180.0f);
+			float pitchCos = cosf(pitchRad);
+			float pitchSin = sinf(pitchRad);
+
+			for (int i = 0; i < 360; i += 90) {
+				float rad = i * (M_PI / 180.0f);
+				FVector3 dir(cosf(rad) * pitchCos, sinf(rad) * pitchCos, pitchSin);
+				TestBossBrainShootRay(actorPos, abovePos, dir, false, shootFromNodes);
+			}
+		}
+	}
+
+	// test impacts against the ceiling
+	FVector3 ceilPos = actorPos;
+	ceilPos.Z = actor->Sector->ceilingplane.ZatPoint(actor->x, actor->y);
+	ceilPos.Z -= FRACUNIT;
+	//ceilPos.Z -= (ROCKET_RADIUS / 2) << FRACBITS;
+
+	for (int p = 1; p < maxPitch; p++) {
+		float pitchRad = p * (M_PI / 180.0f);
+		float pitchCos = cosf(pitchRad);
+		float pitchSin = sinf(pitchRad);
+
+		for (int i = 0; i < 360; i += 90) {
+			float rad = i * (M_PI / 180.0f);
+			FVector3 dir(cosf(rad) * pitchCos, sinf(rad) * pitchCos, pitchSin);
+			TestBossBrainShootRay(actorPos, ceilPos, dir, true, shootFromNodes);
+		}
+	}
+
+
+	return shootFromNodes;
 }

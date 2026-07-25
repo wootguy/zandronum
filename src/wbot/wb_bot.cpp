@@ -140,6 +140,12 @@ void CWootBot::GoalActionThink() {
 	NavSector& nav = m_routeController.m_navIdeal ? *m_routeController.m_navIdeal
 		: g_wb_nav.mesh[m_routeController.m_navid];
 
+	if (!goal.valid()) {
+		DebugPrint("Goal became invalid\n");
+		CompleteGoal();
+		return;
+	}
+
 	int goalSector = goal.getNavId();
 
 	if (m_routeController.m_navid != goalSector && m_routeController.pretendRouteSector != goalSector) {
@@ -209,6 +215,33 @@ void CWootBot::GoalActionThink() {
 		FTraceResults tr;
 		TraceAhead(shootRange, FVector3(0, 0, m_pPlayer->viewheight), false, &tr);
 		if (tr.Line && (tr.Line - lines) == goal.lineid) {
+			Attack();
+		}
+		break;
+	}
+	case WBOT_GOAL_ACTION_BOSS_BRAIN: {
+		if (!m_combatController.GetWeaponByName("RocketLauncher")) {
+			vector<BotGoal> rpgs = g_wb_nav.get_weapon_goals("RocketLauncher");
+			if (!SelectGoal(rpgs, NULL)) {
+				DebugPrint("Failed to find an RPG to kill the boss brain\n");
+				FailGoal();
+			}
+			return;
+		}
+
+		if (!m_combatController.SelectWeapon("RocketLauncher")) {
+			vector<BotGoal> rockets = g_wb_nav.get_ammo_goals("RocketBox", "Rocket");
+			if (!SelectGoal(rockets, NULL)) {
+				DebugPrint("Failed to find RPG ammo to kill the boss brain\n");
+				FailGoal();
+			}
+			return;
+		}
+
+		int dist = GetDistance(goal.shootAlignment.shootFrom) >> FRACBITS;
+		int moveSpeed = std::min(RUN_SPEED, dist);
+		if (MoveTo(goal.shootAlignment.shootFrom, 8, moveSpeed) && GetSpeed2D() < 10) {
+			AimAtPos(goal.shootAlignment.shootAt);
 			Attack();
 		}
 		break;
@@ -541,6 +574,18 @@ bool CWootBot::PushLevelEndGoal() {
 		}
 	}
 
+	TThinkerIterator<AActor> it;
+	AActor* actor;
+	while ((actor = it.Next())) {
+		if ((actor->flags & MF_SHOOTABLE) && !actor->player) {
+			if (!strcmp(actor->GetClass()->TypeName.GetChars(), "BossBrain")) {
+				if (PushGoal(BotGoal(WBOT_GOAL_ACTION_BOSS_BRAIN, actor), NULL)) {
+					return true;
+				}
+			}
+		}
+	}
+
 	return false;
 }
 
@@ -603,7 +648,7 @@ bool CWootBot::PushKeyGoals(line_t* line) {
 }
 
 bool CWootBot::SelectGoal(vector<BotGoal>& goals, NavSectorLink* purposeLink) {
-	int unblockSector = purposeLink->target->id;
+	int unblockSector = purposeLink ? purposeLink->target->id : -1;
 	BotGoal* curGoal = CurrentGoal();
 	BotGoal* bestGoal = NULL;
 
@@ -612,7 +657,8 @@ bool CWootBot::SelectGoal(vector<BotGoal>& goals, NavSectorLink* purposeLink) {
 	RouteOpts opts;
 	opts.start = m_routeController.m_navid;
 	opts.blockedPaths = m_routeController.GetBlockedPaths();
-	opts.blockedSubSectors.insert(unblockSector);
+	if (unblockSector != -1)
+		opts.blockedSubSectors.insert(unblockSector);
 	opts.timeSensitive = stateFlags & FL_WBOT_RUSHING;
 	opts.blockedPathHandling = WBOT_ROUTE_BLOCK_EXPENSIVE;
 
@@ -622,7 +668,7 @@ bool CWootBot::SelectGoal(vector<BotGoal>& goals, NavSectorLink* purposeLink) {
 			continue;
 		int subid = goal.getNavId();
 
-		if (curGoal) {
+		if (curGoal && purposeLink) {
 			auto unblockAttempt = curGoal->unblockAttempts.find(goal.lineid);
 			if (unblockAttempt != curGoal->unblockAttempts.end() && unblockAttempt->second == purposeLink->id) {
 				// already tried this goal and the path was still blocked after completing it.
@@ -633,7 +679,7 @@ bool CWootBot::SelectGoal(vector<BotGoal>& goals, NavSectorLink* purposeLink) {
 		opts.end = subid;
 		BotRoute route = g_wb_nav.get_astar_route(opts);
 
-		if (subid == purposeLink->parent->id || route.route.size()) {
+		if ((purposeLink && subid == purposeLink->parent->id) || route.route.size()) {
 			if (!bestGoal || route.cost < bestCost) {
 				bestCost = route.dist;
 				bestGoal = &goal;

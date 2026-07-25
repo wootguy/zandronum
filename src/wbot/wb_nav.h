@@ -8,6 +8,7 @@
 #define STEP_HEIGHT 24
 #define JUMP_HEIGHT 56
 #define STAND_HEIGHT 56
+#define VIEW_HEIGHT 41
 #define DUCK_HEIGHT 28
 #define PLAYER_WIDTH 32
 #define PLAYER_RADIUS 16
@@ -132,6 +133,12 @@ public:
 	
 	// get key required to use the linedef. Returns false if keys don't exist anywhere in the map.
 	bool get_key_goals_for_line(AActor* actor, line_t* linedef, std::vector<BotGoal>& keyGoals, std::unordered_set<int>* blockedPaths);
+
+	// find all weapons in the map with the given name
+	std::vector<BotGoal> get_weapon_goals(const char* wepname);
+
+	// find all ammo in the map with the given name(s)
+	std::vector<BotGoal> get_ammo_goals(const char* ammoname, const char* ammoname2=NULL);
 
 	int get_nav_id(fixed_t x, fixed_t y);
 	int get_nav_id(AActor* actor); // get key required to use the linedef. Returns false if keys don't exist anywhere in the map.

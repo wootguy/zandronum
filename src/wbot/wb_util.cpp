@@ -118,6 +118,37 @@ FVector2 LineIntersect(const FVector2& la1, const FVector2& la2, const FVector2&
 	return FVector2(x, y);
 }
 
+bool LineIntersectsZRange(const FVector3& a, const FVector3& b, float zMin, float zMax, FVector3& enter, FVector3& exit) {
+	float dz = b.Z - a.Z;
+
+	// Horizontal line
+	const fixed_t eps = 1 << (FRACBITS / 2);
+	if (dz < eps) {
+		if (a.Z >= zMin && a.Z <= zMax) {
+			enter = a;
+			exit = b;
+			return true;
+		}
+		return false;
+	}
+
+	float t0 = (zMin - a.Z) / dz;
+	float t1 = (zMax - a.Z) / dz;
+
+	if (t0 > t1)
+		std::swap(t0, t1);
+
+	t0 = std::max(0.0f, t0);
+	t1 = std::min(1.0f, t1);
+
+	if (t0 > t1)
+		return false;
+
+	enter = a + (b - a) * t0;
+	exit = a + (b - a) * t1;
+	return true;
+}
+
 FVector2 ClosestPointOnSegment(const FVector2& p, const FVector2& a, const FVector2& b) {
 	FVector2 ab = b - a;
 	float lenSq = DotProduct(ab, ab);
@@ -303,6 +334,7 @@ vector<TraceIsect> TraceIntersections(FVector2 start, FVector2 end) {
 		TraceIsect isect;
 		isect.line = wall;
 		isect.pos = FVector2(StartX + FixedMul(Vx, dist), StartY + FixedMul(Vy, dist));
+		isect.fraction = in->frac;
 
 		if (wall->backsector == NULL) {
 			isect.sector = in->d.line->frontsector;
@@ -402,7 +434,15 @@ void kill_all_shootables() {
 	TThinkerIterator<AActor> it;
 	AActor* actor;
 	while ((actor = it.Next())) {
+		if (!strcmp(actor->GetClass()->TypeName.GetChars(), "BossEye")) {
+			P_RemoveThing(actor);
+			continue;
+		}
+
 		if ((actor->flags & MF_SHOOTABLE) && !actor->player) {
+			if (!strcmp(actor->GetClass()->TypeName.GetChars(), "BossBrain")) {
+				continue;
+			}
 			P_DamageMobj(actor, actor, actor, actor->health * 2, FName());
 		}
 	}
@@ -453,8 +493,8 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 			if (!playeringame[i] || !player)
 				continue;
 
-			if (player->player->bIsBot)	set_ori(player, 3172, 2783, ANGLE_1 * 0);
-			else						set_ori(player, 3419, 2282, ANGLE_1 * 40);
+			if (player->player->bIsBot)	set_ori(player, 1260, 1647, ANGLE_1 * 0);
+			else						set_ori(player, 1279, 2384, ANGLE_1 * 40);
 
 			if (player->player->bIsBot) {
 				CWootBot* bot = (CWootBot*)player->player->pSkullBot;
@@ -477,6 +517,7 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 				continue;
 
 			CWootBot* bot = (CWootBot*)player->player->pSkullBot;
+			//set_ori(player, 3211, -131, ANGLE_1 * 40);
 			bot->PushLevelEndGoal();
 		}
 	}

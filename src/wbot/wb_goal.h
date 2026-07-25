@@ -11,6 +11,14 @@ enum BotGoalAction {
 	WBOT_GOAL_ACTION_TOUCH,		// touch the given actor
 	WBOT_GOAL_ACTION_CROSS,		// cross the given line
 	WBOT_GOAL_ACTION_SHOOT,		// shoot the given line
+	WBOT_GOAL_ACTION_BOSS_BRAIN,// find some angle where the target can be damaged with rockets, then attack
+};
+
+// position to shoot a target from indirectly
+struct IndirectShootPos {
+	FVector3 shootFrom;
+	FVector3 shootAt;
+	int subid = -1;
 };
 
 struct BotGoal {
@@ -22,7 +30,8 @@ struct BotGoal {
 	// per-bot data
 	std::unordered_set<int> blockers; // paths that can't be used while reacching this goal
 	std::unordered_map<int, int> unblockAttempts; // maps a line to a path it was meant to unblock. Don't try that line again if the path is still blocked.
-	
+	IndirectShootPos shootAlignment; // where to aim and where to shoot from
+
 	NavSectorLink* purposeLink = NULL; // link this goal is meant to unblock
 	bool required = false; // if true, fail the parent goal and other required subgoals when this fails
 
@@ -42,4 +51,9 @@ struct BotGoal {
 
 	// false if the actor or lineid are no longer interactable
 	bool valid();
+
+	std::unordered_map<int, IndirectShootPos> FindBossBrainShootPositions();
+
+private:
+	void TestBossBrainShootRay(FVector3 brainPos, FVector3 rayStart, FVector3 rayDir, bool isCeilTrace, std::unordered_map<int, IndirectShootPos>& shootNodes);
 };
