@@ -28,9 +28,14 @@ bool SectorNavMeshGenerator::trace_jump(FVector3 start, FVector3 end, int fromMo
 					continue; // wall may move out of the way in the future
 				}
 			}
-			if (tr.HitType == TRACE_HitCeiling && fromNavMovesDown && start.Z > tr.Z) {
+			else if (tr.HitType == TRACE_HitCeiling && fromNavMovesDown && start.Z > tr.Z) {
 				// sector may be fully lifted to the ceiling and so can't connect yet
 				continue; // may move out of the way in the future
+			}
+			else if (tr.HitType == TRACE_HitFloor) {
+				if (g_wb_mapinfo.sector_info[tr.Sector - sectors].moveFlags & FL_SECTOR_MOVE_FLOOR_DOWN) {
+					continue; // hit a floor that may move out of the way later
+				}
 			}
 
 			return false; // hit an immovable wall or ceiling/floor
@@ -124,8 +129,8 @@ bool SectorNavMeshGenerator::is_potential_jump_link(NavSector& fromNav, NavSecto
 	}
 
 	// check that the path is clear
-	FVector3 start = FVector3(jumpStart, 56 << FRACBITS);
-	FVector3 end = FVector3(jumpEnd, 56 << FRACBITS);
+	FVector3 start = FVector3(jumpStart, fromFloorZ + (56 << FRACBITS));
+	FVector3 end = FVector3(jumpEnd, toFloorZ + (56 << FRACBITS));
 
 	bool fromNavMovesUp = fromMovement & FL_SECTOR_MOVE_FLOOR_UP;
 	bool toNavMovesDown = toMovement & FL_SECTOR_MOVE_FLOOR_DOWN;
@@ -134,7 +139,7 @@ bool SectorNavMeshGenerator::is_potential_jump_link(NavSector& fromNav, NavSecto
 	if (TraceImpassable(jumpStart, jumpEnd))
 		return false;
 
-	if (fromNav.id == 420 && toNav.id == 280)
+	if (fromLink.id == 1505 && toNav.id == 435)
 		Printf("");
 
 	if (jumpTooFarCurrently && jumpMayBeLowerLater) {
@@ -196,10 +201,7 @@ bool SectorNavMeshGenerator::create_jump_link(NavSector& fromNav, NavSectorLink&
 	link.id = g_total_links++;
 	link.isJump = true;
 	link.jumpDist = (fromLink.pos() - toLink.pos()).Length();
-
-	//if (link.id == 2673 && toNav.id == 673) {
-		//Printf("");
-	//}
+	link.jumpNeighbor = fromLink.target;
 
 	fromNav.links.push_back(link);
 

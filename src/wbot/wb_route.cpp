@@ -267,11 +267,27 @@ void CBotRouteController::JumpThink() {
 		if (m_navTarget->getFloorZ() > pActor->z + (JUMP_HEIGHT << FRACBITS)) {
 			jumpState = WBOT_JUMP_NONE; // missed the jump
 
-			BotGoal* curgoal = pBot->CurrentGoal();
-			if (curgoal) {
-				// don't try the jump again, there are probably other ones to try
-				// and many jumps just don't work
-				curgoal->blockers.insert(m_navLink->id);
+			NavSector* backupBlocker = m_navLink->GetJumpBackupBlocker(m_navTarget->pos());
+
+			if (backupBlocker) {
+				// The running-start position was blocked by something that can be moved.
+				// Try moving it before considering this jump to be impossible
+				if (pBot->SelectGoal(backupBlocker->getTriggers(), m_navLink)) {
+					return;
+				}
+				else {
+					// already tried this goal
+					backupBlocker = NULL;
+				}
+			}
+
+			if (!backupBlocker) {
+				BotGoal* curgoal = pBot->CurrentGoal();
+				if (curgoal) {
+					// don't try the jump again, there are probably other ones to try
+					// and many jumps just don't work
+					curgoal->blockers.insert(m_navLink->id);
+				}
 			}
 
 			return;

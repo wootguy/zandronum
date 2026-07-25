@@ -330,7 +330,7 @@ bool TraceImpassable(FVector2 start, FVector2 end) {
 	return false;
 }
 
-bool TraceSectorEdge(FVector2 start, FVector2 end, FVector2& edge) {
+bool TraceSectorEdge(FVector2 start, FVector2 end, FVector2& edge, line_t** line) {
 	FPathTraverse path(start.X, start.Y, end.X, end.Y, PT_ADDLINES);
 	intercept_t* in = path.Next();
 
@@ -344,8 +344,15 @@ bool TraceSectorEdge(FVector2 start, FVector2 end, FVector2& edge) {
 		fixed_t Vx = dir.X;
 		fixed_t Vy = dir.Y;
 
+		if (line) {
+			*line = in->d.line;
+		}
+
 		edge = FVector2(StartX + FixedMul(Vx, dist), StartY + FixedMul(Vy, dist));
 		return true;
+	}
+	else if (line) {
+		*line = NULL;
 	}
 
 	edge = end;
@@ -446,8 +453,8 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 			if (!playeringame[i] || !player)
 				continue;
 
-			if (player->player->bIsBot)	set_ori(player, -1344, 460, ANGLE_1 * 0);
-			else						set_ori(player, -1266, 791, ANGLE_1 * 40);
+			if (player->player->bIsBot)	set_ori(player, 3172, 2783, ANGLE_1 * 0);
+			else						set_ori(player, 3419, 2282, ANGLE_1 * 40);
 
 			if (player->player->bIsBot) {
 				CWootBot* bot = (CWootBot*)player->player->pSkullBot;

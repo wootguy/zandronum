@@ -112,12 +112,16 @@ bool NavSectorLink::jumpable() {
 }
 
 bool NavSectorLink::isJumpValid() {
-	fixed_t jumpHeight = target->getFloorZ() - parent->getFloorZ();
+	fixed_t floorZ = parent->getFloorZ();
+	fixed_t jumpHeight = target->getFloorZ() - floorZ;
 	if (jumpHeight >= (JUMP_HEIGHT << FRACBITS))
 		return false;
 
 	if (jumpDist > (JUMP_DIST << FRACBITS) - jumpHeight)
 		return false; // too far to make it
+
+	if (jumpNeighbor->getFloorZ() - floorZ > -(JUMP_HEIGHT << FRACBITS))
+		return false; // not currently a cliff edge
 
 	return true;
 }
@@ -142,22 +146,80 @@ FVector2 NavSectorLink::GetJumpEndPos(FVector2 targetPos) {
 	// move the landing point from the center to the nearest ledge
 	FVector2 ledgeDir = (jumpPos - targetPos).Unit();
 
+	line_t* line;
 	FVector2 edgePos;
-	if (TraceSectorEdge(targetPos, targetPos + ledgeDir * (1000 << FRACBITS), edgePos)) {
+	if (TraceSectorEdge(targetPos, targetPos + ledgeDir * (1000 << FRACBITS), edgePos, &line)) {
+		FVector2 a = FVector2(line->v1->x, line->v1->y);
+		FVector2 b = FVector2(line->v2->x, line->v2->y);
+		FVector2 dir = (b - a).Unit();
+		fixed_t dist = (b - a).Length();
+		fixed_t nudgeDist = std::min(dist / 2, 32 << FRACBITS);
+		fixed_t distFromA = (edgePos - a).Length();
+		fixed_t distFromB = (edgePos - b).Length();
+
+		// move edge away from the line endings to avoid collision with a wall
+		if (distFromB < nudgeDist) {
+			edgePos -= dir * (nudgeDist - distFromB);
+		}
+		if (distFromA < nudgeDist) {
+			edgePos += dir * (nudgeDist - distFromA);
+		}
+
 		return edgePos;
 	}
 
 	return targetPos;
 }
 
-
-FVector2 NavSectorLink::GetJumpBackupPos(FVector2 targetPos, AActor* jumper) {
+NavSector* NavSectorLink::GetJumpBackupBlocker(FVector2 targetPos) {
 	FVector2 startPos = GetJumpStartPos(targetPos);
 
 	// back up the starting position to get a running start for the jump
 	FVector2 jumpDir = (targetPos - startPos).Unit();
 
 	fixed_t maxBackupDist = 256 << FRACBITS;
+	FVector2 backupStartPos = startPos - (jumpDir * FRACUNIT); // avoid clipping against the backoff line
+	FVector2 backupPos = startPos - jumpDir * maxBackupDist;
+	fixed_t startZ = parent->getFloorZ();
+	int isects = 0;
+
+	FVector2 edge;
+	line_t* line;
+	if (TraceSectorEdge(backupStartPos, backupPos, edge, &line)) {
+		subsector_t& sub = subsectors[parent->id];
+		for (NavSectorLink& link : parent->links) {
+			if (link.seg->linedef == line) {
+				bool canMoveAway = link.target->getMoveFlags() & (FL_SECTOR_MOVE_FLOOR_DOWN | FL_SECTOR_MOVE_CEIL_UP);
+				return canMoveAway ? link.target : NULL;
+			}
+		}
+	}
+
+	return NULL;
+}
+
+fixed_t NavSectorLink::GetJumpBackupSpaceNeeded(FVector3 start, FVector3 end) {
+	fixed_t gap = jumpDist - (PLAYER_WIDTH << FRACBITS);
+
+	const fixed_t maxBackup = 256 << FRACBITS;
+
+	FVector3 dir = (end - start).Unit();
+	float distScale = dir.Z + 1; // increase gap for upward jumps, decrease for downward
+
+	return std::min(maxBackup, (fixed_t)(gap * distScale));
+}
+
+FVector2 NavSectorLink::GetJumpBackupPos(FVector2 targetPos, AActor* jumper) {
+	FVector2 startPos = GetJumpStartPos(targetPos);
+	FVector2 endPos = GetJumpEndPos(targetPos);
+	FVector3 startPos3D(startPos, parent->getFloorZ());
+	FVector3 endPos3D(endPos, target->getFloorZ());
+
+	// back up the starting position to get a running start for the jump
+	FVector2 jumpDir = (targetPos - startPos).Unit();
+
+
+	fixed_t maxBackupDist = GetJumpBackupSpaceNeeded(startPos3D, endPos3D);
 	FVector2 backupStartPos = startPos - (jumpDir * FRACUNIT); // avoid clipping against the backoff line
 	FVector2 backupPos = startPos - jumpDir * maxBackupDist;
 	fixed_t startZ = parent->getFloorZ();

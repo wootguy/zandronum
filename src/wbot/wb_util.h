@@ -62,7 +62,7 @@ std::vector<TraceIsect> TraceIntersections(FVector2 start, FVector2 end);
 bool TraceImpassable(FVector2 start, FVector2 end);
 
 // trace until the first intersected sector edge
-bool TraceSectorEdge(FVector2 start, FVector2 end, FVector2& edge);
+bool TraceSectorEdge(FVector2 start, FVector2 end, FVector2& edge, line_t** line);
 
 bool IsImpassable(line_t* line);
 

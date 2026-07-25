@@ -25,22 +25,25 @@ enum LinkBlockReason {
 };
 
 struct NavSectorLink {
-	int id;		// link ID, not associated with any bsp structure
-	NavSector* parent;
-	NavSector* target;
+	int id = -1;		// link ID, not associated with any bsp structure
+	NavSector* parent = NULL;
+	NavSector* target = NULL;
+	NavSector* jumpNeighbor = NULL; // node that must be partially run into to begin the jump
 	FVector2 overlapCenter;
-	int linkWidth;
-	int leftSector; // setor on the left side of the target sector, relative to the border segment
-	int rightSector; // setor on the right side of the target sector, relative to the border segment
-	bool isTeleport;
-	bool isCliff; // crossing this segs drops you down to a floor so low that you can't get back
-	bool isJump; // jump required to reach the target sector
-	fixed_t jumpDist; // distance to the nearest landing point in the target sector
-	seg_t* seg;
+	int linkWidth = 0;
+	int leftSector = -1; // setor on the left side of the target sector, relative to the border segment
+	int rightSector = -1; // setor on the right side of the target sector, relative to the border segment
+	bool isTeleport = false;
+	bool isCliff = false; // crossing this segs drops you down to a floor so low that you can't get back
+	bool isJump = false; // jump required to reach the target sector
+	fixed_t jumpDist = 0; // distance to the nearest landing point in the target sector
+	seg_t* seg = NULL;
 
 	FVector2 pos();
 	FVector3 pos3D();
+	fixed_t GetJumpBackupSpaceNeeded(FVector3 start, FVector3 end); // calculate how much of a running start is needed to complete the jump
 	FVector2 GetJumpBackupPos(FVector2 targetPos, AActor* jumper); // find the best place to begin running for a jump
+	NavSector* GetJumpBackupBlocker(FVector2 targetPos); // get the movable sector that blocks the backup position, if any
 	FVector2 GetJumpStartPos(FVector2 targetPos); // find the best place to begin the jump
 	FVector2 GetJumpEndPos(FVector2 targetPos); // find the closest point to land
 	
