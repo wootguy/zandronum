@@ -1,6 +1,7 @@
 #include "wb_util.h"
 #include "wb_bot.h"
 #include "wb_map.h"
+#include "wb_nav.h"
 #include "r_utility.h"
 #include "p_spec.h"
 #include "p_local.h"
@@ -9,7 +10,7 @@
 #include "network.h"
 #include "sv_commands.h"
 #include "p_trace.h"
-#include "wbot/wb_nav.h"
+#include "m_bbox.h"
 
 #include <chrono>
 
@@ -183,6 +184,88 @@ fixed_t DistanceToLine(const FVector2& p, const FVector2& a, const FVector2& b) 
 
 fixed_t DistanceToLine(const FVector2& p, line_t* line) {
 	return DistanceToLine(p, FVector2(line->v1->x, line->v1->y), FVector2(line->v2->x, line->v2->y));
+}
+
+bool IsBoxClipped(const FVector3& pos, fixed_t radius, fixed_t height) {
+	FBoundingBox box(pos.X, pos.Y, radius);
+	FBlockLinesIterator it(box);
+	line_t* ld;
+
+	fixed_t x = pos.X;
+	fixed_t y = pos.Y;
+	fixed_t z = pos.Z;
+	fixed_t topZ = z + height;
+
+	while ((ld = it.Next())) {
+
+		if (box.Right() <= ld->bbox[BOXLEFT]
+			|| box.Left() >= ld->bbox[BOXRIGHT]
+			|| box.Top() <= ld->bbox[BOXBOTTOM]
+			|| box.Bottom() >= ld->bbox[BOXTOP]) {
+			continue;
+		}
+
+		if (box.BoxOnLineSide(ld) != -1)
+			continue; // doesn't cross the line
+
+		if (IsImpassable(ld))
+			return true; // crosses an impassable line
+		
+		fixed_t frontCeil = ld->frontsector->ceilingplane.ZatPoint(x, y);
+		fixed_t frontFloor = ld->frontsector->floorplane.ZatPoint(x, y);
+		fixed_t backCeil = ld->backsector->ceilingplane.ZatPoint(x, y);
+		fixed_t backFloor = ld->backsector->floorplane.ZatPoint(x, y);
+
+		if (z < backFloor || z < frontFloor)
+			return true; // clipped into the floor
+
+		if (topZ > frontCeil || topZ > backCeil)
+			return true; // clipped into the ceiling
+	}
+
+	return false;
+}
+
+std::vector<sector_t*> GetBoxClipSectors(const FVector3& pos, fixed_t radius, fixed_t height) {
+	std::vector<sector_t*> clipSectors;
+	
+	FBoundingBox box(pos.X, pos.Y, radius);
+	FBlockLinesIterator it(box);
+	line_t* ld;
+
+	fixed_t x = pos.X;
+	fixed_t y = pos.Y;
+	fixed_t z = pos.Z;
+	fixed_t topZ = z + height;
+
+	while ((ld = it.Next())) {
+
+		if (box.Right() <= ld->bbox[BOXLEFT]
+			|| box.Left() >= ld->bbox[BOXRIGHT]
+			|| box.Top() <= ld->bbox[BOXBOTTOM]
+			|| box.Bottom() >= ld->bbox[BOXTOP]) {
+			continue;
+		}
+
+		if (box.BoxOnLineSide(ld) != -1)
+			continue; // doesn't cross the line
+
+		if (IsImpassable(ld))
+			continue; // crosses an impassable line, no sector to trigger
+
+		fixed_t frontCeil = ld->frontsector->ceilingplane.ZatPoint(x, y);
+		fixed_t frontFloor = ld->frontsector->floorplane.ZatPoint(x, y);
+		fixed_t backCeil = ld->backsector->ceilingplane.ZatPoint(x, y);
+		fixed_t backFloor = ld->backsector->floorplane.ZatPoint(x, y);
+
+		if (z < backFloor || topZ > backCeil)
+			clipSectors.push_back(ld->backsector);
+
+		if (z < frontFloor || topZ > frontCeil)
+			clipSectors.push_back(ld->frontsector);
+	}
+
+	return clipSectors;
 }
 
 void ExtendSegment(FVector2& a, FVector2& b, float amount) {
@@ -493,15 +576,15 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 			if (!playeringame[i] || !player)
 				continue;
 
-			if (player->player->bIsBot)	set_ori(player, 1260, 1647, ANGLE_1 * 0);
-			else						set_ori(player, 1279, 2384, ANGLE_1 * 40);
+			if (player->player->bIsBot)	set_ori(player, 609, 1688, ANGLE_1 * 0);
+			else						set_ori(player, 1181, 1918, ANGLE_1 * 40);
 
 			if (player->player->bIsBot) {
 				CWootBot* bot = (CWootBot*)player->player->pSkullBot;
 				bot->Reset();
 				bot->m_followPlayer = true;
 				player->player->cheats &= ~CF_FROZEN;
-				//bot->m_freezeOnRouteChange = true;
+				bot->m_routeController.m_freezeOnGoalFail = true;
 				//bot->m_speedMult = 0.6f;
 			}
 		}
@@ -519,6 +602,7 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 			CWootBot* bot = (CWootBot*)player->player->pSkullBot;
 			//set_ori(player, 3211, -131, ANGLE_1 * 40);
 			bot->PushLevelEndGoal();
+			bot->m_autoWinMap = true;
 		}
 	}
 
@@ -595,6 +679,7 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 			CWootBot* bot = (CWootBot*)player->player->pSkullBot;
 			bot->Reset();
 			bot->m_followPlayer = false;
+			bot->m_autoWinMap = false;
 		}
 	}
 
@@ -636,6 +721,24 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 			NavSector& nav = g_wb_nav.mesh[id];
 			FVector3 pos = nav.pos3D();
 			P_Teleport(players[ulPlayer].mo, pos.X, pos.Y, pos.Z, 0, true, true, true);
+		}
+	}
+
+	// go to a link
+	if (strstr(msg, "gotol ") == msg) {
+		int id = atoi(msg + 5);
+
+		bool found = false;
+		for (int i = 0; i < numsubsectors && !found; i++) {
+			NavSector& nav = g_wb_nav.mesh[i];
+			for (int k = 0; k < nav.links.size(); k++) {
+				if (nav.links[k].id == id) {
+					FVector3 pos = nav.links[k].pos3D();
+					P_Teleport(players[ulPlayer].mo, pos.X, pos.Y, pos.Z, 0, true, true, true);
+					found = true;
+					break;
+				}
+			}
 		}
 	}
 

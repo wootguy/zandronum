@@ -507,45 +507,37 @@ void BotMapInfo::find_linedef_sectors() {
 		if (!line.special) {
 			continue;
 		}
-		seg_t lineSeg; // fake seg for overlap test
-		lineSeg.v1 = line.v1;
-		lineSeg.v2 = line.v2;
-
-		sector_t* bestSector = line.frontsector;
 
 		int lineAction = get_linedef_goal_action(&line);
 		bool doubleSidedCrossLine = lineAction == WBOT_GOAL_ACTION_CROSS && (line.flags & ML_TWOSIDED);
 
-		for (int s = 0; s < numsubsectors; s++) {
-			subsector_t& sub = subsectors[s];
-			float mostOverlap = 0;
+		FVector2 center = getLineCenter(&line);
+		FVector2 normal = getLineBackDir(&line) * -1;
 
-			for (int k = 0; k < sub.numlines; k++) {
-				seg_t& seg = sub.firstline[k];
-				if (seg.linedef != &line) {
-					continue;
-				}
+		int useDist = (16 << FRACBITS); // route to a nearby sector if the adjacent one is too small
 
-				if (doubleSidedCrossLine) {
-					// pick the side that allows crossing so that bot doesn't try to cross lines from the bottom of a cliff
-					if (!is_seg_potentially_crossable(&seg)) {
-						continue;
-					}
-				}
-				else {
-					if (seg.frontsector != bestSector) {
-						continue; // only want the sector in front of the line
-					}
-				}
+		if (lineAction == WBOT_GOAL_ACTION_CROSS || lineAction == WBOT_GOAL_ACTION_TOUCH) {
+			// need to be very close to the line
+			useDist = FRACUNIT;
+		}
 
-				LinkSeg linkseg = GetSegmentOverlap(&seg, &lineSeg);
-				float overlap = linkseg.length();
-				if (overlap > mostOverlap) {
-					mostOverlap = overlap;
-					line_subsectors[i] = s;
-				}
+		FVector2 frontPoint = center + normal * useDist;
+		FVector2 backPoint = center - normal * useDist;
+		int frontSubId = R_PointInSubsector(frontPoint.X, frontPoint.Y) - subsectors;
+		int backSubId = R_PointInSubsector(backPoint.X, backPoint.Y) - subsectors;
+		int routeToId = frontSubId;
+
+		if (doubleSidedCrossLine) {
+			// pick the side that allows crossing so that bot doesn't try to cross lines from the bottom of a cliff
+			fixed_t frontZ = subsectors[frontSubId].sector->floorplane.ZatPoint((fixed_t)frontPoint.X, (fixed_t)frontPoint.Y);
+			fixed_t backZ = subsectors[backSubId].sector->floorplane.ZatPoint((fixed_t)frontPoint.X, (fixed_t)frontPoint.Y);
+			
+			if (backZ > frontZ) {
+				routeToId = backSubId;
 			}
 		}
+
+		line_subsectors[i] = routeToId;
 	}
 }
 

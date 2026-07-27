@@ -124,11 +124,11 @@ void CBotRouteController::UpdateRoute() {
 		BotGoal& goal = pBot->m_goals[i];
 
 		if (goal.purposeLink && goal.purposeLink->target->id == m_navid) {
-			completedGoals = (pBot->m_goals.size() - i) + 1;
-			DebugPrint(VarArgs("Accidentally completed %d subgoals by being int sector %d!\n", completedGoals, m_navid));
+			completedGoals = (pBot->m_goals.size() - i);
 		}
 	}
 	if (completedGoals) {
+		DebugPrint(VarArgs("Accidentally completed %d subgoals by being int sector %d!\n", completedGoals, m_navid));
 		for (int i = 0; i < completedGoals; i++) {
 			pBot->m_goals.pop_back();
 		}
@@ -252,8 +252,9 @@ void CBotRouteController::JumpThink() {
 			FVector3 pos(pActor->z, pActor->y, pActor->z);
 			FVector3 idealDir = (landPos - pos).Unit();
 			FVector3 velDir = FVector3(pActor->velx, pActor->vely, pActor->velz).Unit();
+			fixed_t distLeft = pBot->GetDistance(landPos);
 
-			if (idealDir.Z > velDir.Z) {
+			if (distLeft > (192 << FRACBITS) || idealDir.Z > velDir.Z) {
 				// falling short, keep building speed
 				pBot->MoveTo(jumpEndPos, 0, m_routeSpeed);
 				pBot->m_lButtons |= BT_CROUCH; // just in case
@@ -311,19 +312,6 @@ bool CBotRouteController::HandleBlockedPaths() {
 		return true;
 	}
 
-	// wait for doors to open
-	if (!m_navLink->walkable() && m_navLink->target->isMoving()) {
-		// door is raising or elevator is lowering in the next sector
-		if (m_navLink->isJump && !m_navLink->target->isFloorMoving() && !m_navLink->isJumpValid()) {
-			// a door opening isn't going to make the jump doable if the floor is too high
-		}
-		else {
-			pBot->stateFlags |= FL_WBOT_WAIT_DOOR;
-			pBot->StopMoving();
-			return true; // wait until the door/elevator is done moving
-		}
-	}
-
 	// handle severe blockages
 	if (linkBlockReason != LINK_BLOCK_CLEAR) {
 		BlockedPathThink(m_navLink, linkBlockReason);
@@ -337,14 +325,8 @@ bool CBotRouteController::HandleBlockedPaths() {
 
 		if (nextLink && !nextLink->isJump) {
 			sector_t* nextNextSector = subsectors[route[2]].sector;
-
-			if (!nextLink->walkable() && (nextNextSector->floordata || nextNextSector->ceilingdata)) {
-				pBot->stateFlags |= FL_WBOT_WAIT_DOOR;
-				pBot->StopMoving();
-				return true; // wait until the door/elevator is done moving
-			}
-
 			int blockReason = nextLink->blocked(pActor);
+
 			if (blockReason != LINK_BLOCK_CLEAR) {
 				BlockedPathThink(nextLink, blockReason);
 				return true;
@@ -468,6 +450,29 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link, int blockReason)
 	link->blocked(pActor); // debug here
 	DebugPrint(VarArgs("Link %d blocked!\n", link->id));
 
+	// wait for doors to open
+	bool isBlockerMoving = m_navLink->target->isMoving();
+	if (!isBlockerMoving && blockReason == LINK_BLOCK_CLIPPED) {
+		for (sector_t* sec : m_navLink->getClippedSectors(pActor)) {
+			if (sec->floordata || sec->ceilingdata) {
+				isBlockerMoving = true;
+				break;
+			}
+		}
+	}
+
+	if (isBlockerMoving) {
+		// door is raising or elevator is lowering in the next sector
+		if (m_navLink->isJump && !m_navLink->target->isFloorMoving() && !m_navLink->isJumpValid()) {
+			// a door opening isn't going to make the jump doable if the floor is too high
+		}
+		else {
+			pBot->stateFlags |= FL_WBOT_WAIT_DOOR;
+			pBot->StopMoving();
+			return; // wait until the door/elevator is done moving
+		}
+	}
+
 	BotGoal* curGoal = pBot->CurrentGoal();
 	if (!curGoal)
 		return;
@@ -497,12 +502,23 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link, int blockReason)
 			tryParentTrigger = false;
 		}
 		break;
+	case LINK_BLOCK_CLIPPED:
+		tryParentTrigger = false;
+		tryTargetTrigger = false;
+
+		// try unblocking anything the box is clipping into
+		for (sector_t* sec : link->getClippedSectors(pActor)) {
+			BotSectorInfo& info = g_wb_mapinfo.sector_info[sec - sectors];
+			if (info.moveFlags && pBot->SelectGoal(info.triggers, link)) {
+				return;
+			}
+		}
+		break;
 	default:
 		tryParentTrigger = false;
 		tryTargetTrigger = false;
 		break;
 	}
-
 
 	// nothing is moving, try unblocking it ourselves.
 	if (tryTargetTrigger && pBot->SelectGoal(link->target->getTriggers(), link)) {

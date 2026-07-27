@@ -2,13 +2,13 @@
 #include "wb_bot.h"
 #include "wb_map.h"
 #include "wb_nav_gen.h"
+#include "wb_util.h"
 #include "r_state.h"
 #include "sv_commands.h"
 #include "p_local.h"
 #include "p_lnspec.h"
 #include "p_trace.h"
 #include "a_keys.h"
-#include "wb_util.h"
 
 #include <algorithm>
 #include <unordered_set>
@@ -51,41 +51,18 @@ int NavSectorLink::blocked(AActor* actor, bool recurse) {
 	if (!jumpable()) {
 		return LINK_BLOCK_CANT_JUMP;
 	}
-	
-	if (recurse && linkWidth <= PLAYER_WIDTH) {
-		// too narrow to move thru unless the neighbor sectors are passable
-		int expandedWidth = linkWidth;
-		int neighbors[2] = {leftSector, rightSector};
-		for (int i = 0; i < 2; i++) {
-			if (neighbors[i] < 0)
-				continue;
 
-			NavSector& neighborNav = g_wb_nav.mesh[neighbors[i]];
-			bool isWalkable = parent->getFloorZ() + (STEP_HEIGHT << FRACBITS) > neighborNav.getFloorZ();
-			bool wontHitHead = neighborNav.getCeilZ() > parent->getFloorZ() + (DUCK_HEIGHT << FRACBITS);
-			if (isWalkable && wontHitHead) {
-				// the neighboring sector is not a wall and won't prevent movement on the target sector
-				// TODO: need to check how thick the neighbor is too
-				expandedWidth += PLAYER_WIDTH;
-				continue;
-			}
-
-			NavSectorLink* link = parent->getLink(neighbors[i]);
-
-			if (link && !link->blocked(actor, false)) {
-				expandedWidth += link->linkWidth;
-			}
-		}
-		
-		if (expandedWidth > PLAYER_WIDTH) {
-			// wide enough if you consider the neighbor sectors
-			return LINK_BLOCK_CLEAR;
-		}
-
-		return LINK_BLOCK_TOO_NARROW;
+	fixed_t bottomZ = parent->getFloorZ() + (JUMP_HEIGHT << FRACBITS);
+	if (IsBoxClipped(FVector3(overlapCenter, bottomZ), PLAYER_RADIUS << FRACBITS, 0)) {
+		return LINK_BLOCK_CLIPPED;
 	}
 
 	return LINK_BLOCK_CLEAR;
+}
+
+std::vector<sector_t*> NavSectorLink::getClippedSectors(AActor* actor) {
+	fixed_t bottomZ = parent->getFloorZ() + (JUMP_HEIGHT << FRACBITS);
+	return GetBoxClipSectors(FVector3(overlapCenter, bottomZ), PLAYER_RADIUS << FRACBITS, 0);
 }
 
 bool NavSectorLink::walkable() {
@@ -149,21 +126,16 @@ FVector2 NavSectorLink::GetJumpEndPos(FVector2 targetPos) {
 	line_t* line;
 	FVector2 edgePos;
 	if (TraceSectorEdge(targetPos, targetPos + ledgeDir * (1000 << FRACBITS), edgePos, &line)) {
+		// move edge away from the line endings to avoid collision with a wall
 		FVector2 a = FVector2(line->v1->x, line->v1->y);
 		FVector2 b = FVector2(line->v2->x, line->v2->y);
-		FVector2 dir = (b - a).Unit();
 		fixed_t dist = (b - a).Length();
+		FVector2 dir = (b - a).Unit();
 		fixed_t nudgeDist = std::min(dist / 2, 32 << FRACBITS);
-		fixed_t distFromA = (edgePos - a).Length();
-		fixed_t distFromB = (edgePos - b).Length();
+		a += dir * nudgeDist;
+		b -= dir * nudgeDist;
 
-		// move edge away from the line endings to avoid collision with a wall
-		if (distFromB < nudgeDist) {
-			edgePos -= dir * (nudgeDist - distFromB);
-		}
-		if (distFromA < nudgeDist) {
-			edgePos += dir * (nudgeDist - distFromA);
-		}
+		edgePos = ClosestPointOnSegment(jumpPos, a, b);
 
 		return edgePos;
 	}
@@ -216,8 +188,7 @@ FVector2 NavSectorLink::GetJumpBackupPos(FVector2 targetPos, AActor* jumper) {
 	FVector3 endPos3D(endPos, target->getFloorZ());
 
 	// back up the starting position to get a running start for the jump
-	FVector2 jumpDir = (targetPos - startPos).Unit();
-
+	FVector2 jumpDir = (endPos - startPos).Unit();
 
 	fixed_t maxBackupDist = GetJumpBackupSpaceNeeded(startPos3D, endPos3D);
 	FVector2 backupStartPos = startPos - (jumpDir * FRACUNIT); // avoid clipping against the backoff line

@@ -3,6 +3,7 @@
 #include "wb_nav.h"
 #include "wb_util.h"
 #include "wb_route.h"
+#include "wb_map.h"
 #include "p_spec.h"
 #include "p_trace.h"
 #include "p_local.h"
@@ -98,6 +99,7 @@ void wbot_debug(CWootBot* pBot) {
 				for (int i = 0; i < 5; i++)
 					navInfo += " " + to_string(line->args[i]);
 			}
+			navInfo += "\n   Use Sector: " + to_string(g_wb_mapinfo.line_subsectors[line - lines]);
 		}
 
 		navInfo += "\nOrigin: " + to_string(player->x >> FRACBITS) + " " + to_string(player->y >> FRACBITS)
@@ -106,6 +108,9 @@ void wbot_debug(CWootBot* pBot) {
 		int yaw = (int)((uint64_t)player->angle * 360 / 0x100000000ULL);
 		int pitch = (int)((uint64_t)player->pitch * 360 / 0x100000000ULL);
 		navInfo += "\nAngles: " + to_string(yaw) + " " + to_string(pitch);
+
+		bool isClipped = IsBoxClipped(FVector3(player->x, player->y, player->z), player->radius, DUCK_HEIGHT);
+		navInfo += string("\nClipped: ") + (isClipped ? "Yes" : "No");
 	}
 
 	int jumpState = pBot->m_routeController.jumpState;

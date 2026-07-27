@@ -535,28 +535,31 @@ int CWootBot::GetSpeed2D() {
 }
 
 bool CWootBot::FindGoal() {
-	if (!m_followPlayer)
-		return false;
 
-	int thisSubId = g_wb_nav.get_nav_id(pActor);
+	if (m_autoWinMap) {
+		PushLevelEndGoal();
+	}
+	else if (m_followPlayer) {
+		int thisSubId = g_wb_nav.get_nav_id(pActor);
 
-	AActor* player = NULL;
-	for (int i = 0; i < MAXPLAYERS; i++)
-	{
-		if (!playeringame[i])
-			continue;
+		AActor* player = NULL;
+		for (int i = 0; i < MAXPLAYERS; i++)
+		{
+			if (!playeringame[i])
+				continue;
 
-		AActor* actor = players[i].mo;
-		if (!actor || actor->player->bIsBot)
-			continue;
+			AActor* actor = players[i].mo;
+			if (!actor || actor->player->bIsBot)
+				continue;
 
-		if (actor->player->cheats & (CF_NOCLIP | CF_NOCLIP2))
-			continue; // for testing
+			if (actor->player->cheats & (CF_NOCLIP | CF_NOCLIP2))
+				continue; // for testing
 
-		if (thisSubId == g_wb_nav.get_nav_id(actor))
-			continue; // already with this player
+			if (thisSubId == g_wb_nav.get_nav_id(actor))
+				continue; // already with this player
 
-		PushGoal(BotGoal(WBOT_GOAL_ACTION_MOVE_TO, actor), NULL);
+			PushGoal(BotGoal(WBOT_GOAL_ACTION_MOVE_TO, actor), NULL);
+		}
 	}
 
 	return m_routeController.HasRoute();
@@ -681,7 +684,7 @@ bool CWootBot::SelectGoal(vector<BotGoal>& goals, NavSectorLink* purposeLink) {
 
 		if ((purposeLink && subid == purposeLink->parent->id) || route.route.size()) {
 			if (!bestGoal || route.cost < bestCost) {
-				bestCost = route.dist;
+				bestCost = route.cost;
 				bestGoal = &goal;
 			}
 		}
@@ -735,6 +738,13 @@ void CWootBot::FailGoal() {
 	m_routeController.CancelRoute();
 
 	DebugPrint(VarArgs("FAILED %s '%s'\n", m_goals.size() == 1 ? "goal" : "subgoal", curGoal.desc().c_str()));
+
+	if (m_routeController.m_freezeOnGoalFail) {
+		m_pPlayer->cheats |= CF_FROZEN;
+		pActor->velx = 0;
+		pActor->vely = 0;
+		pActor->velz = 0;
+	}
 
 	if (m_goals.size() == 1) {
 		m_goals.clear();

@@ -32,6 +32,7 @@ public:
 	int rushNav = -1;				// subsector/nav ID that the bot is rushing for
 	BotGoal rushTrigger;		// goal which caused the bot to start rushing
 	bool m_followPlayer = false; // set true to follow player automatically
+	bool m_autoWinMap = false; // automatically try to beat the map when out of goals
 
 	// debug state
 	bool m_debug = false;		// print thoughts to chat

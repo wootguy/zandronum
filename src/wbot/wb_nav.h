@@ -22,6 +22,7 @@ enum LinkBlockReason {
 	LINK_BLOCK_TOO_HIGH,	// too high to jump up to the next sector
 	LINK_BLOCK_TOO_LOW,		// next sector doesn't have enough vertical space
 	LINK_BLOCK_TOO_NARROW,	// the link doesn't have enough space between walls
+	LINK_BLOCK_CLIPPED,		// the player would be clipped inside walls/floor/ceil if moving here
 	LINK_BLOCK_CANT_JUMP,	// the jump is too high/far or blocked
 };
 
@@ -32,8 +33,6 @@ struct NavSectorLink {
 	NavSector* jumpNeighbor = NULL; // node that must be partially run into to begin the jump
 	FVector2 overlapCenter;
 	int linkWidth = 0;
-	int leftSector = -1; // setor on the left side of the target sector, relative to the border segment
-	int rightSector = -1; // setor on the right side of the target sector, relative to the border segment
 	bool isTeleport = false;
 	bool isCliff = false; // crossing this segs drops you down to a floor so low that you can't get back
 	bool isJump = false; // jump required to reach the target sector
@@ -49,6 +48,7 @@ struct NavSectorLink {
 	FVector2 GetJumpEndPos(FVector2 targetPos); // find the closest point to land
 	
 	int blocked(AActor* actor, bool recurse=true); // returns LinkBlockReason
+	std::vector<sector_t*> getClippedSectors(AActor* actor);
 	bool walkable();
 	bool jumpable();
 	bool isJumpValid(); // checks if jump height and distance is valid currently
@@ -131,7 +131,7 @@ public:
 	// to walk through lava or jump somewhere
 	BotRoute get_astar_route(const RouteOpts& opts);
 	
-	// get key required to use the linedef. Returns false if keys don't exist anywhere in the map.
+	// get key(s) required to use the linedef. Returns false if keys don't exist anywhere in the map.
 	bool get_key_goals_for_line(AActor* actor, line_t* linedef, std::vector<BotGoal>& keyGoals, std::unordered_set<int>* blockedPaths);
 
 	// find all weapons in the map with the given name
@@ -141,7 +141,7 @@ public:
 	std::vector<BotGoal> get_ammo_goals(const char* ammoname, const char* ammoname2=NULL);
 
 	int get_nav_id(fixed_t x, fixed_t y);
-	int get_nav_id(AActor* actor); // get key required to use the linedef. Returns false if keys don't exist anywhere in the map.
+	int get_nav_id(AActor* actor);
 
 	// call to create or remove links on nodes that no longer move
 	void relink_sector(sector_t* sec);

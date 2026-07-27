@@ -139,9 +139,6 @@ bool SectorNavMeshGenerator::is_potential_jump_link(NavSector& fromNav, NavSecto
 	if (TraceImpassable(jumpStart, jumpEnd))
 		return false;
 
-	if (fromLink.id == 1505 && toNav.id == 435)
-		Printf("");
-
 	if (jumpTooFarCurrently && jumpMayBeLowerLater) {
 		// One or both sectors must move for the jump to be possible.
 		// Test ideal elevations instead of current.
@@ -187,12 +184,14 @@ bool SectorNavMeshGenerator::create_jump_link(NavSector& fromNav, NavSectorLink&
 	if (!is_potential_jump_link(fromNav, fromLink, toNav, toLink))
 		return false;
 
+	FVector2 targetPos = toNav.pos();
+	FVector2 jumpStart = fromLink.GetJumpStartPos(targetPos);
+	FVector2 jumpEnd = fromLink.GetJumpEndPos(targetPos);
+
 	NavSectorLink link;
 	link.parent = fromLink.parent;
-	link.overlapCenter = fromLink.overlapCenter;
+	link.overlapCenter = jumpStart;
 	link.linkWidth = fromLink.linkWidth;
-	link.leftSector = fromLink.leftSector;
-	link.rightSector = fromLink.rightSector;
 	link.isTeleport = fromLink.isTeleport;
 	link.isCliff = fromLink.isCliff;
 	link.seg = fromLink.seg;
@@ -200,7 +199,7 @@ bool SectorNavMeshGenerator::create_jump_link(NavSector& fromNav, NavSectorLink&
 	link.target = &toNav;
 	link.id = g_total_links++;
 	link.isJump = true;
-	link.jumpDist = (fromLink.pos() - toLink.pos()).Length();
+	link.jumpDist = (jumpEnd - jumpStart).Length();
 	link.jumpNeighbor = fromLink.target;
 
 	fromNav.links.push_back(link);
@@ -313,8 +312,6 @@ void SectorNavMeshGenerator::add_walkable_links(NavSector* mesh, int nodeid, std
 		link.linkWidth = (int)linkseg.length() >> FRACBITS;
 		link.isJump = false;
 		link.isTeleport = false;
-		link.leftSector = -1;
-		link.rightSector = -1;
 		link.jumpDist = 0;
 
 		subsector_t& neighbor = subsectors[linkseg.otherSub];
@@ -323,7 +320,7 @@ void SectorNavMeshGenerator::add_walkable_links(NavSector* mesh, int nodeid, std
 			int dummy;
 			if (g_wb_mapinfo.is_link_bordered_by_walls(sub, k, dummy, dummy))
 				continue; // link is too narrow to enter and both sides of it are impassable walls
-			if (g_wb_mapinfo.is_link_bordered_by_walls(neighbor, linkseg.idx, link.leftSector, link.rightSector))
+			if (g_wb_mapinfo.is_link_bordered_by_walls(neighbor, linkseg.idx, dummy, dummy))
 				continue; // link is too narrow to leave and both sides of it are impassable walls
 		}
 

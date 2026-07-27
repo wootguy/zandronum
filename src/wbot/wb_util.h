@@ -37,6 +37,12 @@ fixed_t DistanceToLine(const FVector2& p, const FVector2& a, const FVector2& b);
 
 fixed_t DistanceToLine(const FVector2& p, line_t* line);
 
+// true if the box is stuck inside a wall, ceiling, or floor
+bool IsBoxClipped(const FVector3& pos, fixed_t radius, fixed_t height);
+
+// get sectors the box is clipping into
+std::vector<sector_t*> GetBoxClipSectors(const FVector3& pos, fixed_t radius, fixed_t height);
+
 // true if the point is in front of or behind the segment, not to the side
 bool PointAlignedSegment(const FVector2& p, const FVector2& a, const FVector2& b);
 

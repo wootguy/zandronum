@@ -31,6 +31,7 @@ public:
 	int m_navid = -1;					// current navigation node/subsector id
 	int pretendRouteSector = -1;		// pretend we're in this sector for now
 	bool m_freezeOnRouteChange = false; // set to true to stop moving when the route changes. For debugging
+	bool m_freezeOnGoalFail = false;	// set to true to stop moving when a goal fails.
 	fixed_t m_lastElevZ = 0;			// last height of the elevator we've been standing on
 	NavSector* m_navCur = NULL;			// current physical node (or "pretend" node)
 	NavSector* m_navIdeal = NULL;		// current node in the route
@@ -39,7 +40,7 @@ public:
 
 	FVector2 jumpBackupPos = FVector2(0, 0);		// position to move to for a running start
 	FVector2 jumpStartPos = FVector2(0,0);			// position where the jump begins
-	FVector2 jumpEndPos = FVector2(0,0);			// position where the jump begins
+	FVector2 jumpEndPos = FVector2(0,0);			// position where the jump ends
 	int jumpState = WBOT_JUMP_NONE;
 	int walkNodeState = WBOT_WALK_NODE_EDGE;
 
