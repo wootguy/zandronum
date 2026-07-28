@@ -871,7 +871,15 @@ void G_ExitLevel (int position, bool keepFacing)
 		return;
 	}
 
-	G_ChangeLevel(G_GetExitMap(), position, keepFacing ? CHANGELEVEL_KEEPFACING : 0); 
+	int flags = keepFacing ? CHANGELEVEL_KEEPFACING : 0;
+
+	if (g_wbot_test_mode) {
+		flags |= CHANGELEVEL_NOINTERMISSION;
+	}
+
+	wbot_map_exit();
+
+	G_ChangeLevel(G_GetExitMap(), position, flags);
 }
 
 void G_SecretExitLevel (int position) 

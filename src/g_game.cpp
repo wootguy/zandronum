@@ -113,6 +113,7 @@
 #include "a_lightning.h"
 #include "po_man.h"
 #include "voicechat.h"
+#include "wbot/wb_util.h"
 
 #include <zlib.h>
 
@@ -1906,7 +1907,7 @@ void G_Ticker ()
 		// [BB] Don't call P_Ticker on the server if there are no players.
 		// This significantly reduces CPU usage on maps with many monsters
 		// (of course only as long as there are no connected clients).
-		if ( ( NETWORK_GetState( ) != NETSTATE_SERVER ) || ( SERVER_CalcNumConnectedClients() > 0 ) )
+		if ( ( NETWORK_GetState( ) != NETSTATE_SERVER ) || ( SERVER_CalcNumConnectedClients() > 0 ) || g_wbot_test_mode)
 			P_Ticker ();
 		AM_Ticker ();
 

@@ -18,6 +18,12 @@ using namespace std;
 using namespace std::chrono;
 
 extern float g_GameSpeed;
+int g_kill_all_shootables_again_tick = 0;
+bool g_wbot_test_mode = false;
+uint64_t g_wbot_level_start_time = 0;
+uint64_t g_wbot_tests_start_time = 0;
+uint32_t g_wbot_test_tics_total;
+string g_test_start_map;
 
 char* VarArgs(const char* format, ...)
 {
@@ -588,11 +594,23 @@ void kill_all_shootables() {
 			P_DamageMobj(actor, actor, actor, actor->health * 2, FName());
 		}
 	}
+
+	// do it again a second later to kill lost souls that spawn from pain elementals
+	g_kill_all_shootables_again_tick = level.time + 35;
 }
 
 void wbot_map_init() {
 	srand((unsigned int)time(NULL));
 	g_wb_nav.init();
+
+	bool testFinished = false;
+	if (g_wbot_test_mode && g_test_start_map == string(level.mapname)) {
+		g_wbot_test_mode = false;
+		g_GameSpeed = 1.0f;
+		testFinished = true;
+		uint32_t totalTime = getEpochMillis() - g_wbot_tests_start_time;
+		Printf("Tests finished in %d tics (%d ms)\n", g_wbot_test_tics_total, totalTime);
+	}
 
 	for (int i = 0; i < MAXPLAYERS; i++) {
 		AActor* player = players[i].mo;
@@ -601,6 +619,25 @@ void wbot_map_init() {
 
 		CWootBot* bot = (CWootBot*)player->player->pSkullBot;
 		bot->Reset();
+		
+		if (testFinished) {
+			bot->m_autoWinMap = false;
+		}
+	}
+
+	if (g_wbot_test_mode) {
+		kill_all_shootables();
+	}
+
+	g_wbot_level_start_time = getEpochMillis();
+}
+
+void wbot_map_exit() {
+	if (g_wbot_test_mode) {
+		int testTime = level.time;
+		uint32_t millis = getEpochMillis() - g_wbot_level_start_time;
+		g_wbot_test_tics_total += level.time;
+		Printf("Finished level in %d tics (%d ms)\n", testTime, millis);
 	}
 }
 
@@ -623,6 +660,26 @@ void wbot_add_bot() {
 	}
 
 	new CWootBot(NULL, NULL, ulPlayerIdx);
+}
+
+void wbot_run_tests() {
+	kill_all_shootables();
+
+	for (int i = 0; i < MAXPLAYERS; i++) {
+		AActor* player = players[i].mo;
+		if (!playeringame[i] || !player || !player->player->bIsBot)
+			continue;
+
+		CWootBot* bot = (CWootBot*)player->player->pSkullBot;
+		bot->Reset();
+		bot->m_autoWinMap = true;
+		bot->m_debug = false;
+	}
+
+	g_wbot_test_mode = true;
+	g_GameSpeed = 100.0f;
+	g_test_start_map = level.mapname;
+	g_wbot_tests_start_time = getEpochMillis();
 }
 
 void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
@@ -668,6 +725,11 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 			bot->PushLevelEndGoal();
 			bot->m_autoWinMap = true;
 		}
+	}
+
+	// run tests
+	if (!strcmp(msg, "test")) {
+		wbot_run_tests();
 	}
 
 	// add a line use goal
@@ -853,9 +915,15 @@ void wbot_tick() {
 	if (testModo) {
 		testModo = false;
 		new CWootBot(NULL, NULL, BOTS_FindFreePlayerSlot());
+		//wbot_run_tests();
 	}
 
 	g_wb_nav.relink_pending_sector();
+
+	if (g_kill_all_shootables_again_tick && level.time > g_kill_all_shootables_again_tick) {
+		kill_all_shootables();
+		g_kill_all_shootables_again_tick = 0;
+	}
 }
 
 CCMD(addbotw) {

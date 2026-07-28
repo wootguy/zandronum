@@ -772,7 +772,8 @@ void SectorNavMesh::relink_pending_sector() {
 		}
 	}
 	
-	Printf("Relinked sector %d (%+d links)\n", secid, linksAdded);
+	if (!g_wbot_test_mode)
+		Printf("Relinked sector %d (%+d links)\n", secid, linksAdded);
 
 	pending_sector_relinks.erase(pending_sector_relinks.begin() + idx);
 }
