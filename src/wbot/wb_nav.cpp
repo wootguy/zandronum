@@ -328,6 +328,8 @@ void SectorNavMesh::init() {
 	}
 
 	mesh = SectorNavMeshGenerator::generate(propBlockers);
+	astarNodes = new AstarNode[numsubsectors];
+	memset(astarNodes, 0, sizeof(AstarNode) * numsubsectors);
 }
 
 void SectorNavMesh::draw_nodes(AActor* actor) {
@@ -481,12 +483,15 @@ float SectorNavMesh::path_cost(NavSectorLink& link, float dist, const RouteOpts&
 
 BotRoute SectorNavMesh::get_astar_route(const RouteOpts& opts)
 {
-	unordered_set<int> closedSet;
-	unordered_set<int> openSet;
+	struct OpenNode {
+		int id;
+		float f;
 
-	unordered_map<int, float> gScore;
-	unordered_map<int, float> fScore;
-	unordered_map<int, BotRouteLink> cameFrom;
+		bool operator<(const OpenNode& other) const {
+			return f > other.f; // reversed because priority_queue is a max heap
+		}
+	};
+	std::priority_queue<OpenNode> openQueue;
 
 	BotRoute emptyRoute;
 
@@ -504,19 +509,22 @@ BotRoute SectorNavMesh::get_astar_route(const RouteOpts& opts)
 		return emptyRoute;
 	}
 
+	memset(astarNodes, 0, sizeof(AstarNode) * numsubsectors);
+
 	NavSector& start = mesh[opts.start];
 	NavSector& goal = mesh[opts.end];
 
-	openSet.insert(opts.start);
-	gScore[opts.start] = 0;
-	fScore[opts.start] = node_heuristic(start.id, goal.id);
+	astarNodes[opts.start].gScore = 0;
+	astarNodes[opts.start].fScore = node_heuristic(start.id, goal.id);
+
+	openQueue.push({ opts.start, astarNodes[opts.start].fScore });
 
 	bool hasBlockedPaths = opts.blockedPaths.size();
 	bool hasBlockedSubSectors = opts.blockedSubSectors.size();
 
 	const int maxIter = 8192;
 	int curIter = 0;
-	while (!openSet.empty()) {
+	while (!openQueue.empty()) {
 
 		if (++curIter > maxIter) {
 			Printf("AStarRoute exceeded max iterations searching path (%d)", maxIter);
@@ -524,55 +532,49 @@ BotRoute SectorNavMesh::get_astar_route(const RouteOpts& opts)
 		}
 
 		// get node in openset with lowest cost
-		int current = -1;
-		float bestScore = 9e99;
-		for (int nodeId : openSet)
-		{
-			float score = fScore[nodeId];
-			if (score < bestScore) {
-				bestScore = score;
-				current = nodeId;
-			}
-		}
+		auto top = openQueue.top();
+		openQueue.pop();
+		AstarNode& curDat = astarNodes[top.id];
+
+		if (curDat.closed)
+			continue;
+		if (top.f != curDat.fScore)
+			continue; // stale entry
+
+		int current = top.id;
 
 		if (current == goal.id) {
 			// goal reached, build the route
 			BotRoute route;
 			route.route.push_back(current);
 
-			int maxPathLen = 1000;
-			int i = 0;
-			while (cameFrom.count(current)) {
-				const BotRouteLink& from = cameFrom[current];
-				current = from.node;
-				route.cost += from.cost;
-				route.dist += ((int)from.dist) >> FRACBITS;
+			while (astarNodes[current].pathed) {
+				const AstarNode& from = astarNodes[current];
+				current = from.cameFromNode;
+				route.cost += from.cameFromCost;
+				route.dist += ((int)from.cameFromDist) >> FRACBITS;
 				route.route.push_back(current);
-				if (++i > maxPathLen) {
-					Printf("AStarRoute exceeded max path length (%d)", maxPathLen);
-					break;
-				}
 			}
 			reverse(route.route.begin(), route.route.end());
 
 			if (verbose) {
-				Printf("FINISH route calculation from %d to %d. Size is %d. visited %d nodes\n",
-					opts.start, opts.end, route.route.size(), closedSet.size());
+				Printf("FINISH route calculation from %d to %d. Size is %d.\n",
+					opts.start, opts.end, route.route.size());
 			}
 
 			return route;
 		}
 
-		openSet.erase(current);
-		closedSet.insert(current);
+		curDat.closed = true;
 
 		NavSector& currentNode = mesh[current];
 
 		for (int i = 0; i < currentNode.links.size(); i++) {
 			NavSectorLink& link = currentNode.links[i];
 			int neighbor = link.target->id;
+			AstarNode& neighborDat = astarNodes[neighbor];
 
-			if (closedSet.count(neighbor))
+			if (neighborDat.closed)
 				continue;
 
 			if (hasBlockedSubSectors && opts.blockedSubSectors.count(neighbor))
@@ -586,19 +588,21 @@ BotRoute SectorNavMesh::get_astar_route(const RouteOpts& opts)
 
 			float linkDist = path_dist(link);
 			float linkCost = path_cost(link, linkDist, opts);
-			float tentative_gScore = gScore[current] + linkCost;
+			float tentative_gScore = curDat.gScore + linkCost;
 
-			auto neigborCost = gScore.find(neighbor);
-			if (neigborCost != gScore.end() && tentative_gScore >= neigborCost->second)
+			if (neighborDat.pathed && tentative_gScore >= neighborDat.gScore)
 				continue; // not a better path
 
 			// This path is the best until now. Record it!
-			gScore[neighbor] = tentative_gScore;
-			fScore[neighbor] = tentative_gScore + node_heuristic(mesh[neighbor].id, goal.id);
-			cameFrom[neighbor] = BotRouteLink(current, linkDist, linkCost);
+			neighborDat.pathed = true;
+			neighborDat.gScore = tentative_gScore;
+			neighborDat.fScore = tentative_gScore + node_heuristic(mesh[neighbor].id, goal.id);
+			neighborDat.cameFromNode = current;
+			neighborDat.cameFromDist = linkDist;
+			neighborDat.cameFromCost = linkCost;
 
 			// discover a new node
-			openSet.insert(neighbor);
+			openQueue.push({ neighbor, neighborDat.fScore });
 		}
 	}
 

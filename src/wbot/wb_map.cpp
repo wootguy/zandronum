@@ -211,8 +211,13 @@ LinkSeg BotMapInfo::get_neighbor_subsector(subsector_t* ignoreSector, seg_t* bor
 	float bestLen = epsilonWidth;
 	bool foundSeg = false;
 
+	sector_t* backsector = borderSeg->backsector;
+	sector_t* frontsector = borderSeg->frontsector;
+
 	for (int j = 0; j < numsubsectors; j++) {
 		subsector_t& otherSub = subsectors[j];
+		if (otherSub.sector != backsector && otherSub.sector != frontsector)
+			continue;
 		if (&otherSub == ignoreSector)
 			continue;
 

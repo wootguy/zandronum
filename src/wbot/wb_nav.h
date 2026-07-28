@@ -114,11 +114,23 @@ struct RouteOpts {
 	std::unordered_set<int> blockedSubSectors;	// disallowd subsectors
 };
 
+struct AstarNode {
+	float gScore;
+	float fScore;
+	float cameFromCost;
+
+	bool closed;
+	bool pathed;
+	uint16_t cameFromNode;
+	uint16_t cameFromDist;
+};
+
 class SectorNavMesh {
 public:
 	NavSector* mesh = NULL;
 	std::vector<AActor*> propBlockers;
 	std::vector<sector_t*> pending_sector_relinks; // sectors that will be relinked as soon as they stop moving
+	AstarNode* astarNodes; // temp data for astar routing
 
 	int pathTests; // number of blocked path checks
 	bool verbose;

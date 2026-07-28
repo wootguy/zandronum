@@ -677,7 +677,7 @@ void wbot_run_tests() {
 	}
 
 	g_wbot_test_mode = true;
-	g_GameSpeed = 100.0f;
+	g_GameSpeed = 1000.0f;
 	g_test_start_map = level.mapname;
 	g_wbot_tests_start_time = getEpochMillis();
 }
