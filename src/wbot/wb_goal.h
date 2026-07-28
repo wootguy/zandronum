@@ -39,21 +39,22 @@ struct BotGoal {
 	BotGoal(int action, int lineid) : action(action), lineid(lineid) {}
 	BotGoal(int action, AActor* actor) : action(action), actor(actor) {}
 
-	std::string desc();
-	std::string descLong();
-	int getNavId();
+	std::string desc() const;
+	std::string descLong() const;
+	int getNavId() const;
 	FVector3 pos();
 	int touchDistance(AActor* toucher); // how close the player needs to be to consider this goal as touched
 
-	bool matches(BotGoal& other) {
-		return action == other.action && lineid == other.lineid && actor == other.actor;
+	bool matches(const BotGoal& other) {
+		return action == other.action && lineid == other.lineid && actor == const_cast<TObjPtr<AActor>&>(other.actor);
 	}
 
 	// false if the actor or lineid are no longer interactable
-	bool valid();
+	bool valid() const;
 
 	std::unordered_map<int, IndirectShootPos> FindBossBrainShootPositions();
 
 private:
-	void TestBossBrainShootRay(FVector3 brainPos, FVector3 rayStart, FVector3 rayDir, bool isCeilTrace, std::unordered_map<int, IndirectShootPos>& shootNodes);
+	void TestBossBrainShootRay(FVector3 brainPos, FVector3 rayStart, FVector3 rayDir, bool isCeilTrace,
+		std::unordered_map<int, IndirectShootPos>& shootNodes);
 };

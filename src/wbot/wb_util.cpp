@@ -13,6 +13,7 @@
 #include "m_bbox.h"
 
 #include <chrono>
+#include <float.h>
 
 using namespace std;
 using namespace std::chrono;

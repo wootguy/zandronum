@@ -21,6 +21,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <string>
+#include <float.h>
 
 using namespace std;
 
@@ -596,7 +597,7 @@ bool CWootBot::PushLevelEndGoal() {
 	return false;
 }
 
-bool CWootBot::PushGoal(BotGoal& goal, NavSectorLink* purposeLink) {
+bool CWootBot::PushGoal(const BotGoal& goal, NavSectorLink* purposeLink) {
 	if (!m_goals.empty()) {
 		BotGoal& lastGoal = m_goals[m_goals.size() - 1];
 		if (lastGoal.matches(goal)) {

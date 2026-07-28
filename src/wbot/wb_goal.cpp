@@ -12,10 +12,10 @@ using namespace std;
 #define ROCKET_EXPLODE_RADIUS 96 // reduced a bit, just in case
 #define ROCKET_RADIUS 20
 
-std::string BotGoal::desc() {
+std::string BotGoal::desc() const {
 	std::string thingName;
-	if (actor) {
-		thingName = actor->GetClass()->TypeName.GetChars();
+	if ((TObjPtr<AActor>)actor) {
+		thingName = ((TObjPtr<AActor>)actor)->GetClass()->TypeName.GetChars();
 	}
 	else if (lineid) {
 		thingName = "Line " + to_string(lineid);
@@ -41,7 +41,7 @@ std::string BotGoal::desc() {
 	return "??? " + thingName;
 }
 
-std::string BotGoal::descLong() {
+std::string BotGoal::descLong() const {
 	string descStr = desc();
 
 	string blockerStr;
@@ -78,11 +78,11 @@ std::string BotGoal::descLong() {
 	return descStr;
 }
 
-int BotGoal::getNavId() {
-	if (actor) {
+int BotGoal::getNavId() const {
+	if (const_cast<TObjPtr<AActor>&>(actor)) {
 		if (shootAlignment.subid >= 0)
 			return shootAlignment.subid;
-		return g_wb_nav.get_nav_id(actor);
+		return g_wb_nav.get_nav_id(const_cast<TObjPtr<AActor>&>(actor));
 	}
 	else if (lineid >= 0) {
 		int ret = g_wb_mapinfo.line_subsectors[lineid];
@@ -148,11 +148,11 @@ int BotGoal::touchDistance(AActor* toucher) {
 	return 0;
 }
 
-bool BotGoal::valid() {
+bool BotGoal::valid() const {
 	if (lineid >= 0) {
 		return lines[lineid].special != 0;
 	}
-	return actor != NULL;
+	return const_cast<TObjPtr<AActor>&>(actor) != NULL;
 }
 
 void BotGoal::TestBossBrainShootRay(FVector3 brainPos, FVector3 rayStart, FVector3 rayDir,

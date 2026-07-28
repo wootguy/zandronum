@@ -52,7 +52,7 @@ public:
 	// goal management
 	bool FindGoal(); // find something to do in the map
 	bool PushLevelEndGoal(); // try to beat the map
-	bool PushGoal(BotGoal& goal, NavSectorLink* purposeLink); // returns false if this is already the current goal
+	bool PushGoal(const BotGoal& goal, NavSectorLink* purposeLink); // returns false if this is already the current goal
 	bool PushKeyGoals(line_t* line);
 	bool SelectGoal(std::vector<BotGoal>& goals, NavSectorLink* purposeLink);
 	void CompleteGoal();

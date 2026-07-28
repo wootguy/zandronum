@@ -166,7 +166,7 @@ int main(int argc, char **argv)
 		{
 			struct tm	*lt = gmtime( &hgdate );
 			//fprintf (stream, "#define HG_TIME \"%d%02d%02d-%02d%02d", lt->tm_year - 100, lt->tm_mon + 1, lt->tm_mday, lt->tm_hour, lt->tm_min);
-			fprintf (stream, "250804-2140");
+			fprintf (stream, "#define HG_TIME \"250804-2140");
 			if ( localchanges )
 				fprintf (stream, "M" );
 			fprintf (stream, "\"\n" );
