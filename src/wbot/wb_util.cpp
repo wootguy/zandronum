@@ -844,7 +844,7 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 	if (strstr(msg, "gotos ") == msg) {
 		int id = atoi(msg + 5);
 		if (id >= 0 && id < numsubsectors) {
-			NavSector& nav = g_wb_nav.mesh[id];
+			NavSector& nav = g_wb_nav.mesh.nodes[id];
 			FVector3 pos = nav.pos3D();
 			P_Teleport(players[ulPlayer].mo, pos.X, pos.Y, pos.Z, 0, true, true, true);
 		}
@@ -856,10 +856,10 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 
 		bool found = false;
 		for (int i = 0; i < numsubsectors && !found; i++) {
-			NavSector& nav = g_wb_nav.mesh[i];
+			NavSector& nav = g_wb_nav.mesh.nodes[i];
 			for (int k = 0; k < nav.links.size(); k++) {
-				if (nav.links[k].id == id) {
-					FVector3 pos = nav.links[k].pos3D();
+				if (nav.links[k]->id == id) {
+					FVector3 pos = nav.links[k]->pos3D();
 					P_Teleport(players[ulPlayer].mo, pos.X, pos.Y, pos.Z, 0, true, true, true);
 					found = true;
 					break;
@@ -915,7 +915,7 @@ void wbot_tick() {
 	if (testModo) {
 		testModo = false;
 		new CWootBot(NULL, NULL, BOTS_FindFreePlayerSlot());
-		//wbot_run_tests();
+		wbot_run_tests();
 	}
 
 	g_wb_nav.relink_pending_sector();

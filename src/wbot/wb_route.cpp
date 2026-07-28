@@ -100,7 +100,7 @@ void CBotRouteController::UpdateRoute() {
 			}
 		}
 		else {
-			FVector2 center = g_wb_nav.mesh[route[1]].pos();
+			FVector2 center = g_wb_nav.mesh.nodes[route[1]].pos();
 			fixed_t dist = P_AproxDistance(pActor->x - (fixed_t)center.X, pActor->y - (fixed_t)center.Y);
 			if (pBot->stuckCounter >= 200 && dist < (16 << FRACBITS)) {
 				// already very close to the center, so this is probably a tiny polygon jammed
@@ -137,7 +137,7 @@ void CBotRouteController::UpdateRoute() {
 
 	if (m_navid != route[0]) {
 		// update route if slipped off into a sector adjacent to a target
-		NavSector& curNav = g_wb_nav.mesh[m_navid];
+		NavSector& curNav = g_wb_nav.mesh.nodes[m_navid];
 
 		if (route.size() > 1 && curNav.getLink(route[1])) {
 			NavSectorLink* link = curNav.getLink(route[1]);
@@ -154,9 +154,9 @@ void CBotRouteController::UpdateRoute() {
 		pBot->stateFlags &= ~FL_WBOT_RUSHING;
 	}
 
-	m_navCur = &g_wb_nav.mesh[m_navid];
-	m_navIdeal = &g_wb_nav.mesh[route[0]];
-	m_navTarget = &g_wb_nav.mesh[route.size() > 1 ? route[1] : route[0]];
+	m_navCur = &g_wb_nav.mesh.nodes[m_navid];
+	m_navIdeal = &g_wb_nav.mesh.nodes[route[0]];
+	m_navTarget = &g_wb_nav.mesh.nodes[route.size() > 1 ? route[1] : route[0]];
 	m_navLink = route.size() > 1 ? m_navIdeal->getLink(route[1]) : NULL;
 }
 
@@ -167,8 +167,8 @@ bool CBotRouteController::BeCareful() {
 
 	// be careful near cliffs
 	if (route.size() > 1) {
-		NavSector& idealNav = g_wb_nav.mesh[route[0]];
-		NavSector& targetNav = g_wb_nav.mesh[route[1]];
+		NavSector& idealNav = g_wb_nav.mesh.nodes[route[0]];
+		NavSector& targetNav = g_wb_nav.mesh.nodes[route[1]];
 		NavSectorLink* link = idealNav.getLink(route[1]);
 		headingTowardsCliff = targetNav.hasCliffs && link->linkWidth < 32
 			&& targetNav.getFloorZ() < (pActor->z + (STEP_HEIGHT << FRACBITS));
@@ -235,7 +235,7 @@ void CBotRouteController::JumpThink() {
 		break;
 	}
 	case WBOT_JUMP_FLY: {
-		NavSector& curNav = g_wb_nav.mesh[g_wb_nav.get_nav_id(pActor)];
+		NavSector& curNav = g_wb_nav.mesh.nodes[g_wb_nav.get_nav_id(pActor)];
 		NavSectorLink* linkToTarg = curNav.getLink(m_navTarget->id);
 		bool flyingOverWalkableNeighbor = linkToTarg && !linkToTarg->isJump && !linkToTarg->blocked(pActor);
 
@@ -448,7 +448,7 @@ void CBotRouteController::RouteSlipThink() {
 	if (m_navid != route[0]) {
 		// update route if slipped off into a sector adjacent to the previous
 		// not done earlier for a reason i forgot on doom2 map24 tightrope area.
-		NavSector& curNav = g_wb_nav.mesh[m_navid];
+		NavSector& curNav = g_wb_nav.mesh.nodes[m_navid];
 		NavSectorLink* link = curNav.getLink(route[0]);
 		if (link && link->walkable()) {
 			route.insert(route.begin(), m_navid);
@@ -499,9 +499,6 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link, int blockReason)
 		return;
 
 	curGoal->blockers.insert(link->id);
-
-	// don't try to route through previous paths we've been trying to unblock
-	unordered_set<int> allBlockedPaths = GetBlockedPaths();
 
 	int targetMovement = link->target->getMoveFlags();
 	int parentMovement = link->parent->getMoveFlags();
@@ -598,23 +595,26 @@ void CBotRouteController::CancelRoute() {
 	walkNodeState = 0;
 }
 
-unordered_set<int> CBotRouteController::GetBlockedPaths() {
-	unordered_set<int> allBlockedPaths;
+void CBotRouteController::MarkBlockedPaths() {
+	NavSectorLink* links = g_wb_nav.mesh.links;
+
 	for (BotGoal& goal : pBot->m_goals) {
-		allBlockedPaths.insert(goal.blockers.begin(), goal.blockers.end());
+		for (int id : goal.blockers) {
+			links[id].routeNumIgnore = g_route_ignore_num;
+		}
 	}
-	return allBlockedPaths;
 }
 
 BotRoute CBotRouteController::RouteToSector(int subid, int blockSector) {
 	RouteOpts opts;
 	opts.start = m_navid;
 	opts.end = subid;
-	opts.blockedPaths = GetBlockedPaths();
-	opts.blockedSubSectors.insert(blockSector);
-	opts.blockedSubSectors.erase(-1);
 	opts.timeSensitive = pBot->stateFlags & FL_WBOT_RUSHING;
 	opts.blockedPathHandling = WBOT_ROUTE_BLOCK_IGNORE;
+
+	MarkBlockedPaths();
+	if (blockSector != -1)
+		g_wb_nav.mesh.nodes[blockSector].routeNumIgnore = g_route_ignore_num;
 
 	return g_wb_nav.get_astar_route(opts);
 }
@@ -676,9 +676,9 @@ bool CBotRouteController::RouteToGoal() {
 			// add the back sector of the cross line to the route, in case its part of an elevator
 			// this way unblocking logic works (doom2 map06 gold key).
 			line_t& line = lines[goal->lineid];
-			NavSector& goalSector = g_wb_nav.mesh[route[route.size() - 1]];
+			NavSector& goalSector = g_wb_nav.mesh.nodes[route[route.size() - 1]];
 			for (int i = 0; i < goalSector.links.size(); i++) {
-				NavSectorLink& link = goalSector.links[i];
+				NavSectorLink& link = *goalSector.links[i];
 				if (link.seg->linedef == &line) {
 					route.push_back(link.target->id);
 					break;

@@ -15,6 +15,8 @@
 #define SAFE_CLIFF_DIST 80 // don't reduce movement speed when this far away from any cliff
 #define JUMP_DIST 200 // max jump distance on flat ground
 
+#define MAX_MESH_LINKS 8192
+
 struct NavSector;
 
 enum LinkBlockReason {
@@ -38,6 +40,8 @@ struct NavSectorLink {
 	bool isJump = false; // jump required to reach the target sector
 	fixed_t jumpDist = 0; // distance to the nearest landing point in the target sector
 	seg_t* seg = NULL;
+	
+	int routeNumIgnore; // ignore this path for the next route if set to the current route call num
 
 	FVector2 pos();
 	FVector3 pos3D();
@@ -59,7 +63,9 @@ struct NavSector {
 	int id = -1; // also index into nav array
 	bool hasCliffs = false; // bot should be careful here
 	bool doesDamage = false; // bot should try to route around this
-	std::vector<NavSectorLink> links;
+	std::vector<NavSectorLink*> links;
+
+	int routeNumIgnore; // ignore this sector for the next route if set to the current route call num
 
 	FVector2 pos();
 	FVector3 pos3D();
@@ -81,6 +87,14 @@ struct NavSector {
 	fixed_t getHeight();
 	fixed_t getFloorZ();
 	fixed_t getCeilZ();
+};
+
+struct BotMeshData {
+	NavSector* nodes;
+	NavSectorLink* links;
+	int numLinks;
+
+	BotMeshData() {}
 };
 
 enum RouteBlockHandling {
@@ -110,8 +124,6 @@ struct RouteOpts {
 	bool timeSensitive = false;		// prefer running thru lava and jumping if the route would be shorter
 	int blockedPathHandling = WBOT_ROUTE_BLOCK_IGNORE;
 	AActor* actor = NULL;
-	std::unordered_set<int> blockedPaths;		// disallowed paths
-	std::unordered_set<int> blockedSubSectors;	// disallowd subsectors
 };
 
 struct AstarNode {
@@ -125,9 +137,11 @@ struct AstarNode {
 	uint16_t cameFromDist;
 };
 
+extern int g_route_ignore_num; // incremented every time a route is calculated
+
 class SectorNavMesh {
 public:
-	NavSector* mesh = NULL;
+	BotMeshData mesh;
 	std::vector<AActor*> propBlockers;
 	std::vector<sector_t*> pending_sector_relinks; // sectors that will be relinked as soon as they stop moving
 	AstarNode* astarNodes; // temp data for astar routing
@@ -144,7 +158,7 @@ public:
 	BotRoute get_astar_route(const RouteOpts& opts);
 	
 	// get key(s) required to use the linedef. Returns false if keys don't exist anywhere in the map.
-	bool get_key_goals_for_line(AActor* actor, line_t* linedef, std::vector<BotGoal>& keyGoals, std::unordered_set<int>* blockedPaths);
+	bool get_key_goals_for_line(AActor* actor, line_t* linedef, std::vector<BotGoal>& keyGoals);
 
 	// find all weapons in the map with the given name
 	std::vector<BotGoal> get_weapon_goals(const char* wepname);
@@ -163,8 +177,6 @@ private:
 	float node_heuristic(int a, int b); // how "close" node a is to b (may not be physical distance)
 	float path_dist(NavSectorLink& link);
 	float path_cost(NavSectorLink& link, float dist, const RouteOpts& opts);
-
-	bool create_jump_link(NavSector& fromNav, NavSectorLink& fromLink, NavSector& toNav, NavSectorLink& toLink);
 };
 
 extern SectorNavMesh g_wb_nav;

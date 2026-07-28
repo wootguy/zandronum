@@ -10,8 +10,6 @@
 
 using namespace std;
 
-int g_total_links;
-
 bool SectorNavMeshGenerator::trace_jump(FVector3 start, FVector3 end, int fromMovement, int toMovement) {
 	const fixed_t rightStep = ((PLAYER_WIDTH / 2) / 2) << FRACBITS;
 	FVector2 start2d = FVector2(start.X, start.Y);
@@ -125,19 +123,19 @@ bool SectorNavMeshGenerator::is_potential_jump_link(NavSector& fromNav, NavSecto
 		return false; // jump position clipped inside a wall
 	}
 
-	for (NavSectorLink& link : fromNav.links) {
-		NavSector* neighbor = link.target;
-		if (link.isJump || link.isCliff)
+	for (NavSectorLink* link : fromNav.links) {
+		NavSector* neighbor = link->target;
+		if (link->isJump || link->isCliff)
 			continue;
 
-		for (NavSectorLink& neighborLink : neighbor->links) {
-			if (neighborLink.isJump || neighborLink.isCliff)
+		for (NavSectorLink* neighborLink : neighbor->links) {
+			if (neighborLink->isJump || neighborLink->isCliff)
 				continue;
 
-			if (neighborLink.target->getMoveFlags() & FL_SECTOR_MOVE_FLOOR_DOWN)
+			if (neighborLink->target->getMoveFlags() & FL_SECTOR_MOVE_FLOOR_DOWN)
 				continue; // may not be level in the future
 
-			if (neighborLink.target->id == toNav.id && !neighborLink.isJump) {
+			if (neighborLink->target->id == toNav.id && !neighborLink->isJump) {
 				// a neighbor has a walkable link to the jump target.
 				// This jump would hardly be a shortcut.
 				return false;
@@ -197,7 +195,7 @@ bool SectorNavMeshGenerator::is_potential_jump_link(NavSector& fromNav, NavSecto
 	return trace_jump(start, end, fromMovement, toMovement);
 }
 
-bool SectorNavMeshGenerator::create_jump_link(NavSector& fromNav, NavSectorLink& fromLink, NavSector& toNav, NavSectorLink& toLink) {
+bool SectorNavMeshGenerator::create_jump_link(BotMeshData& mesh, NavSector& fromNav, NavSectorLink& fromLink, NavSector& toNav, NavSectorLink& toLink) {
 	if (!is_potential_jump_link(fromNav, fromLink, toNav, toLink))
 		return false;
 
@@ -214,22 +212,24 @@ bool SectorNavMeshGenerator::create_jump_link(NavSector& fromNav, NavSectorLink&
 	link.seg = fromLink.seg;
 
 	link.target = &toNav;
-	link.id = g_total_links++;
+	link.id = mesh.numLinks;
 	link.isJump = true;
 	link.jumpDist = (jumpEnd - jumpStart).Length();
 	link.jumpNeighbor = fromLink.target;
 
-	fromNav.links.push_back(link);
+	mesh.links[mesh.numLinks] = link;
+	fromNav.links.push_back(&mesh.links[mesh.numLinks]);
+	mesh.numLinks++;
 
 	return true;
 }
 
-void SectorNavMeshGenerator::add_jump_links(NavSector* mesh, int nodeid) {
-	NavSector& nav = mesh[nodeid];
+void SectorNavMeshGenerator::add_jump_links(BotMeshData& mesh, int nodeid) {
+	NavSector& nav = mesh.nodes[nodeid];
 	bool srcCanBeCliffsLater = nav.getMoveFlags() & FL_SECTOR_MOVE_FLOOR_UP;
 
 	for (int k = 0; k < nav.links.size(); k++) {
-		NavSectorLink& link = nav.links[k];
+		NavSectorLink& link = *nav.links[k];
 
 		if (link.isJump)
 			continue;
@@ -242,19 +242,18 @@ void SectorNavMeshGenerator::add_jump_links(NavSector* mesh, int nodeid) {
 
 		// find other other cliff segments to try linking to
 		for (int j = 0; j < numsubsectors; j++) {
-			NavSector& otherNav = mesh[j];
+			NavSector& otherNav = mesh.nodes[j];
 
 			if (j == nodeid)
 				continue;
 
 			bool dstCanBeCliffsLater = otherNav.getMoveFlags() & FL_SECTOR_MOVE_FLOOR_UP;
 
-			for (int x = 0; x < otherNav.links.size(); x++) {
-				NavSectorLink& otherLink = otherNav.links[x];
-				if (!otherLink.isCliff || otherLink.isJump)
+			for (NavSectorLink* otherLink : otherNav.links) {
+				if (!otherLink->isCliff || otherLink->isJump)
 					continue;
 
-				if (create_jump_link(nav, nav.links[k], otherNav, otherLink)) {
+				if (create_jump_link(mesh, nav, *nav.links[k], otherNav, *otherLink)) {
 					break;
 				}
 			}
@@ -262,17 +261,17 @@ void SectorNavMeshGenerator::add_jump_links(NavSector* mesh, int nodeid) {
 	}
 }
 
-void SectorNavMeshGenerator::add_jump_links(NavSector* mesh) {
+void SectorNavMeshGenerator::add_jump_links(BotMeshData& mesh) {
 	// add jump links between cliff segments
 	for (int i = 0; i < numsubsectors; i++) {
 		add_jump_links(mesh, i);
 	}
 }
 
-void SectorNavMeshGenerator::calc_nav_centers(NavSector* mesh) {
+void SectorNavMeshGenerator::calc_nav_centers(BotMeshData& mesh) {
 	for (int i = 0; i < numsubsectors; i++) {
 		subsector_t& sub = subsectors[i];
-		NavSector& nav = mesh[i];
+		NavSector& nav = mesh.nodes[i];
 
 		float area = 0;
 		FVector2 centroid(0, 0);
@@ -293,9 +292,9 @@ void SectorNavMeshGenerator::calc_nav_centers(NavSector* mesh) {
 	}
 }
 
-void SectorNavMeshGenerator::add_walkable_links(NavSector* mesh, int nodeid, std::vector<AActor*> propBlockers) {
+void SectorNavMeshGenerator::add_walkable_links(BotMeshData& mesh, int nodeid, std::vector<AActor*> propBlockers) {
 	subsector_t& sub = subsectors[nodeid];
-	NavSector& nav = mesh[nodeid];
+	NavSector& nav = mesh.nodes[nodeid];
 
 	for (int k = 0; k < sub.numlines; k++) {
 		seg_t& seg = sub.firstline[k];
@@ -322,10 +321,10 @@ void SectorNavMeshGenerator::add_walkable_links(NavSector* mesh, int nodeid, std
 		
 
 		NavSectorLink link;
-		link.target = &mesh[linkseg.otherSub];
+		link.target = &mesh.nodes[linkseg.otherSub];
 		link.movePos = FVector3(cx, cy, z);
 		link.seg = &seg;
-		link.id = g_total_links++;
+		link.id = mesh.numLinks;
 		link.parent = &nav;
 		link.linkWidth = (int)linkseg.length() >> FRACBITS;
 		link.isJump = false;
@@ -377,7 +376,7 @@ void SectorNavMeshGenerator::add_walkable_links(NavSector* mesh, int nodeid, std
 			AActor* dest = SelectTeleDest(line->args[0], line->args[1]);
 			if (dest) {
 				subsector_t* destSub = R_PointInSubsector(dest->x, dest->y);
-				link.target = &mesh[destSub - subsectors];
+				link.target = &mesh.nodes[destSub - subsectors];
 				link.isTeleport = true;
 			}
 		}
@@ -398,25 +397,28 @@ void SectorNavMeshGenerator::add_walkable_links(NavSector* mesh, int nodeid, std
 			continue;
 		}
 
-		nav.links.push_back(link);
+		mesh.links[mesh.numLinks] = link;
+		nav.links.push_back(&mesh.links[mesh.numLinks]);
+		mesh.numLinks++;
 	}
 }
 
-NavSector* SectorNavMeshGenerator::generate(std::vector<AActor*> propBlockers) {
+BotMeshData SectorNavMeshGenerator::generate(std::vector<AActor*> propBlockers) {
 	uint64_t genStart = getEpochMillis();
 
-	NavSector* mesh = new NavSector[numsubsectors];
+	BotMeshData mesh;
+	mesh.nodes = new NavSector[numsubsectors];
+	mesh.links = new NavSectorLink[MAX_MESH_LINKS];
+	mesh.numLinks = 0;
 
 	g_wb_mapinfo.init();
-
-	g_total_links = 0;
 
 	calc_nav_centers(mesh);
 
 	// link sectors as a nav mesh
 	for (int i = 0; i < numsubsectors; i++) {
 		subsector_t& sub = subsectors[i];
-		NavSector& nav = mesh[i];
+		NavSector& nav = mesh.nodes[i];
 
 		nav.id = i;
 		nav.doesDamage = g_wb_mapinfo.subsector_does_damage(&sub);
@@ -426,13 +428,13 @@ NavSector* SectorNavMeshGenerator::generate(std::vector<AActor*> propBlockers) {
 
 	add_jump_links(mesh);
 
-	Printf("Generated %d nodes, %d links in %d ms\n", (int)numsubsectors, g_total_links, (int)(getEpochMillis() - genStart));
+	Printf("Generated %d nodes, %d links in %d ms\n", (int)numsubsectors, mesh.numLinks, (int)(getEpochMillis() - genStart));
 
 	return mesh;
 }
 
-int SectorNavMeshGenerator::relink_node(NavSector* mesh, int id, std::vector<AActor*> propBlockers) {
-	NavSector& nav = mesh[id];
+int SectorNavMeshGenerator::relink_node(BotMeshData& mesh, int id, std::vector<AActor*> propBlockers) {
+	NavSector& nav = mesh.nodes[id];
 	int oldLinkCount = nav.links.size();
 	nav.links.clear();
 
@@ -440,18 +442,18 @@ int SectorNavMeshGenerator::relink_node(NavSector* mesh, int id, std::vector<AAc
 	add_walkable_links(mesh, id, propBlockers);
 	add_jump_links(mesh, id);
 
-	NavSector* toNav = &mesh[id];
+	NavSector* toNav = &mesh.nodes[id];
 
 	// test that links to this sector are still valid if it's no longer possible to move
 	int removed = 0;
 	for (int i = 0; i < numsubsectors; i++) {
-		NavSector& otherNav = mesh[i];
+		NavSector& otherNav = mesh.nodes[i];
 
 		// don't unlink yet if the source sectors can be elevated in the future
 		bool jumpsMayBePossibleLater = otherNav.getMoveFlags() & FL_SECTOR_MOVE_FLOOR_UP;
 
 		for (int k = 0; k < otherNav.links.size(); k++) {
-			NavSectorLink& link = otherNav.links[k];
+			NavSectorLink& link = *otherNav.links[k];
 
 			if (link.target != toNav)
 				continue;

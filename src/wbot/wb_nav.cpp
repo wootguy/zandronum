@@ -18,6 +18,7 @@
 using namespace std;
 
 SectorNavMesh g_wb_nav;
+int g_route_ignore_num;
 
 FVector2 NavSectorLink::pos() {
 	return movePos;
@@ -162,10 +163,10 @@ NavSector* NavSectorLink::GetJumpBackupBlocker(FVector2 targetPos) {
 	line_t* line;
 	if (TraceSectorEdge(backupStartPos, backupPos, edge, &line)) {
 		subsector_t& sub = subsectors[parent->id];
-		for (NavSectorLink& link : parent->links) {
-			if (link.seg->linedef == line) {
-				bool canMoveAway = link.target->getMoveFlags() & (FL_SECTOR_MOVE_FLOOR_DOWN | FL_SECTOR_MOVE_CEIL_UP);
-				return canMoveAway ? link.target : NULL;
+		for (NavSectorLink* link : parent->links) {
+			if (link->seg->linedef == line) {
+				bool canMoveAway = link->target->getMoveFlags() & (FL_SECTOR_MOVE_FLOOR_DOWN | FL_SECTOR_MOVE_CEIL_UP);
+				return canMoveAway ? link->target : NULL;
 			}
 		}
 	}
@@ -242,8 +243,8 @@ NavSectorLink* NavSector::getLink(int subSectorId) {
 		return NULL;
 
 	for (int i = 0; i < links.size(); i++) {
-		if (links[i].target->id == subSectorId) {
-			return &links[i];
+		if (links[i]->target->id == subSectorId) {
+			return links[i];
 		}
 	}
 
@@ -349,12 +350,12 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 	int subId = sub - subsectors;
 
 	if (sub && subId < numsubsectors) {
-		NavSector& nav = mesh[subId];
+		NavSector& nav = mesh.nodes[subId];
 		int spritesDrawn = 0;
 		const int maxSprites = 1000;
 
 		for (int k = 0; k < nav.links.size() && spritesDrawn < maxSprites; k++) {
-			NavSectorLink& link = nav.links[k];
+			NavSectorLink& link = *nav.links[k];
 			
 			if (!link.blocked(player)) {
 				FVector3 linkPos = link.pos3D();
@@ -404,7 +405,7 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 	}
 
 	for (int i = 0; i < numsubsectors; i++) {
-		NavSector& node = mesh[i];
+		NavSector& node = mesh.nodes[i];
 		FVector3 pos = node.pos3D();
 
 		if (P_AproxDistance(pos.X - player->x, pos.Y - player->y) > (1000 << FRACBITS)) {
@@ -424,8 +425,8 @@ int SectorNavMesh::get_nav_id(AActor* actor) {
 }
 
 float SectorNavMesh::node_heuristic(int a, int b) {
-	NavSector& nodea = mesh[a];
-	NavSector& nodeb = mesh[b];
+	NavSector& nodea = mesh.nodes[a];
+	NavSector& nodeb = mesh.nodes[b];
 	FVector2 delta = nodea.pos() - nodeb.pos();
 	return delta.Length();
 }
@@ -501,26 +502,25 @@ BotRoute SectorNavMesh::get_astar_route(const RouteOpts& opts)
 
 	if (opts.start < 0 || opts.end < 0 || opts.start >= numsubsectors || opts.end >= numsubsectors) {
 		Printf("AStarRoute: invalid start/end nodes\n");
+		g_route_ignore_num++;
 		return emptyRoute;
 	}
 
 	if (opts.start == opts.end) {
 		emptyRoute.route.push_back(opts.start);
+		g_route_ignore_num++;
 		return emptyRoute;
 	}
 
 	memset(astarNodes, 0, sizeof(AstarNode) * numsubsectors);
 
-	NavSector& start = mesh[opts.start];
-	NavSector& goal = mesh[opts.end];
+	NavSector& start = mesh.nodes[opts.start];
+	NavSector& goal = mesh.nodes[opts.end];
 
 	astarNodes[opts.start].gScore = 0;
 	astarNodes[opts.start].fScore = node_heuristic(start.id, goal.id);
 
 	openQueue.push({ opts.start, astarNodes[opts.start].fScore });
-
-	bool hasBlockedPaths = opts.blockedPaths.size();
-	bool hasBlockedSubSectors = opts.blockedSubSectors.size();
 
 	const int maxIter = 8192;
 	int curIter = 0;
@@ -562,32 +562,32 @@ BotRoute SectorNavMesh::get_astar_route(const RouteOpts& opts)
 					opts.start, opts.end, route.route.size());
 			}
 
+			g_route_ignore_num++;
 			return route;
 		}
 
 		curDat.closed = true;
 
-		NavSector& currentNode = mesh[current];
+		NavSector& currentNode = mesh.nodes[current];
 
-		for (int i = 0; i < currentNode.links.size(); i++) {
-			NavSectorLink& link = currentNode.links[i];
-			int neighbor = link.target->id;
+		for (NavSectorLink* link : currentNode.links) {
+			int neighbor = link->target->id;
 			AstarNode& neighborDat = astarNodes[neighbor];
 
 			if (neighborDat.closed)
 				continue;
 
-			if (hasBlockedSubSectors && opts.blockedSubSectors.count(neighbor))
+			if (link->routeNumIgnore == g_route_ignore_num)
 				continue;
 
-			if (hasBlockedPaths && opts.blockedPaths.count(link.id))
+			if (link->target->routeNumIgnore == g_route_ignore_num)
 				continue;
 
-			if (opts.blockedPathHandling == WBOT_ROUTE_BLOCK_FORBID && link.blocked(opts.actor))
+			if (opts.blockedPathHandling == WBOT_ROUTE_BLOCK_FORBID && link->blocked(opts.actor))
 				continue;
 
-			float linkDist = path_dist(link);
-			float linkCost = path_cost(link, linkDist, opts);
+			float linkDist = path_dist(*link);
+			float linkCost = path_cost(*link, linkDist, opts);
 			float tentative_gScore = curDat.gScore + linkCost;
 
 			if (neighborDat.pathed && tentative_gScore >= neighborDat.gScore)
@@ -596,7 +596,7 @@ BotRoute SectorNavMesh::get_astar_route(const RouteOpts& opts)
 			// This path is the best until now. Record it!
 			neighborDat.pathed = true;
 			neighborDat.gScore = tentative_gScore;
-			neighborDat.fScore = tentative_gScore + node_heuristic(mesh[neighbor].id, goal.id);
+			neighborDat.fScore = tentative_gScore + node_heuristic(mesh.nodes[neighbor].id, goal.id);
 			neighborDat.cameFromNode = current;
 			neighborDat.cameFromDist = linkDist;
 			neighborDat.cameFromCost = linkCost;
@@ -606,10 +606,11 @@ BotRoute SectorNavMesh::get_astar_route(const RouteOpts& opts)
 		}
 	}
 
+	g_route_ignore_num++;
 	return emptyRoute;
 }
 
-bool SectorNavMesh::get_key_goals_for_line(AActor* actor, line_t* line, vector<BotGoal>& keyGoals, std::unordered_set<int>* blockedPaths) {
+bool SectorNavMesh::get_key_goals_for_line(AActor* actor, line_t* line, vector<BotGoal>& keyGoals) {
 	if (line->special != Door_LockedRaise)
 		return true; // not a locked door
 
@@ -634,8 +635,8 @@ bool SectorNavMesh::get_key_goals_for_line(AActor* actor, line_t* line, vector<B
 	
 	RouteOpts opts;
 	opts.start = actorNavId;
-	if (blockedPaths)
-		opts.blockedPaths = *blockedPaths;
+
+	int oldRouteIgnoreNum = g_route_ignore_num;
 
 	while ((mapKey = it.Next()) != NULL) {
 		if (mapKey->Owner)
@@ -643,6 +644,8 @@ bool SectorNavMesh::get_key_goals_for_line(AActor* actor, line_t* line, vector<B
 
 		int keyNavId = get_nav_id(mapKey);
 		opts.end = keyNavId;
+
+		g_route_ignore_num = oldRouteIgnoreNum;
 
 		KeyRoute keyRoute;
 		keyRoute.key = mapKey;

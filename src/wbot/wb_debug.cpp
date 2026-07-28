@@ -21,7 +21,7 @@ void wbot_debug_player_nav() {
 	string navInfo;
 	int plrnavid = g_wb_nav.get_nav_id(player);
 	navInfo = "Sector " + to_string(plrnavid) + ":";
-	NavSector& nav = g_wb_nav.mesh[plrnavid];
+	NavSector& nav = g_wb_nav.mesh.nodes[plrnavid];
 
 	//int temp;
 	//AvoidLedges(player, temp);
@@ -34,7 +34,7 @@ void wbot_debug_player_nav() {
 
 	navInfo += "\n   Links:";
 	for (int i = 0; i < nav.links.size(); i++) {
-		NavSectorLink& link = nav.links[i];
+		NavSectorLink& link = *nav.links[i];
 		NavSector& targ = *link.target;
 		string arrow = link.blocked(player) ? " -X> " : " --> ";
 		navInfo += "\n      " + to_string(link.id) + arrow + to_string(link.target->id);
@@ -105,7 +105,7 @@ void wbot_debug(CWootBot* pBot) {
 	routeStr += "\n                     " + to_string(pBot->m_routeController.m_route.dist) + " units";
 
 	if (pBot->m_routeController.m_route.route.size() > 1) {
-		NavSector& nav = g_wb_nav.mesh[pBot->m_routeController.m_route.route[0]];
+		NavSector& nav = g_wb_nav.mesh.nodes[pBot->m_routeController.m_route.route[0]];
 		NavSectorLink* link = nav.getLink(pBot->m_routeController.m_route.route[1]);
 		if (link) {
 			routeStr += "\nLink: " + to_string(link->id) + " -> " + to_string(link->target->id);

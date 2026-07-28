@@ -90,7 +90,7 @@ int BotGoal::getNavId() {
 		if (ret == -1)
 			Printf("Failed to find subsector for line %d\n", lineid);
 		else {
-			NavSector& node = g_wb_nav.mesh[ret];
+			NavSector& node = g_wb_nav.mesh.nodes[ret];
 			if (node.links.empty() && (action == WBOT_GOAL_ACTION_USE || action == WBOT_GOAL_ACTION_SHOOT)) {
 				// line is in an unreachable sector.
 				// Try tracing in front of it to see if it can be activated from a sector nearby
@@ -194,7 +194,7 @@ void BotGoal::TestBossBrainShootRay(FVector3 brainPos, FVector3 rayStart, FVecto
 		if (!isectors.count(sec))
 			continue; // sector not intersected
 
-		NavSector& nav = g_wb_nav.mesh[k];
+		NavSector& nav = g_wb_nav.mesh.nodes[k];
 
 		// test if the shoot line intersects this subsector
 		int numisect = 0;

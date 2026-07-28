@@ -139,7 +139,7 @@ void CWootBot::IdleThink() {
 void CWootBot::GoalActionThink() {
 	BotGoal& goal = *CurrentGoal();
 	NavSector& nav = m_routeController.m_navIdeal ? *m_routeController.m_navIdeal
-		: g_wb_nav.mesh[m_routeController.m_navid];
+		: g_wb_nav.mesh.nodes[m_routeController.m_navid];
 
 	if (!goal.valid()) {
 		DebugPrint("Goal became invalid\n");
@@ -419,14 +419,14 @@ FVector2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
 	//NavSector& nav = g_wb_nav.mesh[m_navid];
 	//FVector2 plrPos(pActor->x, pActor->y);
 	int subid = R_PointInSubsector(actor->x, actor->y) - subsectors;
-	NavSector* nav = &g_wb_nav.mesh[subid];
+	NavSector* nav = &g_wb_nav.mesh.nodes[subid];
 	FVector2 plrPos(actor->x, actor->y);
 
 	int targetNav = -1;
 	int idealNav = -1;
 	if (m_routeController.m_route.route.size() > 0) {
 		idealNav = m_routeController.m_route.route[0];
-		nav = &g_wb_nav.mesh[idealNav];
+		nav = &g_wb_nav.mesh.nodes[idealNav];
 	}
 	if (m_routeController.m_route.route.size() > 1) {
 		targetNav = m_routeController.m_route.route[1];
@@ -438,12 +438,12 @@ FVector2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
 	std::vector<NavSector*> sectors;
 	if (nav->hasCliffs)
 		sectors.push_back(nav);
-	for (NavSectorLink& link : nav->links) {
-		if (link.isCliff || link.isTeleport)
+	for (NavSectorLink* link : nav->links) {
+		if (link->isCliff || link->isTeleport)
 			continue;
 
-		if (link.target->hasCliffs) {
-			sectors.push_back(link.target);
+		if (link->target->hasCliffs) {
+			sectors.push_back(link->target);
 		}
 	}
 
@@ -457,14 +457,14 @@ FVector2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
 			continue;
 		}
 
-		for (NavSectorLink& link : testSec->links) {
-			if (!link.isCliff)
+		for (NavSectorLink* link : testSec->links) {
+			if (!link->isCliff)
 				continue;
 
-			if (link.target->id == targetNav || link.target->id == idealNav)
+			if (link->target->id == targetNav || link->target->id == idealNav)
 				continue; // don't back off from segments that must be crossed
 
-			seg_t* seg = link.seg;
+			seg_t* seg = link->seg;
 			FVector2 v1(seg->v1->x, seg->v1->y);
 			FVector2 v2(seg->v2->x, seg->v2->y);
 			FVector2 edge = v2 - v1;
@@ -485,7 +485,7 @@ FVector2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
 				worstDist = dist;
 				worstNormal = normal;
 				worsetSec = testSec->id;
-				worstLink = link.id;
+				worstLink = link->id;
 			}
 		}
 	}
@@ -513,7 +513,7 @@ void CWootBot::UpdatePositionFlags() {
 
 	stateFlags &= ~(FL_WBOT_FLYING | FL_WBOT_ON_ELEV);
 	if (m_routeController.m_navCur) {
-		NavSector& nav = g_wb_nav.mesh[m_routeController.m_navid];
+		NavSector& nav = g_wb_nav.mesh.nodes[m_routeController.m_navid];
 		if (pActor->z > nav.getFloorZ())
 			stateFlags |= FL_WBOT_FLYING;
 		if (nav.sector()->floordata)
@@ -638,8 +638,9 @@ bool CWootBot::PushGoal(BotGoal& goal, NavSectorLink* purposeLink) {
 bool CWootBot::PushKeyGoals(line_t* line) {
 	if (line->special == Door_LockedRaise && !P_CheckKeys(pActor, line->args[3], false)) {
 		vector<BotGoal> keyGoals;
-		unordered_set<int> allBlockedPaths = m_routeController.GetBlockedPaths();
-		g_wb_nav.get_key_goals_for_line(pActor, line, keyGoals, &allBlockedPaths);
+
+		m_routeController.MarkBlockedPaths();
+		g_wb_nav.get_key_goals_for_line(pActor, line, keyGoals);
 
 		for (BotGoal& keyGoal : keyGoals) {
 			m_goals.push_back(keyGoal);
@@ -663,11 +664,14 @@ bool CWootBot::SelectGoal(vector<BotGoal>& goals, NavSectorLink* purposeLink) {
 
 	RouteOpts opts;
 	opts.start = m_routeController.m_navid;
-	opts.blockedPaths = m_routeController.GetBlockedPaths();
-	if (unblockSector != -1)
-		opts.blockedSubSectors.insert(unblockSector);
 	opts.timeSensitive = stateFlags & FL_WBOT_RUSHING;
 	opts.blockedPathHandling = WBOT_ROUTE_BLOCK_EXPENSIVE;
+
+	m_routeController.MarkBlockedPaths();
+	if (unblockSector != -1)
+		g_wb_nav.mesh.nodes[unblockSector].routeNumIgnore = g_route_ignore_num;
+
+	int oldRouteIgnoreNum = g_route_ignore_num;
 
 	for (int i = 0; i < goals.size(); i++) {
 		BotGoal& goal = goals[i];
@@ -684,6 +688,7 @@ bool CWootBot::SelectGoal(vector<BotGoal>& goals, NavSectorLink* purposeLink) {
 		}
 
 		opts.end = subid;
+		g_route_ignore_num = oldRouteIgnoreNum;
 		BotRoute route = g_wb_nav.get_astar_route(opts);
 
 		if ((purposeLink && subid == purposeLink->parent->id) || route.route.size()) {

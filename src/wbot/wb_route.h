@@ -52,7 +52,7 @@ public:
 	bool RouteToGoal();
 	inline bool HasRoute() { return m_route.route.size(); };
 
-	std::unordered_set<int> GetBlockedPaths();	// paths blocked during path to current goal
+	void MarkBlockedPaths();	// mark paths blocked during path to current goal
 	BotRoute RouteToSector(int subid, int blockSector=-1);
 
 private:
