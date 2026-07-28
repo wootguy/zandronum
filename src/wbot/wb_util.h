@@ -12,8 +12,6 @@ struct TraceIsect {
 	fixed_t fraction;
 };
 
-extern bool g_wbot_test_mode;
-
 char* VarArgs(const char* format, ...);
 
 AActor* getAnyPlayer();
@@ -88,10 +86,3 @@ bool IsPropBlocker(AActor* actor);
 std::vector<int> debugv2(const FVector2& v);
 
 std::vector<int> debugv3(const FVector2& v);
-
-// Hooks
-void wbot_handle_chat_command(ULONG ulPlayer, const char* msg);
-void wbot_handle_line_activation(line_t* line, AActor* activator);
-void wbot_map_init();
-void wbot_map_exit();
-void wbot_tick();

@@ -1052,6 +1052,7 @@ set(WBOT_SOURCES
 	wbot/wb_nav.h wbot/wb_nav.cpp
 	wbot/wb_nav_gen.h wbot/wb_nav_gen.cpp
 	wbot/wb_util.h wbot/wb_util.cpp
+	wbot/wb_hooks.h wbot/wb_hooks.cpp
 	wbot/wb_route.h wbot/wb_route.cpp
 	wbot/wb_goal.h wbot/wb_goal.cpp
 	wbot/wb_map.h wbot/wb_map.cpp

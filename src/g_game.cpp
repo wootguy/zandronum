@@ -113,7 +113,7 @@
 #include "a_lightning.h"
 #include "po_man.h"
 #include "voicechat.h"
-#include "wbot/wb_util.h"
+#include "wbot/wb_hooks.h"
 
 #include <zlib.h>
 

@@ -3,6 +3,7 @@
 #include "wb_map.h"
 #include "wb_nav_gen.h"
 #include "wb_util.h"
+#include "wb_hooks.h"
 #include "r_state.h"
 #include "sv_commands.h"
 #include "p_local.h"

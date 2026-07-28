@@ -125,7 +125,7 @@
 #include "p_lnspec.h"
 #include "unlagged.h"
 #include "scoreboard.h"
-#include "wbot/wb_util.h"
+#include "wbot/wb_hooks.h"
 
 //*****************************************************************************
 //	MISC CRAP THAT SHOULDN'T BE HERE BUT HAS TO BE BECAUSE OF SLOPPY CODING

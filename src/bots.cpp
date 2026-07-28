@@ -91,7 +91,7 @@
 #include "doomerrors.h"
 #include "chat.h"
 #include "scoreboard.h"
-#include "wbot/wb_util.h"
+#include "wbot/wb_hooks.h"
 
 //*****************************************************************************
 //	VARIABLES
