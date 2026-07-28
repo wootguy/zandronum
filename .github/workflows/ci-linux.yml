@@ -14,16 +14,12 @@ jobs:
       fail-fast: false
 
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm]
+        os: [ubuntu-24.04]
         build_type: [Release]
         # This is just so the job and artefact names look nicer...
-        serveronly: ["", "SERVERONLY"]
+        serveronly: ["SERVERONLY"]
         include:
           - os: ubuntu-24.04
-          - os: ubuntu-24.04-arm
-        exclude:
-          - os: ubuntu-24.04-arm
-            serveronly: ""
 
     steps:
     - uses: actions/checkout@v4
