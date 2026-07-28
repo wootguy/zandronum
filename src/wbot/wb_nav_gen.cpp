@@ -38,6 +38,16 @@ bool SectorNavMeshGenerator::trace_jump(FVector3 start, FVector3 end, int fromMo
 				}
 			}
 
+			FVector3 impact(tr.X, tr.Y, tr.Z);
+			if (tr.HitType == TRACE_HitWall && tr.Line) {
+				// trace has a bug where you can impact a wall in a different sector
+				sector_t* impactSector = R_PointInSubsector(tr.X, tr.Y)->sector;
+				if (tr.Line->frontsector != impactSector && tr.Line->backsector != impactSector) {
+					continue; // impossible to have hit this line
+				}
+			}
+
+ 			//TraceLine(start + rightDir * i * rightStep, end + rightDir * i * rightStep, true, NULL, &tr); // debug
 			return false; // hit an immovable wall or ceiling/floor
 		}
 	}
@@ -109,7 +119,11 @@ bool SectorNavMeshGenerator::is_potential_jump_link(NavSector& fromNav, NavSecto
 	float jumpDirDot = DotProduct(normalA, jumpDir);
 	if (jumpDirDot < 0.5f) {
 		return false; // awkward jump direction
-	}	
+	}
+
+	if (IsBoxWallClipped(jumpStart, (PLAYER_RADIUS << FRACBITS))) {
+		return false; // jump position clipped inside a wall
+	}
 
 	for (NavSectorLink& link : fromNav.links) {
 		NavSector* neighbor = link.target;
@@ -119,6 +133,9 @@ bool SectorNavMeshGenerator::is_potential_jump_link(NavSector& fromNav, NavSecto
 		for (NavSectorLink& neighborLink : neighbor->links) {
 			if (neighborLink.isJump || neighborLink.isCliff)
 				continue;
+
+			if (neighborLink.target->getMoveFlags() & FL_SECTOR_MOVE_FLOOR_DOWN)
+				continue; // may not be level in the future
 
 			if (neighborLink.target->id == toNav.id && !neighborLink.isJump) {
 				// a neighbor has a walkable link to the jump target.
@@ -142,7 +159,7 @@ bool SectorNavMeshGenerator::is_potential_jump_link(NavSector& fromNav, NavSecto
 	if (jumpTooFarCurrently && jumpMayBeLowerLater) {
 		// One or both sectors must move for the jump to be possible.
 		// Test ideal elevations instead of current.
-		fixed_t movementNeeded = linkDist - (JUMP_DIST << FRACBITS);
+		fixed_t movementNeeded = abs(linkDist - (JUMP_DIST << FRACBITS));
 		FVector3 moved(0, 0, movementNeeded);
 		FVector3 halfMoved(0, 0, movementNeeded / 2);
 
@@ -190,7 +207,7 @@ bool SectorNavMeshGenerator::create_jump_link(NavSector& fromNav, NavSectorLink&
 
 	NavSectorLink link;
 	link.parent = fromLink.parent;
-	link.overlapCenter = jumpStart;
+	link.movePos = jumpStart;
 	link.linkWidth = fromLink.linkWidth;
 	link.isTeleport = fromLink.isTeleport;
 	link.isCliff = fromLink.isCliff;
@@ -302,10 +319,11 @@ void SectorNavMeshGenerator::add_walkable_links(NavSector* mesh, int nodeid, std
 		fixed_t cx = (linkseg.x1 + linkseg.x2) / 2;
 		fixed_t cy = (linkseg.y1 + linkseg.y2) / 2;
 		float z = sub.sector->floorplane.ZatPoint(cx, cy);
+		
 
 		NavSectorLink link;
 		link.target = &mesh[linkseg.otherSub];
-		link.overlapCenter = FVector3(cx, cy, z);
+		link.movePos = FVector3(cx, cy, z);
 		link.seg = &seg;
 		link.id = g_total_links++;
 		link.parent = &nav;
@@ -316,12 +334,34 @@ void SectorNavMeshGenerator::add_walkable_links(NavSector* mesh, int nodeid, std
 
 		subsector_t& neighbor = subsectors[linkseg.otherSub];
 
-		if (link.linkWidth <= PLAYER_WIDTH) {
-			int dummy;
-			if (g_wb_mapinfo.is_link_bordered_by_walls(sub, k, dummy, dummy))
-				continue; // link is too narrow to enter and both sides of it are impassable walls
-			if (g_wb_mapinfo.is_link_bordered_by_walls(neighbor, linkseg.idx, dummy, dummy))
-				continue; // link is too narrow to leave and both sides of it are impassable walls
+		const fixed_t mesh_radius = PLAYER_RADIUS << FRACBITS;
+		if (IsBoxWallClipped(link.movePos, mesh_radius)) {
+			int step = 8;
+			int steps = (link.linkWidth / step) / 2; // half len for left/right split
+			FVector2 a(linkseg.x1, linkseg.y1);
+			FVector2 b(linkseg.x2, linkseg.y2);
+			FVector2 delta = b - a;
+			FVector2 dir = delta.Unit() * FRACUNIT;
+
+			bool foundUnclippedPos = false;
+			for (int s = 1; s <= steps; s++) {
+				FVector2 testLeft = link.movePos + dir * s * step;
+				FVector2 testRight = link.movePos + dir * s * -step;
+
+				if (!IsBoxWallClipped(testLeft, mesh_radius)) {
+					foundUnclippedPos = true;
+					link.movePos = testLeft;
+					break;
+				}
+				if (!IsBoxWallClipped(testRight, mesh_radius)) {
+					foundUnclippedPos = true;
+					link.movePos = testRight;
+					break;
+				}
+			}
+			if (!foundUnclippedPos) {
+				continue; // unable to fit a player anywhere along this link
+			}
 		}
 
 		link.isCliff = sub.sector->floorplane.ZatPoint(cx, cy)
@@ -345,7 +385,7 @@ void SectorNavMeshGenerator::add_walkable_links(NavSector* mesh, int nodeid, std
 		// don't add links that are blocked by immovable props
 		bool propBlocked = false;
 		const fixed_t playerRadius = (PLAYER_WIDTH / 2) << FRACBITS;
-		FVector2 linkPos = link.overlapCenter;
+		FVector2 linkPos = link.movePos;
 		for (int i = 0; i < propBlockers.size(); i++) {
 			AActor* actor = propBlockers[i];
 			FVector2 propPos(actor->x, actor->y);

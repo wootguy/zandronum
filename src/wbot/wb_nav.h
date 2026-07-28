@@ -31,7 +31,7 @@ struct NavSectorLink {
 	NavSector* parent = NULL;
 	NavSector* target = NULL;
 	NavSector* jumpNeighbor = NULL; // node that must be partially run into to begin the jump
-	FVector2 overlapCenter;
+	FVector2 movePos; // position to move to for crossing the link
 	int linkWidth = 0;
 	bool isTeleport = false;
 	bool isCliff = false; // crossing this segs drops you down to a floor so low that you can't get back

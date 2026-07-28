@@ -37,8 +37,14 @@ fixed_t DistanceToLine(const FVector2& p, const FVector2& a, const FVector2& b);
 
 fixed_t DistanceToLine(const FVector2& p, line_t* line);
 
+// get the distance from the inside to the outside of a box in the given direction (longer at the corners)
+fixed_t BoxRadiusForDir(const FVector2& dir, fixed_t radius);
+
 // true if the box is stuck inside a wall, ceiling, or floor
 bool IsBoxClipped(const FVector3& pos, fixed_t radius, fixed_t height);
+
+// true if the box is stuck inside an impassable wall
+bool IsBoxWallClipped(const FVector2& pos, fixed_t radius);
 
 // get sectors the box is clipping into
 std::vector<sector_t*> GetBoxClipSectors(const FVector3& pos, fixed_t radius, fixed_t height);
@@ -76,6 +82,10 @@ bool TraceSectorEdge(FVector2 start, FVector2 end, FVector2& edge, line_t** line
 bool IsImpassable(line_t* line);
 
 bool IsPropBlocker(AActor* actor);
+
+std::vector<int> debugv2(const FVector2& v);
+
+std::vector<int> debugv3(const FVector2& v);
 
 // Hooks
 void wbot_handle_chat_command(ULONG ulPlayer, const char* msg);

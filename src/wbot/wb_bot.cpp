@@ -101,6 +101,7 @@ void CWootBot::Reset() {
 	m_forwardMove = 0;
 	m_sideMove = 0;
 	m_nextThink = 0;
+	goalFailCounter = 0;
 	rushNav = -1;
 	rushTrigger = BotGoal();
 	UpdatePositionFlags();
@@ -345,6 +346,9 @@ bool CWootBot::MoveTo(FVector2 pos, int radius, int speed) {
 			// For best results, speed should be 0.5 or less, so correction force can recover from any velocity
 			moveDir = avoidLedgeDir;
 			speed = std::min(RUN_SPEED, speed * 2);
+
+			//FVector3 dpos(pos, z);
+			//draw_debug_line(dpos, dpos + FVector3(avoidLedgeDir, 0) * (100 << FRACBITS), pActor);
 		}
 		else {
 			moveDir += avoidLedgeDir * 0.5f;
@@ -707,6 +711,7 @@ void CWootBot::CompleteGoal() {
 	BotGoal& goal = m_goals[m_goals.size() - 1];
 
 	rushNav = -1;
+	goalFailCounter = 0;
 	stateFlags &= ~FL_WBOT_RUSHING;
 
 	int purposeLinkId = goal.purposeLink ? goal.purposeLink->id : -1;
@@ -760,6 +765,9 @@ void CWootBot::FailGoal() {
 
 	if (bubbleFailure) {
 		FailGoal(); // fail until hitting an optional/parent goal
+	} else if (++goalFailCounter > 10) {
+		DebugPrint("I can't reach any goals from here! Time to die.\n");
+		P_DamageMobj(pActor, pActor, pActor, TELEFRAG_DAMAGE, NAME_Suicide);
 	}
 
 	m_nextThink = level.time + 7; // failing lots of goals at once could cause lag
@@ -784,7 +792,14 @@ void CWootBot::HandleLineActivation(line_t* line, AActor* activator) {
 
 	if (line->special && line->special == Door_LockedRaise) {
 		if (!P_CheckKeys(activator, line->args[3], false)) {
-			return; // door wasn't actually opened
+			// door wasn't actually opened
+			if (activator == pActor) {
+				// we tried to activate this. Add the key goals now. They may have been skipped if this
+				// isn't our current goal line, but it blocks access to an unblocked line in the same
+				// goal sector ID (doom2 map27 thin blue door in front of switch)
+				PushKeyGoals(line);
+			}
+			return;
 		}
 	}
 

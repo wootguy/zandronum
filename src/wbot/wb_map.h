@@ -39,7 +39,6 @@ public:
 	int get_linedef_move_flag(line_t* line); // FL_SECTOR_MOVE_*
 	LinkSeg GetSegmentOverlap(seg_t* a, seg_t* b);
 	LinkSeg get_neighbor_subsector(subsector_t* ignoreSector, seg_t* borderSeg);
-	bool is_link_bordered_by_walls(subsector_t& sub, int segIdx, int& leftSubId, int& rightSubId);
 	bool is_seg_potentially_crossable(seg_t* seg);
 	int segment_walkability(seg_t* seg); // returns LinkBlockReason
 	int get_linedef_goal_action(line_t* line);

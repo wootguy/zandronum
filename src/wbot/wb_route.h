@@ -63,6 +63,7 @@ private:
 	// think logic
 	void UpdateRoute();							// setup and advance route nodes
 	void JumpThink();							// execute a jump link
+	void JumpFail();							// failed to prepare for or execute a jump
 	void MoveThruLink();						// move through walkable route links
 	bool HandleBlockedPaths();					// returns true if move should be cancelled
 	bool ElevatorThink(bool linkBlocked);		// returns true if the bot is waiting on an elevator

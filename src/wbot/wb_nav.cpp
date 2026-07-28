@@ -20,11 +20,11 @@ using namespace std;
 SectorNavMesh g_wb_nav;
 
 FVector2 NavSectorLink::pos() {
-	return overlapCenter;
+	return movePos;
 }
 
 FVector3 NavSectorLink::pos3D() {
-	return FVector3(overlapCenter.X, overlapCenter.Y, parent->getFloorZ());
+	return FVector3(movePos.X, movePos.Y, parent->getFloorZ());
 }
 
 int NavSectorLink::blocked(AActor* actor, bool recurse) {
@@ -52,8 +52,11 @@ int NavSectorLink::blocked(AActor* actor, bool recurse) {
 		return LINK_BLOCK_CANT_JUMP;
 	}
 
-	fixed_t bottomZ = parent->getFloorZ() + (JUMP_HEIGHT << FRACBITS);
-	if (IsBoxClipped(FVector3(overlapCenter, bottomZ), PLAYER_RADIUS << FRACBITS, 0)) {
+	const fixed_t pradius = PLAYER_RADIUS << FRACBITS;
+	fixed_t parentFloorZ = parent->getFloorZ();
+	FVector3 jumpOverPos = FVector3(movePos, parentFloorZ + (JUMP_HEIGHT << FRACBITS));
+	FVector3 duckUnderPos = FVector3(movePos, parentFloorZ + (DUCK_HEIGHT << FRACBITS));
+	if (IsBoxClipped(jumpOverPos, pradius, 0) && IsBoxClipped(duckUnderPos, pradius, 0)) {
 		return LINK_BLOCK_CLIPPED;
 	}
 
@@ -62,7 +65,7 @@ int NavSectorLink::blocked(AActor* actor, bool recurse) {
 
 std::vector<sector_t*> NavSectorLink::getClippedSectors(AActor* actor) {
 	fixed_t bottomZ = parent->getFloorZ() + (JUMP_HEIGHT << FRACBITS);
-	return GetBoxClipSectors(FVector3(overlapCenter, bottomZ), PLAYER_RADIUS << FRACBITS, 0);
+	return GetBoxClipSectors(FVector3(movePos, bottomZ), PLAYER_RADIUS << FRACBITS, 0);
 }
 
 bool NavSectorLink::walkable() {
@@ -97,8 +100,8 @@ bool NavSectorLink::isJumpValid() {
 	if (jumpDist > (JUMP_DIST << FRACBITS) - jumpHeight)
 		return false; // too far to make it
 
-	if (jumpNeighbor->getFloorZ() - floorZ > -(JUMP_HEIGHT << FRACBITS))
-		return false; // not currently a cliff edge
+	if (jumpNeighbor->getFloorZ() - floorZ == 0)
+		return false; // not currently an edge that can help with jumping
 
 	return true;
 }
@@ -456,12 +459,12 @@ float SectorNavMesh::path_cost(NavSectorLink& link, float dist, const RouteOpts&
 		if (link.isJump) {
 			// jumps are error-prone. If you must take one, choose the shortest
 			cost += dist * (4 << FRACBITS);
-
-			if (!link.isJumpValid()) {
-				// jumps that can't be made yet are even more error prone
-				cost += 4000 << FRACBITS;
-			}
 		}
+	}
+	
+	if (link.isJump && !link.isJumpValid()) {
+		// jumps that can't be made yet are error prone
+		cost += 4000 << FRACBITS;
 	}
 
 	if (g_wb_mapinfo.segment_walkability(link.seg) == LINK_BLOCK_TOO_HIGH) {

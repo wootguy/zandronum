@@ -17,6 +17,8 @@
 using namespace std;
 using namespace std::chrono;
 
+extern float g_GameSpeed;
+
 char* VarArgs(const char* format, ...)
 {
 	va_list		argptr;
@@ -186,6 +188,33 @@ fixed_t DistanceToLine(const FVector2& p, line_t* line) {
 	return DistanceToLine(p, FVector2(line->v1->x, line->v1->y), FVector2(line->v2->x, line->v2->y));
 }
 
+fixed_t BoxRadiusForDir(const FVector2& dir, fixed_t radius)
+{
+	float tx = (dir.X != 0) ? radius / fabs(dir.X) : FLT_MAX;
+	float ty = (dir.Y != 0) ? radius / fabs(dir.Y) : FLT_MAX;
+	return std::min(tx, ty);
+}
+
+bool IsBoxWallClipped(const FVector2& pos, fixed_t radius) {
+	FBoundingBox box(pos.X, pos.Y, radius);
+	FBlockLinesIterator it(box);
+	line_t* ld;
+
+	while ((ld = it.Next())) {
+		if (box.Right() <= ld->bbox[BOXLEFT]
+			|| box.Left() >= ld->bbox[BOXRIGHT]
+			|| box.Top() <= ld->bbox[BOXBOTTOM]
+			|| box.Bottom() >= ld->bbox[BOXTOP]) {
+			continue;
+		}
+
+		if (box.BoxOnLineSide(ld) == -1 && IsImpassable(ld))
+			return true;  // crosses an impassable line
+	}
+
+	return false;
+}
+
 bool IsBoxClipped(const FVector3& pos, fixed_t radius, fixed_t height) {
 	FBoundingBox box(pos.X, pos.Y, radius);
 	FBlockLinesIterator it(box);
@@ -197,7 +226,6 @@ bool IsBoxClipped(const FVector3& pos, fixed_t radius, fixed_t height) {
 	fixed_t topZ = z + height;
 
 	while ((ld = it.Next())) {
-
 		if (box.Right() <= ld->bbox[BOXLEFT]
 			|| box.Left() >= ld->bbox[BOXRIGHT]
 			|| box.Top() <= ld->bbox[BOXBOTTOM]
@@ -437,9 +465,28 @@ bool TraceImpassable(FVector2 start, FVector2 end) {
 	FPathTraverse path(start.X, start.Y, end.X, end.Y, PT_ADDLINES);
 	intercept_t* in;
 
+	FVector2 delta = end - start;
+	fixed_t maxDist = delta.Length();
+	delta = delta.Unit() * FRACUNIT;
+
+	fixed_t StartX = start.X;
+	fixed_t StartY = start.Y;
+	fixed_t Vx = delta.X;
+	fixed_t Vy = delta.Y;
+
 	while ((in = path.Next())) {
-		if (IsImpassable(in->d.line))
+		line_t* line = in->d.line;
+
+		if (IsImpassable(in->d.line)) {
+			fixed_t dist = FixedMul(maxDist, in->frac);
+			FVector2 pos = FVector2(StartX + FixedMul(Vx, dist), StartY + FixedMul(Vy, dist));
+			sector_t* hitSector = R_PointInSubsector(pos.X, pos.Y)->sector;
+
+			if (hitSector != line->frontsector && hitSector != line->backsector)
+				continue; // bug in trace where lines in other sectors nowhere near the impact point are hit
+
 			return true;
+		}
 	}
 
 	return false;
@@ -486,6 +533,18 @@ bool IsPropBlocker(AActor* actor) {
 		return false;
 
 	return true;
+}
+
+std::vector<int> debugv2(const FVector2& v) {
+	return {
+		((int)v.X) >> FRACBITS, ((int)v.Y) >> FRACBITS
+	};
+}
+
+std::vector<int> debugv3(const FVector3& v) {
+	return {
+		((int)v.X) >> FRACBITS, ((int)v.Y) >> FRACBITS, ((int)v.Z) >> FRACBITS
+	};
 }
 
 void wbot_handle_line_activation(line_t* line, AActor* activator) {
@@ -576,18 +635,23 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 			if (!playeringame[i] || !player)
 				continue;
 
-			if (player->player->bIsBot)	set_ori(player, 609, 1688, ANGLE_1 * 0);
-			else						set_ori(player, 1181, 1918, ANGLE_1 * 40);
+			if (player->player->bIsBot)	set_ori(player, 1240, 220, ANGLE_1 * 0);
+			else						set_ori(player, 978, -92, ANGLE_1 * 40);
 
 			if (player->player->bIsBot) {
 				CWootBot* bot = (CWootBot*)player->player->pSkullBot;
 				bot->Reset();
 				bot->m_followPlayer = true;
 				player->player->cheats &= ~CF_FROZEN;
-				bot->m_routeController.m_freezeOnGoalFail = true;
+				//bot->m_routeController.m_freezeOnGoalFail = true;
 				//bot->m_speedMult = 0.6f;
 			}
 		}
+	}
+
+	// change game speed
+	if (strstr(msg, "s") == msg) {
+		g_GameSpeed = clamp((float)atof(msg + 2), 1.0f, 16.0f);
 	}
 
 	// win the level
@@ -715,7 +779,7 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 	}
 
 	// go to a subsector
-	if (strstr(msg, "goto ") == msg) {
+	if (strstr(msg, "gotos ") == msg) {
 		int id = atoi(msg + 5);
 		if (id >= 0 && id < numsubsectors) {
 			NavSector& nav = g_wb_nav.mesh[id];
@@ -739,6 +803,19 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 					break;
 				}
 			}
+		}
+	}
+
+	// goto coordinates
+	if (strstr(msg, "goto ") == msg) {
+		std::string args = msg + 5;
+		int splitter = args.find(" ");
+		if (splitter != -1) {
+			int x = atoi(args.substr(0, splitter).c_str());
+			int y = atoi(args.substr(splitter+1).c_str());
+
+			FVector3 pos(x << FRACBITS, y << FRACBITS, 0);
+			P_Teleport(players[ulPlayer].mo, pos.X, pos.Y, pos.Z, 0, true, true, true);
 		}
 	}
 

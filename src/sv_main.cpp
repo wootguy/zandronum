@@ -198,6 +198,8 @@ static	LONG			g_lCurrentClient;
 // Number of ticks that have passed since start of... level?
 static	unsigned int	g_GameTime = 0;
 
+float g_GameSpeed = 1.0f; // game speed multiplier
+
 // [AK] How many ticks to shift to ensure that the tick rate remains at 35 ticks per
 // second if overflows occur when getting "new" and "previous" ticks in SERVER_Tick.
 static	double			g_GameTicShift = 0.0;
@@ -651,6 +653,16 @@ unsigned int server_GetDeltaTicks( unsigned int &nowTime, const unsigned int pre
 	unsigned int newTics = 0;
 
 	nowTime = I_MSTime( );
+
+	if (g_GameSpeed != 1.0f)
+		nowTime *= g_GameSpeed;
+
+	static float oldGameSpeed = 1.0f;
+	if (g_GameSpeed != oldGameSpeed) {
+		oldGameSpeed = g_GameSpeed;
+		g_GameTime = nowTime;
+		return 1; // prevent speed changes triggering thousands of tics in the first delta
+	}
 
 	// [AK] Check if an integer overflow occurred in the timer (i.e. the "now"
 	// time suddenly became smaller than the "previous" time). This happens once

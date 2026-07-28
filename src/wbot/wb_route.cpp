@@ -30,7 +30,7 @@ void CBotRouteController::Think() {
 		// may go thru different sectors while preparing a jump, so don't get confused
 		JumpThink();
 		if (pBot->StuckThink(500)) {
-			HandleStuckPath();
+			JumpFail();
 		}
 		return;
 	}
@@ -216,34 +216,40 @@ void CBotRouteController::JumpThink() {
 	}
 	case WBOT_JUMP_RUN: {
 		// run to the jumping off point
-		bool inStartSector = g_wb_nav.get_nav_id(pActor) == m_navLink->parent->id;
-		if (pBot->MoveTo(jumpStartPos, 32, m_routeSpeed) || inStartSector) {
-			jumpState = WBOT_JUMP_FLY;
+		if (pBot->MoveTo(jumpStartPos, 16, m_routeSpeed)) {
+			// now aim for the landing position
+			pBot->MoveTo(jumpEndPos, 0, m_routeSpeed);
+
+			if (pBot->stateFlags & FL_WBOT_FLYING) {
+				// bot is off a ledge now, start the jump
+				bool bigJump = m_navLink->jumpDist > 100 << FRACBITS;
+				if (m_navTarget->getFloorZ() > m_navIdeal->getFloorZ() + (STEP_HEIGHT << FRACBITS))
+					bigJump = true;
+
+				if (bigJump)
+					pBot->m_lButtons |= BT_JUMP;
+
+				jumpState = WBOT_JUMP_FLY;
+			}
 		}
 		break;
 	}
 	case WBOT_JUMP_FLY: {
-		FVector2 target = m_navTarget->pos();
-		fixed_t jumpDist = (target - FVector2(pActor->x, pActor->y)).Length();
-		bool bigJump = jumpDist > 100 << FRACBITS;
-		if (m_navTarget->getFloorZ() > m_navIdeal->getFloorZ() + (STEP_HEIGHT << FRACBITS))
-			bigJump = true;
+		NavSector& curNav = g_wb_nav.mesh[g_wb_nav.get_nav_id(pActor)];
+		NavSectorLink* linkToTarg = curNav.getLink(m_navTarget->id);
+		bool flyingOverWalkableNeighbor = linkToTarg && !linkToTarg->isJump && !linkToTarg->blocked(pActor);
 
-		if (bigJump && (pBot->stateFlags & FL_WBOT_FLYING)) {
-			// bot is off a ledge now, start the jump
-			pBot->m_lButtons |= BT_JUMP;
-		}
-
-		if (g_wb_nav.get_nav_id(pActor) == m_navTarget->id) {
+		if (curNav.id == m_navTarget->id || flyingOverWalkableNeighbor) {
 			pBot->StopMoving(); // flying over the target sector, try not to fall off now
 
 			if (pPlayer->onground) {
 				jumpState = WBOT_JUMP_NONE;
+				pBot->MoveTo(jumpEndPos, 0, m_routeSpeed);
 				return; // completed the jump
 			}
 		} 
 		else if (pPlayer->onground) {
-			// haven't jumped yet, keep moving towards the cliff
+			// not a gap that required a jump, just keep moving towards the target
 			pBot->MoveTo(jumpEndPos, 0, m_routeSpeed);
 		}
 		else {
@@ -266,31 +272,7 @@ void CBotRouteController::JumpThink() {
 		}
 
 		if (m_navTarget->getFloorZ() > pActor->z + (JUMP_HEIGHT << FRACBITS)) {
-			jumpState = WBOT_JUMP_NONE; // missed the jump
-
-			NavSector* backupBlocker = m_navLink->GetJumpBackupBlocker(m_navTarget->pos());
-
-			if (backupBlocker) {
-				// The running-start position was blocked by something that can be moved.
-				// Try moving it before considering this jump to be impossible
-				if (pBot->SelectGoal(backupBlocker->getTriggers(), m_navLink)) {
-					return;
-				}
-				else {
-					// already tried this goal
-					backupBlocker = NULL;
-				}
-			}
-
-			if (!backupBlocker) {
-				BotGoal* curgoal = pBot->CurrentGoal();
-				if (curgoal) {
-					// don't try the jump again, there are probably other ones to try
-					// and many jumps just don't work
-					curgoal->blockers.insert(m_navLink->id);
-				}
-			}
-
+			JumpFail();
 			return;
 		}
 		break;
@@ -299,6 +281,33 @@ void CBotRouteController::JumpThink() {
 		DebugPrint("Invalid jump state\n");
 		jumpState = 0;
 		break;
+	}
+}
+
+void CBotRouteController::JumpFail() {
+	jumpState = WBOT_JUMP_NONE; // missed the jump
+
+	NavSector* backupBlocker = m_navLink->GetJumpBackupBlocker(m_navTarget->pos());
+
+	if (backupBlocker) {
+		// The running-start position was blocked by something that can be moved.
+		// Try moving it before considering this jump to be impossible
+		if (pBot->SelectGoal(backupBlocker->getTriggers(), m_navLink)) {
+			return;
+		}
+		else {
+			// already tried this goal
+			backupBlocker = NULL;
+		}
+	}
+
+	if (!backupBlocker) {
+		BotGoal* curgoal = pBot->CurrentGoal();
+		if (curgoal) {
+			// don't try the jump again, there are probably other ones to try
+			// and many jumps just don't work
+			curgoal->blockers.insert(m_navLink->id);
+		}
 	}
 }
 
@@ -393,9 +402,15 @@ void CBotRouteController::MoveThruLink() {
 		pBot->m_lButtons |= BT_CROUCH;
 	}
 
-	if (m_navLink->isJump && m_navLink->jumpDist > (PLAYER_WIDTH << FRACBITS)) {
+	if (m_navLink->isJump) {
 		// get a running start for the jump
-		jumpState = WBOT_JUMP_PREP;
+		if (m_navLink->jumpDist > (PLAYER_WIDTH << FRACBITS)) {
+			jumpState = WBOT_JUMP_PREP;
+		}
+		else {
+			jumpState = WBOT_JUMP_RUN; // skip the prep and head straight for the jump point
+		}
+		
 		FVector2 targetPos = m_navLink->target->pos();
 		jumpBackupPos = m_navLink->GetJumpBackupPos(targetPos, pActor);
 		jumpStartPos = m_navLink->GetJumpStartPos(targetPos);
@@ -447,14 +462,17 @@ void CBotRouteController::RouteSlipThink() {
 }
 
 void CBotRouteController::BlockedPathThink(NavSectorLink* link, int blockReason) {
-	link->blocked(pActor); // debug here
-	DebugPrint(VarArgs("Link %d blocked!\n", link->id));
-
 	// wait for doors to open
-	bool isBlockerMoving = m_navLink->target->isMoving();
+	bool isBlockerMoving = link->target->isMoving();
 	if (!isBlockerMoving && blockReason == LINK_BLOCK_CLIPPED) {
-		for (sector_t* sec : m_navLink->getClippedSectors(pActor)) {
-			if (sec->floordata || sec->ceilingdata) {
+		fixed_t linkZ = link->parent->getFloorZ() + (JUMP_HEIGHT << FRACBITS);
+		for (sector_t* sec : link->getClippedSectors(pActor)) {
+			fixed_t blockerZ = sec->floorplane.Zat0();
+			if (sec->floordata && linkZ < blockerZ) {
+				isBlockerMoving = true;
+				break;
+			}
+			if (sec->ceilingdata && linkZ > blockerZ) {
 				isBlockerMoving = true;
 				break;
 			}
@@ -463,7 +481,7 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link, int blockReason)
 
 	if (isBlockerMoving) {
 		// door is raising or elevator is lowering in the next sector
-		if (m_navLink->isJump && !m_navLink->target->isFloorMoving() && !m_navLink->isJumpValid()) {
+		if (link->isJump && !link->target->isFloorMoving() && !link->isJumpValid()) {
 			// a door opening isn't going to make the jump doable if the floor is too high
 		}
 		else {
@@ -472,6 +490,9 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link, int blockReason)
 			return; // wait until the door/elevator is done moving
 		}
 	}
+
+	DebugPrint(VarArgs("Link %d blocked!\n", link->id));
+	link->blocked(pActor); // debug here
 
 	BotGoal* curGoal = pBot->CurrentGoal();
 	if (!curGoal)
@@ -512,6 +533,14 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link, int blockReason)
 			if (info.moveFlags && pBot->SelectGoal(info.triggers, link)) {
 				return;
 			}
+		}
+		break;
+	case LINK_BLOCK_CANT_JUMP:
+		if (!(targetMovement & (FL_SECTOR_MOVE_FLOOR_DOWN | FL_SECTOR_MOVE_CEIL_UP))) {
+			tryTargetTrigger = false;
+		}
+		if (!(targetMovement & FL_SECTOR_MOVE_FLOOR_UP)) {
+			tryParentTrigger = false;
 		}
 		break;
 	default:

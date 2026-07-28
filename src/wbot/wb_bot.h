@@ -25,7 +25,8 @@ public:
 	int m_lastUse;				// last tic the player used (for preventing sound spam)
 	int m_nextThink;			// for cooling down failures
 	angle_t m_fov = 0;			// field of view
-	int stuckCounter = 0;				// increases while trying to move with nothing happening
+	int stuckCounter = 0;		// increases while trying to move with nothing happening
+	int goalFailCounter = 0;	// for suiciding in areas that can't reach any goals
 	int m_cliffDist = 9999;
 	FVector2 lastPos = FVector2(0, 0);	// used to detect being stuck
 	bool m_wasDead = false;

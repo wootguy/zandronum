@@ -196,7 +196,7 @@ int BotMapInfo::segment_walkability(seg_t* seg)
 	fixed_t borderHeight = std::min(backCeil - frontFloor, frontCeil - backFloor);
 
 	if (backHeight < fduckHeight || borderHeight < fduckHeight) {
-		return LINK_BLOCK_TOO_LOW; // not enough space in target sector
+		return LINK_BLOCK_TOO_LOW; // not enough space in target sector or border
 	}
 
 	return LINK_BLOCK_CLEAR;
@@ -514,7 +514,9 @@ void BotMapInfo::find_linedef_sectors() {
 		FVector2 center = getLineCenter(&line);
 		FVector2 normal = getLineBackDir(&line) * -1;
 
-		int useDist = (16 << FRACBITS); // route to a nearby sector if the adjacent one is too small
+
+		// route to a nearby sector if the adjacent one is too small to fit a player inside
+		fixed_t useDist = BoxRadiusForDir(normal, PLAYER_RADIUS << FRACBITS) + FRACUNIT;
 
 		if (lineAction == WBOT_GOAL_ACTION_CROSS || lineAction == WBOT_GOAL_ACTION_TOUCH) {
 			// need to be very close to the line
@@ -580,23 +582,6 @@ void BotMapInfo::add_sector_info() {
 	}
 
 	add_stair_sector_info();
-}
-
-bool BotMapInfo::is_link_bordered_by_walls(subsector_t& sub, int segIdx, int& leftSubId, int& rightSubId) {
-	int leftIdx = (segIdx + sub.numlines - 1) % sub.numlines;
-	int rightIdx = (segIdx + 1) % sub.numlines;
-	LinkSeg leftSector = get_neighbor_subsector(&sub, &sub.firstline[leftIdx]);
-	LinkSeg rightSector = get_neighbor_subsector(&sub, &sub.firstline[rightIdx]);
-	int leftSub = leftSector.otherSub;
-	int rightSub = rightSector.otherSub;
-
-	bool leftSubIsWall = leftSub == -1 || !is_seg_potentially_crossable(&sub.firstline[leftIdx]);
-	bool rightSubIsWall = rightSub == -1 || !is_seg_potentially_crossable(&sub.firstline[rightIdx]);
-
-	leftSubId = leftSub;
-	rightSubId = rightSub;
-
-	return leftSubIsWall && rightSubIsWall;
 }
 
 void BotMapInfo::remove_invalid_goals(int secid) {
