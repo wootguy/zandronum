@@ -2662,6 +2662,16 @@ static void CheckCmdLine()
 		autostart = true;
 	}
 
+	p = Args->CheckParm("-wbtest");
+	if (p && p < Args->NumArgs() - 1)
+	{
+		const char* testMap = Args->CheckValue("-wbtest");
+		if (testMap) {
+			startmap = testMap;
+			autostart = true;
+		}
+	}
+
 	// [RH] Hack to handle +map. The standard console command line handler
 	// won't be able to handle it, so we take it out of the command line and set
 	// it up like -warp.

@@ -20,10 +20,30 @@ using namespace std::chrono;
 extern float g_GameSpeed;
 int g_kill_all_shootables_again_tick = 0;
 bool g_wbot_test_mode = false;
-uint64_t g_wbot_level_start_time = 0;
-uint64_t g_wbot_tests_start_time = 0;
-uint32_t g_wbot_test_tics_total;
-string g_test_start_map;
+
+struct TestResult {
+	string mapname;
+	uint32_t tics;
+	uint32_t solve_millis; // time taken to solve the map
+	uint32_t gen_nav_millis; // time taken to generate a nav mesh for the map
+	bool success;
+};
+
+struct TestState {
+	bool currentFailed = false;
+	bool debugFailed = false;
+	uint64_t levelStartTime = 0;
+	uint32_t levelGenMillis = 0;
+	uint64_t startTime = 0;
+	uint32_t totalTics = 0;
+	string startMap;
+	vector<TestResult> results;
+};
+
+TestState g_wb_test_state;
+
+// max tics a level can last before its considered stuck
+#define MAX_TEST_TICS 21000 // 10 minutes
 
 char* VarArgs(const char* format, ...)
 {
@@ -599,18 +619,8 @@ void kill_all_shootables() {
 	g_kill_all_shootables_again_tick = level.time + 35;
 }
 
-void wbot_map_init() {
-	srand((unsigned int)time(NULL));
-	g_wb_nav.init();
-
-	bool testFinished = false;
-	if (g_wbot_test_mode && g_test_start_map == string(level.mapname)) {
-		g_wbot_test_mode = false;
-		g_GameSpeed = 1.0f;
-		testFinished = true;
-		uint32_t totalTime = getEpochMillis() - g_wbot_tests_start_time;
-		Printf("Tests finished in %d tics (%d ms)\n", g_wbot_test_tics_total, totalTime);
-	}
+void wbot_run_tests() {
+	kill_all_shootables();
 
 	for (int i = 0; i < MAXPLAYERS; i++) {
 		AActor* player = players[i].mo;
@@ -619,25 +629,121 @@ void wbot_map_init() {
 
 		CWootBot* bot = (CWootBot*)player->player->pSkullBot;
 		bot->Reset();
-		
-		if (testFinished) {
+		bot->m_autoWinMap = true;
+		bot->m_debug = false;
+	}
+
+	g_wb_test_state = TestState();
+	g_wbot_test_mode = true;
+	g_GameSpeed = 1000.0f;
+	g_wb_test_state.startMap = level.mapname;
+	g_wb_test_state.startTime = getEpochMillis();
+}
+
+void wbot_init() {
+	static bool wbot_init_done = false;
+	if (!wbot_init_done) {
+		srand((unsigned int)time(NULL));
+
+		int anum = Args->CheckParm("-wbtest");
+		if (anum) {
+			const char* testMap = Args->CheckValue("-wbtest");
+			new CWootBot(NULL, NULL, BOTS_FindFreePlayerSlot());
+
+			if (!testMap) {
+				wbot_run_tests(); // run all tests
+				g_wb_test_state.debugFailed = Args->CheckParm("-wbd");
+			}
+		}
+
+		wbot_init_done = true;
+	}
+}
+
+bool wbot_next_test() {
+	if (g_wbot_test_mode && g_wb_test_state.startMap == string(level.mapname)) {
+		g_wbot_test_mode = false;
+		g_GameSpeed = 1.0f;
+		uint32_t totalTime = getEpochMillis() - g_wb_test_state.startTime;
+
+		uint32_t total_gen_time = 0;
+		uint32_t total_solve_time = 0;
+		int numPass = 0;
+		Printf("\n---------------------\nTESTS FINISHED\n---------------------\n");
+		for (TestResult& result : g_wb_test_state.results) {
+			Printf("  %-8s = %4dms gen,   %4dms solve,   %3.1f ktics  %s\n", result.mapname.c_str(),
+				result.gen_nav_millis, result.solve_millis, result.tics / 1000.0f,
+				result.success ? "PASS" : "FAIL <--");
+			numPass += result.success;
+			total_gen_time += result.gen_nav_millis;
+			total_solve_time += result.solve_millis;
+		}
+
+		Printf("\n%d / %d tests passed\n\n", numPass, g_wb_test_state.results.size());
+
+		Printf("Total time:  %d ms\n", totalTime);
+		Printf("navmesh:     %d ms\n", total_gen_time);
+		Printf("solver:      %d ms\n", total_solve_time);
+		Printf("tics:        %d ktics\n", g_wb_test_state.totalTics / 1000);
+		Printf("---------------------\n");
+
+		// stop bots from completing the levels
+		for (int i = 0; i < MAXPLAYERS; i++) {
+			AActor* player = players[i].mo;
+			if (!playeringame[i] || !player || !player->player->bIsBot)
+				continue;
+
+			CWootBot* bot = (CWootBot*)player->player->pSkullBot;
+			bot->Reset();
 			bot->m_autoWinMap = false;
 		}
+
+		return true;
+	}
+
+	return false;
+}
+
+void wbot_map_init() {
+	wbot_next_test();
+	wbot_init();
+
+	uint64_t nav_gen_start = getEpochMillis();
+	g_wb_nav.init();
+	g_wb_test_state.levelGenMillis = getEpochMillis() - nav_gen_start;
+
+	for (int i = 0; i < MAXPLAYERS; i++) {
+		AActor* player = players[i].mo;
+		if (!playeringame[i] || !player || !player->player->bIsBot)
+			continue;
+
+		CWootBot* bot = (CWootBot*)player->player->pSkullBot;
+		bot->Reset();
 	}
 
 	if (g_wbot_test_mode) {
 		kill_all_shootables();
 	}
 
-	g_wbot_level_start_time = getEpochMillis();
+	g_wb_test_state.levelStartTime = getEpochMillis();
 }
 
 void wbot_map_exit() {
 	if (g_wbot_test_mode) {
 		int testTime = level.time;
-		uint32_t millis = getEpochMillis() - g_wbot_level_start_time;
-		g_wbot_test_tics_total += level.time;
+		uint32_t millis = getEpochMillis() - g_wb_test_state.levelStartTime;
+		g_wb_test_state.totalTics += level.time;
 		Printf("Finished level in %d tics (%d ms)\n", testTime, millis);
+
+		TestResult result;
+		result.mapname = level.mapname;
+		result.success = !g_wb_test_state.currentFailed;
+		result.tics = level.time;
+		result.solve_millis = millis;
+		result.gen_nav_millis = g_wb_test_state.levelGenMillis;
+		g_wb_test_state.results.push_back(result);
+
+		g_wb_test_state.currentFailed = false;
 	}
 }
 
@@ -662,24 +768,30 @@ void wbot_add_bot() {
 	new CWootBot(NULL, NULL, ulPlayerIdx);
 }
 
-void wbot_run_tests() {
-	kill_all_shootables();
+void wbot_abort_test() {
+	Printf("---------------------\nTEST FAILED\n---------------------\n");
 
-	for (int i = 0; i < MAXPLAYERS; i++) {
-		AActor* player = players[i].mo;
-		if (!playeringame[i] || !player || !player->player->bIsBot)
-			continue;
+	g_wb_test_state.currentFailed = true;
 
-		CWootBot* bot = (CWootBot*)player->player->pSkullBot;
-		bot->Reset();
-		bot->m_autoWinMap = true;
-		bot->m_debug = false;
+	if (g_wb_test_state.debugFailed) {
+		g_GameSpeed = 1.0f;
+		g_wbot_test_mode = false;
+
+		for (int i = 0; i < MAXPLAYERS; i++) {
+			AActor* player = players[i].mo;
+			if (!playeringame[i] || !player || !player->player->bIsBot)
+				continue;
+
+			CWootBot* bot = (CWootBot*)player->player->pSkullBot;
+			bot->m_debug = true;
+		}
+
+		Printf("\nFailed after %d tics\n", level.time);
+		Printf("\nJoin the server to see what the bot is stuck on.\n");
 	}
-
-	g_wbot_test_mode = true;
-	g_GameSpeed = 1000.0f;
-	g_test_start_map = level.mapname;
-	g_wbot_tests_start_time = getEpochMillis();
+	else {
+		G_ExitLevel(0, false);
+	}
 }
 
 void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
@@ -911,18 +1023,15 @@ void wbot_handle_chat_command(ULONG ulPlayer, const char* msg) {
 }
 
 void wbot_tick() {
-	static bool testModo = true;
-	if (testModo) {
-		testModo = false;
-		new CWootBot(NULL, NULL, BOTS_FindFreePlayerSlot());
-		wbot_run_tests();
-	}
-
 	g_wb_nav.relink_pending_sector();
 
 	if (g_kill_all_shootables_again_tick && level.time > g_kill_all_shootables_again_tick) {
 		kill_all_shootables();
 		g_kill_all_shootables_again_tick = 0;
+	}
+
+	if (g_wbot_test_mode && level.time >= MAX_TEST_TICS) {
+		wbot_abort_test();
 	}
 }
 
