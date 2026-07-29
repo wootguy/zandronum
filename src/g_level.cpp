@@ -891,7 +891,13 @@ void G_SecretExitLevel (int position)
 		return;
 	}
 
-	G_ChangeLevel(G_GetSecretExitMap(), position, 0);
+	int flags = 0;
+	if (g_wbot_test_mode) {
+		flags |= CHANGELEVEL_NOINTERMISSION;
+	}
+	wbot_map_exit();
+
+	G_ChangeLevel(G_GetSecretExitMap(), position, flags);
 }
 
 //==========================================================================

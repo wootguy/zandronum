@@ -300,7 +300,7 @@ void SectorNavMeshGenerator::add_walkable_links(BotMeshData& mesh, int nodeid, s
 		seg_t& seg = sub.firstline[k];
 
 		if (!g_wb_mapinfo.is_seg_potentially_crossable(&seg)) {
-			//if (i == 304) { // debug possible link not created
+			//if (nodeid == 67) { // debug possible link not created
 			//	g_wb_mapinfo.is_seg_potentially_crossable(&seg);
 			//}
 			continue;

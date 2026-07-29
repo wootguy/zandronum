@@ -568,6 +568,13 @@ void BotMapInfo::add_sector_info() {
 					info.triggers.push_back(BotGoal(get_linedef_goal_action(&line), k));
 				}
 			}
+
+			if (sec.tag == 666) {
+				// hardcoded doom1/2 logic
+				// just assume the sector can be moved in some way that is helpful
+				info.moveFlags |= FL_SECTOR_MOVE_FLOOR_DOWN | FL_SECTOR_MOVE_FLOOR_UP |
+					FL_SECTOR_MOVE_CEIL_UP;
+			}
 		}
 
 		// lines that have this sector as a backsector also trigger it, if no tag

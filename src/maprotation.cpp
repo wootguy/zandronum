@@ -102,6 +102,12 @@ void MAPROTATION_StartNewGame( void )
 	char levelname[10];
 	sprintf( levelname, "%s", MAPROTATION_GetMap( position )->mapname );
 
+	if (Args->CheckValue("-wbtest")) {
+		// don't override the test start map
+		strncpy(levelname, startmap, 10);
+		levelname[9] = 0;
+	}
+
 	MAPROTATION_SetPositionToMap( levelname, true );
 	G_InitNew( levelname, false );
 }
