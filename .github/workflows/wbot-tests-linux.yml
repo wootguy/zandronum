@@ -1,0 +1,54 @@
+name: Linux Tests
+
+on: [push, pull_request]
+
+env:
+  FMOD_VER: 44464
+  FMOD_SOVER: 4.44.64
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        os: [ubuntu-24.04]
+        build_type: [Release]
+        # This is just so the job and artefact names look nicer...
+        serveronly: ["SERVERONLY"]
+        include:
+          - os: ubuntu-24.04
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install dependencies for Linux
+      shell: bash
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt update
+        sudo apt install g++ make cmake libsdl1.2-dev mercurial zlib1g-dev libbz2-dev libjpeg-dev libfluidsynth-dev libgtk2.0-dev timidity nasm libgl1-mesa-dev libssl-dev tar libglew-dev wget libopus-dev
+        
+        if [[ "${{ matrix.serveronly }}" == "" ]]; then
+          wget https://github.com/DrinkyBird/zan-ci-deps/releases/download/ci-dependencies/fmodapi${FMOD_VER}linux.tar.gz
+          tar xf fmodapi${FMOD_VER}linux.tar.gz
+          echo "FMOD_INCLUDE_DIR=${PWD}/fmodapi${FMOD_VER}linux/api/inc" >> $GITHUB_ENV
+          echo "FMOD_LIBRARY=${PWD}/fmodapi${FMOD_VER}linux/api/lib/libfmodex64-${FMOD_SOVER}.so" >> $GITHUB_ENV
+        fi
+
+    - name: Download test files
+      run: |
+          cd tests
+          wget -q https://github.com/redox-os/freedoom/raw/refs/heads/master/freedoom2.wad
+          wget -q https://w00tguy.ddns.net/files/doom/doom2_maps_v0.7z
+          wget -q https://w00tguy.ddns.net/files/doom/zan_build_linux.zip
+          7z x doom2_maps_v0.7z
+          7z x zan_build_linux.zip
+
+    - name: Beat Doom II
+      run: |
+          cd tests
+          ./zandronum-server -config test_doom2.ini -wbtest
+          
