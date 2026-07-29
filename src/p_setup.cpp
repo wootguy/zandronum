@@ -3940,6 +3940,9 @@ void P_SetupLevel (char *lumpname, int position)
 
 	bool RequireGLNodes = Renderer->RequireGLNodes() || am_textured;
 
+	// Forced true here so subsectors are consistent across builds for wbot
+	RequireGLNodes = true;
+
 	for (i = 0; i < (int)countof(times); ++i)
 	{
 		times[i].Reset();
