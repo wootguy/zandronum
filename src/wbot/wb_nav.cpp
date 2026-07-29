@@ -4,19 +4,17 @@
 #include "wb_nav_gen.h"
 #include "wb_util.h"
 #include "wb_hooks.h"
-#include "r_state.h"
-#include "sv_commands.h"
-#include "p_local.h"
 #include "p_lnspec.h"
-#include "p_trace.h"
 #include "a_keys.h"
 
 #include <algorithm>
 #include <unordered_set>
 #include <unordered_map>
+#include <queue>
 #include <vector>
 
 using namespace std;
+using namespace wbot;
 
 SectorNavMesh g_wb_nav;
 int g_route_ignore_num;
@@ -32,12 +30,12 @@ FVector3 NavSectorLink::pos3D() {
 int NavSectorLink::blocked(AActor* actor, bool recurse) {
 	g_wb_nav.pathTests++;
 
-	int walkability = g_wb_mapinfo.segment_walkability(seg);
+	int walkability = g_map.sector_border_walkability(parent->sector, sector);
 	if (walkability != LINK_BLOCK_CLEAR) {
-		line_t* line = seg->linedef;
+		MapLine* line = linedef;
 
-		if (line && line->args[0] == 0 && g_wb_mapinfo.get_linedef_move_flag(line)) {
-			if (actor && line->special == Door_LockedRaise && !P_CheckKeys(actor, line->args[3], false)) {
+		if (line && line->getArg(0) == 0 && g_map.get_linedef_move_flag(line)) {
+			if (actor && line->special() == Door_LockedRaise && !g_map.CheckKeys(actor, line)) {
 				return walkability; // don't have the keys required to use this
 			}
 
@@ -65,13 +63,13 @@ int NavSectorLink::blocked(AActor* actor, bool recurse) {
 	return LINK_BLOCK_CLEAR;
 }
 
-std::vector<sector_t*> NavSectorLink::getClippedSectors(AActor* actor) {
+std::vector<MapSector*> NavSectorLink::getClippedSectors(AActor* actor) {
 	fixed_t bottomZ = parent->getFloorZ() + (JUMP_HEIGHT << FRACBITS);
 	return GetBoxClipSectors(FVector3(movePos, bottomZ), PLAYER_RADIUS << FRACBITS, 0);
 }
 
 bool NavSectorLink::walkable() {
-	return g_wb_mapinfo.segment_walkability(seg) == LINK_BLOCK_CLEAR && jumpable();
+	return g_map.sector_border_walkability(parent->sector, sector) == LINK_BLOCK_CLEAR && jumpable();
 }
 
 bool NavSectorLink::jumpable() {
@@ -85,8 +83,7 @@ bool NavSectorLink::jumpable() {
 	FVector3 start = pos3D() + FVector3(0, 0, 56 << FRACBITS);
 	FVector3 end = target->pos3D() + FVector3(0, 0, 56 << FRACBITS);
 
-	FTraceResults tr;
-	if (TraceLine(start, end, true, NULL, &tr)) {
+	if (TraceLine(start, end, true, NULL, NULL)) {
 		return false;
 	}
 
@@ -108,16 +105,13 @@ bool NavSectorLink::isJumpValid() {
 	return true;
 }
 
-FVector2 NavSectorLink::GetJumpStartPos(FVector2 targetPos) {
-	FVector2 a(seg->v1->x, seg->v1->y);
-	FVector2 b(seg->v2->x, seg->v2->y);
-	
+FVector2 NavSectorLink::GetJumpStartPos(FVector2 targetPos) {	
 	// bring points inward a bit to avoid getting too close to a cliff or wall
-	fixed_t dist = (b - a).Length();
-	FVector2 dir = (b - a).Unit();
+	fixed_t dist = (seg.b - seg.a).Length();
+	FVector2 dir = (seg.b - seg.a).Unit();
 	fixed_t nudgeDist = std::min(dist / 2, 32 << FRACBITS);
-	a += dir * nudgeDist;
-	b -= dir * nudgeDist;
+	FVector2 a = seg.a + dir * nudgeDist;
+	FVector2 b = seg.b - dir * nudgeDist;
 
 	return ClosestPointOnSegment(targetPos, a, b);
 }
@@ -128,15 +122,14 @@ FVector2 NavSectorLink::GetJumpEndPos(FVector2 targetPos) {
 	// move the landing point from the center to the nearest ledge
 	FVector2 ledgeDir = (jumpPos - targetPos).Unit();
 
-	line_t* line;
+	MapLine* line;
 	FVector2 edgePos;
 	if (TraceSectorEdge(targetPos, targetPos + ledgeDir * (1000 << FRACBITS), edgePos, &line)) {
 		// move edge away from the line endings to avoid collision with a wall
-		FVector2 a = FVector2(line->v1->x, line->v1->y);
-		FVector2 b = FVector2(line->v2->x, line->v2->y);
-		fixed_t dist = (b - a).Length();
+		FVector2 a = line->start();
+		FVector2 b = line->end();
 		FVector2 dir = (b - a).Unit();
-		fixed_t nudgeDist = std::min(dist / 2, 32 << FRACBITS);
+		fixed_t nudgeDist = std::min(line->length() / 2, 32 << FRACBITS);
 		a += dir * nudgeDist;
 		b -= dir * nudgeDist;
 
@@ -161,11 +154,11 @@ NavSector* NavSectorLink::GetJumpBackupBlocker(FVector2 targetPos) {
 	int isects = 0;
 
 	FVector2 edge;
-	line_t* line;
+	MapLine* line;
 	if (TraceSectorEdge(backupStartPos, backupPos, edge, &line)) {
-		subsector_t& sub = subsectors[parent->id];
+		MapSubsector& sub = g_map.subsectors[parent->id];
 		for (NavSectorLink* link : parent->links) {
-			if (link->seg->linedef == line) {
+			if (link->linedef == line) {
 				bool canMoveAway = link->target->getMoveFlags() & (FL_SECTOR_MOVE_FLOOR_DOWN | FL_SECTOR_MOVE_CEIL_UP);
 				return canMoveAway ? link->target : NULL;
 			}
@@ -202,7 +195,7 @@ FVector2 NavSectorLink::GetJumpBackupPos(FVector2 targetPos, AActor* jumper) {
 	int isects = 0;
 
 	for (TraceIsect& isect : TraceIntersections(backupStartPos, backupPos)) {
-		fixed_t sectorZ = isect.sector->floorplane.ZatPoint((fixed_t)isect.pos.X, (fixed_t)isect.pos.Y);
+		fixed_t sectorZ = isect.sector->getFloorZ();
 		int heightDiff = (sectorZ - startZ) >> FRACBITS;
 
 		if (IsImpassable(isect.line) || heightDiff > STEP_HEIGHT) {
@@ -216,12 +209,11 @@ FVector2 NavSectorLink::GetJumpBackupPos(FVector2 targetPos, AActor* jumper) {
 	}
 
 	// clip against walls for our radius
-	FTraceResults tr;
+	TraceResult tr;
 	FVector2 backupDelta = backupPos - backupStartPos;
 	fixed_t traceZ = startZ + (STEP_HEIGHT << FRACBITS);
 	if (TraceRadius(FVector3(backupStartPos, traceZ), FVector3(backupPos, traceZ), PLAYER_WIDTH / 2, false, jumper, &tr)) {
-		float frac = tr.Fraction / (float)FRACUNIT;
-		backupPos = backupStartPos + backupDelta * frac;
+		backupPos = backupStartPos + backupDelta * tr.frac;
 	}
 
 	fixed_t backupDist = (backupPos - backupStartPos).Length();
@@ -259,17 +251,15 @@ bool NavSector::touches(AActor* actor) {
 
 	FVector2 actorPos = FVector2(actor->x, actor->y);
 
-	int subid = R_PointInSubsector(actorPos.X, actorPos.Y) - subsectors;
+	int subid = g_map.GetSubsector(actorPos.X, actorPos.Y)->id;
 	if (subid == id)
 		return true;
 
-	subsector_t& sub = subsectors[id];
-	for (int i = 0; i < sub.numlines; i++) {
-		seg_t& seg = sub.firstline[i];
-		FVector2 v1(seg.v1->x, seg.v1->y);
-		FVector2 v2(seg.v2->x, seg.v2->y);
+	MapSubsector& sub = g_map.subsectors[id];
+	for (int i = 0; i < sub.numsegs; i++) {
+		MapSeg& seg = g_map.segs[sub.firstseg + i];
 
-		if (CircleIntersectsSegment(actorPos, actor->radius, v1, v2)) {
+		if (CircleIntersectsSegment(actorPos, actor->radius, seg.start(), seg.end())) {
 			return true;
 		}
 	}
@@ -278,42 +268,35 @@ bool NavSector::touches(AActor* actor) {
 }
 
 int NavSector::getMoveFlags() {
-	return g_wb_mapinfo.sector_info[subsectors[id].sector - sectors].moveFlags;
+	return sector->moveFlags;
 }
 
 bool NavSector::isMoving() {
-	sector_t* sec = sector();
-	return sec->floordata || sec->ceilingdata;
+	return sector->isMoving() ;
 }
 
 bool NavSector::isFloorMoving() {
-	return sector()->floordata;
+	return sector->isFloorMoving();
 }
 
 bool NavSector::isCeilMoving() {
-	return sector()->ceilingdata;
+	return sector->isCeilMoving();
 }
 
 std::vector<BotGoal>& NavSector::getTriggers() {
-	return g_wb_mapinfo.sector_info[subsectors[id].sector - sectors].triggers;
-}
-
-sector_t* NavSector::sector() {
-	return subsectors[id].sector;
+	return sector->triggers;
 }
 
 fixed_t NavSector::getHeight() {
-	sector_t* sec = subsectors[id].sector;
-	return sec->ceilingplane.ZatPoint((fixed_t)center.X, (fixed_t)center.Y)
-		   - sec->floorplane.ZatPoint((fixed_t)center.X, (fixed_t)center.Y);
+	return sector->getHeight();
 }
 
 fixed_t NavSector::getFloorZ() {
-	return subsectors[id].sector->floorplane.ZatPoint((fixed_t)center.X, (fixed_t)center.Y);
+	return sector->getFloorZ();
 }
 
 fixed_t NavSector::getCeilZ() {
-	return subsectors[id].sector->ceilingplane.ZatPoint((fixed_t)center.X, (fixed_t)center.Y);
+	return sector->getCeilZ();
 }
 
 void SectorNavMesh::init() {
@@ -330,8 +313,8 @@ void SectorNavMesh::init() {
 	}
 
 	mesh = SectorNavMeshGenerator::generate(propBlockers);
-	astarNodes = new AstarNode[numsubsectors];
-	memset(astarNodes, 0, sizeof(AstarNode) * numsubsectors);
+	astarNodes = new AstarNode[g_map.numsubsectors];
+	memset(astarNodes, 0, sizeof(AstarNode) * g_map.numsubsectors);
 }
 
 void SectorNavMesh::draw_nodes(AActor* actor) {
@@ -347,11 +330,10 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 	if (!player)
 		return;
 
-	subsector_t* sub = R_PointInSubsector(player->x, player->y);
-	int subId = sub - subsectors;
+	MapSubsector* sub = g_map.GetSubsector(player->x, player->y);
 
-	if (sub && subId < numsubsectors) {
-		NavSector& nav = mesh.nodes[subId];
+	if (sub && sub->id < g_map.numsubsectors) {
+		NavSector& nav = mesh.nodes[sub->id];
 		int spritesDrawn = 0;
 		const int maxSprites = 1000;
 
@@ -392,12 +374,30 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 		}
 
 		fixed_t borderZ = nav.getFloorZ();
-		for (int k = 0; k < sub->numlines && spritesDrawn < maxSprites; k++) {
-			seg_t& seg = sub->firstline[k];
-
-			FVector3 start(seg.v1->x, seg.v1->y, borderZ);
-			FVector3 end(seg.v2->x, seg.v2->y, borderZ);
+		for (int k = 0; k < sub->numsegs && spritesDrawn < maxSprites; k++) {
+			MapSeg& seg = g_map.segs[sub->firstseg + k];
+			FVector3 start(seg.start(), borderZ);
+			FVector3 end(seg.end(), borderZ);
 			spritesDrawn += draw_debug_line(start, end, actor);
+		}
+
+		FVector2 playerPos(player->x, player->y);
+		int closestSeg = -1;
+		fixed_t bestDist = INT_MAX;
+		for (int i = 0; i < sub->numsegs; i++) {
+			MapSeg& seg = g_map.segs[sub->firstseg + i];
+			fixed_t dist = abs(DistanceToLine(playerPos, seg.start(), seg.end()));
+			if (dist < bestDist) {
+				bestDist = dist;
+				closestSeg = sub->firstseg + i;
+			}
+		}
+		if (closestSeg != -1) {
+			MapSeg& seg = g_map.segs[closestSeg];
+			fixed_t z = borderZ + FRACUNIT * 16;
+			FVector3 normStart(seg.center(), z);
+			FVector3 normEnd(seg.center() + seg.normal() * FRACUNIT * 32, z);
+			spritesDrawn += draw_debug_line(normStart, normEnd, actor);
 		}
 
 		if (spritesDrawn >= maxSprites) {
@@ -405,20 +405,21 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 		}
 	}
 
-	for (int i = 0; i < numsubsectors; i++) {
+	for (int i = 0; i < g_map.numsubsectors; i++) {
 		NavSector& node = mesh.nodes[i];
 		FVector3 pos = node.pos3D();
 
-		if (P_AproxDistance(pos.X - player->x, pos.Y - player->y) > (1000 << FRACBITS)) {
+		FVector2 delta = (FVector2)pos - FVector2(player->x, player->y);
+		if (delta.Length() > (1000 << FRACBITS)) {
 			continue;
 		}
 
-		SERVERCOMMANDS_SpawnBlood(pos.X, pos.Y, pos.Z + (16 << FRACBITS), 0, 100, player);
+		SpawnBlood(pos + FVector3(0, 0, (16 << FRACBITS)), 100, player);
 	}
 }
 
 int SectorNavMesh::get_nav_id(fixed_t x, fixed_t y) {
-	return R_PointInSubsector(x, y) - subsectors;
+	return g_map.GetSubsector(x, y)->id;
 }
 
 int SectorNavMesh::get_nav_id(AActor* actor) {
@@ -471,7 +472,7 @@ float SectorNavMesh::path_cost(NavSectorLink& link, float dist, const RouteOpts&
 		cost += 4000 << FRACBITS;
 	}
 
-	if (g_wb_mapinfo.segment_walkability(link.seg) == LINK_BLOCK_TOO_HIGH) {
+	if (g_map.sector_border_walkability(link.parent->sector, link.sector) == LINK_BLOCK_TOO_HIGH) {
 		// avoid elevators, so that jumping into a pit to take an elevator isn't preferred
 		// over walking around it
 		cost += (2000 << FRACBITS);
@@ -501,7 +502,7 @@ BotRoute SectorNavMesh::get_astar_route(const RouteOpts& opts)
 		Printf("START route from %d to %d\n", opts.start, opts.end);
 	}
 
-	if (opts.start < 0 || opts.end < 0 || opts.start >= numsubsectors || opts.end >= numsubsectors) {
+	if (opts.start < 0 || opts.end < 0 || opts.start >= g_map.numsubsectors || opts.end >= g_map.numsubsectors) {
 		Printf("AStarRoute: invalid start/end nodes\n");
 		g_route_ignore_num++;
 		return emptyRoute;
@@ -513,7 +514,7 @@ BotRoute SectorNavMesh::get_astar_route(const RouteOpts& opts)
 		return emptyRoute;
 	}
 
-	memset(astarNodes, 0, sizeof(AstarNode) * numsubsectors);
+	memset(astarNodes, 0, sizeof(AstarNode) * g_map.numsubsectors);
 
 	NavSector& start = mesh.nodes[opts.start];
 	NavSector& goal = mesh.nodes[opts.end];
@@ -611,14 +612,14 @@ BotRoute SectorNavMesh::get_astar_route(const RouteOpts& opts)
 	return emptyRoute;
 }
 
-bool SectorNavMesh::get_key_goals_for_line(AActor* actor, line_t* line, vector<BotGoal>& keyGoals) {
-	if (line->special != Door_LockedRaise)
+bool SectorNavMesh::get_key_goals_for_line(AActor* actor, MapLine* line, vector<BotGoal>& keyGoals) {
+	if (line->special() != Door_LockedRaise)
 		return true; // not a locked door
 
-	if (P_CheckKeys(actor, line->args[3], false))
+	if (g_map.CheckKeys(actor, line))
 		return true; // already have all the keys
 
-	TArray<TArray<PClass*>> keyGroups = P_GetRequiredKeys(line->args[3]);
+	TArray<TArray<PClass*>> keyGroups = P_GetRequiredKeys(line->getArg(3));
 
 	if (keyGroups.Size() == 0)
 		return true; // no keys required
@@ -682,7 +683,7 @@ bool SectorNavMesh::get_key_goals_for_line(AActor* actor, line_t* line, vector<B
 
 		if (!bestKey) {
 			// no key satisfies the group requirement
-			Printf("Impossible key requirements for line %d:\n", line - lines);
+			Printf("Impossible key requirements for line %d:\n", line->id);
 
 			for (int i = 0; i < keyGroups.Size(); i++) {
 				TArray<PClass*>& group = keyGroups[i];
@@ -744,8 +745,8 @@ vector<BotGoal> SectorNavMesh::get_ammo_goals(const char* ammoname, const char* 
 	return goals;
 }
 
-void SectorNavMesh::relink_sector(sector_t* sec) {
-	for (sector_t* pend : pending_sector_relinks) {
+void SectorNavMesh::relink_sector(MapSector* sec) {
+	for (MapSector* pend : pending_sector_relinks) {
 		if (pend == sec) {
 			return;
 		}
@@ -763,19 +764,19 @@ void SectorNavMesh::relink_pending_sector() {
 	t++;
 
 	int idx = (t % pending_sector_relinks.size());
-	sector_t* sec = pending_sector_relinks[idx];
-	int secid = sec - sectors;
+	MapSector* sec = pending_sector_relinks[idx];
+	int secid = sec - g_map.sectors;
 
-	if (sec->floordata || sec->ceilingdata) {
+	if (sec->isMoving()) {
 		return;
 	}
 
 	int linksAdded = 0;
 
-	g_wb_mapinfo.sector_info[secid].moveFlags = 0;
+	g_map.sectors[secid].moveFlags = 0;
 
-	for (int i = 0; i < numsubsectors; i++) {
-		if (subsectors[i].sector == sec) {
+	for (int i = 0; i < g_map.numsubsectors; i++) {
+		if (g_map.subsectors[i].sector == sec) {
 			linksAdded += SectorNavMeshGenerator::relink_node(mesh, i, propBlockers);
 		}
 	}

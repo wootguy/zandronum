@@ -2,14 +2,7 @@
 #include "wb_bot.h"
 #include "wb_map.h"
 #include "wb_nav.h"
-#include "r_utility.h"
-#include "p_spec.h"
-#include "p_local.h"
-#include "c_dispatch.h"
-#include "m_cheat.h"
-#include "network.h"
 #include "sv_commands.h"
-#include "p_trace.h"
 #include "m_bbox.h"
 
 #include <chrono>
@@ -17,6 +10,7 @@
 
 using namespace std;
 using namespace std::chrono;
+using namespace wbot;
 
 char* VarArgs(const char* format, ...)
 {
@@ -45,18 +39,6 @@ AActor* getAnyPlayer() {
 	}
 
 	return NULL;
-}
-
-// get direction pointing behind the given linedef
-FVector2 getLineBackDir(line_t* line) {
-	fixed_t dx = line->v2->x - line->v1->x;
-	fixed_t dy = line->v2->y - line->v1->y;
-	double len = sqrt((double)dx * dx + (double)dy * dy);
-	return FVector2(-(double)dy / len, (double)dx / len);
-}
-
-FVector2 getLineCenter(line_t* line) {
-	return FVector2((line->v1->x + line->v2->x) * 0.5, (line->v1->y + line->v2->y) * 0.5);
 }
 
 bool onSegment(const FVector2& p, const FVector2& q, const FVector2& r) {
@@ -166,25 +148,76 @@ FVector2 ClosestPointOnSegment(const FVector2& p, const FVector2& a, const FVect
 	return a + ab * t;
 }
 
+FSegment2 LineSegmentOverlap(const FVector2& a1, const FVector2& a2, const FVector2& b1, const FVector2& b2)
+{
+	FSegment2 result;
+
+	const float eps = 2.0f; // TODO: why are clipped polygon edges this bad?
+
+	// colinear tests
+	if (fabs(DistanceToLine(a1, b1, b2)) >= eps || fabs(DistanceToLine(a2, b1, b2)) >= eps) {
+		return result;
+	}
+	if (fabs(DistanceToLine(b1, a1, a2)) >= eps || fabs(DistanceToLine(b2, a1, a2)) >= eps) {
+		return result;
+	}
+
+	if (fabs(a2.X - a1.X) >= fabs(a2.Y - a1.Y))
+	{
+		bool aForward = a1.X < a2.X;
+		bool bForward = b1.X < b2.X;
+
+		float start = std::max(std::min(a1.X, a2.X), std::min(b1.X, b2.X));
+		float end = std::min(std::max(a1.X, a2.X), std::max(b1.X, b2.X));
+
+		if (end - start < eps)
+			return result;
+
+		float dx = a2.X - a1.X;
+		float dy = a2.Y - a1.Y;
+
+		float t1 = (start - a1.X) / dx;
+		float t2 = (end - a1.X) / dx;
+
+		result.a = FVector2(start, a1.Y + t1 * dy);
+		result.b = FVector2(end, a1.Y + t2 * dy);
+	}
+	else
+	{
+		float start = std::max(std::min(a1.Y, a2.Y), std::min(b1.Y, b2.Y));
+		float end = std::min(std::max(a1.Y, a2.Y), std::max(b1.Y, b2.Y));
+
+		if (end - start < eps)
+			return result;
+
+		float dx = a2.X - a1.X;
+		float dy = a2.Y - a1.Y;
+
+		float t1 = (start - a1.Y) / dy;
+		float t2 = (end - a1.Y) / dy;
+
+		result.a = FVector2(a1.X + t1 * dx, start);
+		result.b = FVector2(a1.X + t2 * dx, end);
+	}
+
+	return result;
+}
+
 void set_ori(AActor* actor, int x, int y, angle_t angle) {
 	fixed_t fx = x << FRACBITS;
 	fixed_t fy = y << FRACBITS;
-	fixed_t z = R_PointInSubsector(fx, fy)->sector->floorplane.ZatPoint(fx, fy);
+	fixed_t z = g_map.GetSector(fx, fy)->getFloorZ();
 	P_Teleport(actor, fx, fy, ONFLOORZ, angle, false, false, false, true, false);
 }
 
-int getLineLength(line_t* line) {
-	return (int)(FVector2(line->v1->x, line->v1->y) - FVector2(line->v2->x, line->v2->y)).Length() >> FRACBITS;
-}
-
-fixed_t DistanceToLine(const FVector2& p, const FVector2& a, const FVector2& b) {
+float DistanceToLine(const FVector2& p, const FVector2& a, const FVector2& b) {
 	FVector2 ab = b - a;
     FVector2 ap = p - a;
     return CrossProduct(ab, ap) / ab.Length();
 }
 
-fixed_t DistanceToLine(const FVector2& p, line_t* line) {
-	return DistanceToLine(p, FVector2(line->v1->x, line->v1->y), FVector2(line->v2->x, line->v2->y));
+float DistanceToLine(const FVector2& p, wbot::MapLine* line) {
+	return DistanceToLine(p, line->start(), line->end());
 }
 
 fixed_t BoxRadiusForDir(const FVector2& dir, fixed_t radius)
@@ -207,7 +240,7 @@ bool IsBoxWallClipped(const FVector2& pos, fixed_t radius) {
 			continue;
 		}
 
-		if (box.BoxOnLineSide(ld) == -1 && IsImpassable(ld))
+		if (box.BoxOnLineSide(ld) == -1 && (!ld->backsector || (ld->flags & ML_BLOCKING)))
 			return true;  // crosses an impassable line
 	}
 
@@ -235,7 +268,7 @@ bool IsBoxClipped(const FVector3& pos, fixed_t radius, fixed_t height) {
 		if (box.BoxOnLineSide(ld) != -1)
 			continue; // doesn't cross the line
 
-		if (IsImpassable(ld))
+		if (!ld->backsector || (ld->flags & ML_BLOCKING))
 			return true; // crosses an impassable line
 		
 		fixed_t frontCeil = ld->frontsector->ceilingplane.ZatPoint(x, y);
@@ -253,8 +286,8 @@ bool IsBoxClipped(const FVector3& pos, fixed_t radius, fixed_t height) {
 	return false;
 }
 
-std::vector<sector_t*> GetBoxClipSectors(const FVector3& pos, fixed_t radius, fixed_t height) {
-	std::vector<sector_t*> clipSectors;
+std::vector<MapSector*> GetBoxClipSectors(const FVector3& pos, fixed_t radius, fixed_t height) {
+	std::vector<MapSector*> clipSectors;
 	
 	FBoundingBox box(pos.X, pos.Y, radius);
 	FBlockLinesIterator it(box);
@@ -277,7 +310,7 @@ std::vector<sector_t*> GetBoxClipSectors(const FVector3& pos, fixed_t radius, fi
 		if (box.BoxOnLineSide(ld) != -1)
 			continue; // doesn't cross the line
 
-		if (IsImpassable(ld))
+		if (!ld->backsector || (ld->flags & ML_BLOCKING))
 			continue; // crosses an impassable line, no sector to trigger
 
 		fixed_t frontCeil = ld->frontsector->ceilingplane.ZatPoint(x, y);
@@ -286,13 +319,57 @@ std::vector<sector_t*> GetBoxClipSectors(const FVector3& pos, fixed_t radius, fi
 		fixed_t backFloor = ld->backsector->floorplane.ZatPoint(x, y);
 
 		if (z < backFloor || topZ > backCeil)
-			clipSectors.push_back(ld->backsector);
+			clipSectors.push_back(&g_map.sectors[ld->backsector - sectors]);
 
 		if (z < frontFloor || topZ > frontCeil)
-			clipSectors.push_back(ld->frontsector);
+			clipSectors.push_back(&g_map.sectors[ld->frontsector - sectors]);
 	}
 
 	return clipSectors;
+}
+
+void ClipPoly(std::vector<FVector2>& poly, FVector2 lp, FVector2 ldir, bool front) {
+	std::vector<FVector2> out;
+
+	for (int i = 0; i < poly.size(); i++)
+	{
+		const FVector2& A = poly[i];
+		const FVector2& B = poly[(i + 1) % poly.size()];
+
+		float da = ((A.Y - (float)lp.Y) * ldir.X + ((float)lp.X - A.X) * ldir.Y);
+		float db = ((B.Y - (float)lp.Y) * ldir.X + ((float)lp.X - B.X) * ldir.Y);
+
+		bool insideA = front ? (da >= 0) : (da <= 0);
+		bool insideB = front ? (db >= 0) : (db <= 0);
+
+		if (insideA && insideB) {
+			// keep endpoint
+			out.push_back(B);
+		}
+		else if (insideA && !insideB) {
+			// leaving half-plane
+			float t = (float)da / (float)(da - db);
+			out.push_back(A + (B - A) * t);
+		}
+		else if (!insideA && insideB) {
+			// entering half-plane
+			float t = (float)da / (float)(da - db);
+			out.push_back(A + (B - A) * t);
+			out.push_back(B);
+		}
+		// else: both outside, keep nothing
+	}
+
+	poly.clear();
+
+	for (int i = 0; i < out.size(); i++) {
+		FVector2 v = out[i];
+		FVector2 vNext = out[(i+1) % out.size()];
+
+		if ((vNext - v).Length() > 0.1f) {
+			poly.push_back(vNext);
+		}
+	}
 }
 
 void ExtendSegment(FVector2& a, FVector2& b, float amount) {
@@ -357,7 +434,7 @@ int draw_debug_line(FVector3 start, FVector3 end, AActor* actor) {
 	// this sucks and the railgun effect crashes the client so can't use that
 
 	FVector3 delta = end - start;
-	float len = delta.Length();
+	float len = std::min(delta.Length(), (double)(4096 << FRACBITS));
 	uint32_t ilen = (uint32_t)len >> FRACBITS;
 	int spacing = 4;
 
@@ -384,42 +461,31 @@ int draw_debug_line(FVector3 start, FVector3 end, AActor* actor) {
 	return i;
 }
 
-bool TraceLine(FVector3 start, FVector3 end, bool ignoreMonsters, AActor* ignoreEnt, FTraceResults* tr) {
-	FVector3 delta = end - start;
-	fixed_t dist = delta.Length();
-	delta.MakeUnit();
-	delta *= FRACUNIT;
-
-	sector_t* sector = P_PointInSector(start.X, start.Y);
-
-	static FTraceResults dummy;
-	FTraceResults* out = tr ? tr : &dummy;
-
-	return Trace((fixed_t)start.X, (fixed_t)start.Y, (fixed_t)start.Z, sector,
-		(fixed_t)delta.X, (fixed_t)delta.Y, (fixed_t)delta.Z, dist, ignoreMonsters ? 0 : 0xffffffff,
-		ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, ignoreEnt, *out);
+bool TraceLine(FVector3 start, FVector3 end, bool ignoreMonsters, AActor* ignoreEnt, TraceResult* tr) {
+	return g_map.Trace(start, end, ignoreMonsters ? 0 : 0xffffffff,
+		ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, ignoreEnt, tr);
 }
 
-bool TraceRadius(FVector3 start, FVector3 end, fixed_t radius, bool ignoreMonsters, AActor* ignoreEnt, FTraceResults* tr) {
+bool TraceRadius(FVector3 start, FVector3 end, fixed_t radius, bool ignoreMonsters, AActor* ignoreEnt, TraceResult* tr) {
 	FVector2 dir = (end - start).Unit() * FRACUNIT;
 	FVector3 rightDir(dir.Y, -dir.X, 0);
-	fixed_t minFrac = FRACUNIT;
+	fixed_t minFrac = 1.0f;
 	int rightStep = radius / 2;
 
-	static FTraceResults dummy;
-	FTraceResults* out = tr ? tr : &dummy;
+	static TraceResult dummy;
+	TraceResult* out = tr ? tr : &dummy;
 
 	for (int i = -2; i <= 2; i++) {
-		FTraceResults temp;
+		TraceResult temp;
 		TraceLine(start + rightDir * i * rightStep, end + rightDir * i * rightStep, ignoreMonsters, ignoreEnt, &temp);
 		
-		if (temp.Fraction < minFrac) {
-			minFrac = temp.Fraction;
+		if (temp.frac < minFrac) {
+			minFrac = temp.frac;
 			*out = temp;
 		}
 	}
 
-	return minFrac < FRACUNIT;
+	return minFrac < 1.0f;
 }
 
 vector<TraceIsect> TraceIntersections(FVector2 start, FVector2 end) {
@@ -442,16 +508,17 @@ vector<TraceIsect> TraceIntersections(FVector2 start, FVector2 end) {
 		fixed_t dist = FixedMul(maxDist, in->frac);
 
 		TraceIsect isect;
-		isect.line = wall;
+		isect.line = &g_map.lines[wall - lines];
 		isect.pos = FVector2(StartX + FixedMul(Vx, dist), StartY + FixedMul(Vy, dist));
 		isect.fraction = in->frac;
 
 		if (wall->backsector == NULL) {
-			isect.sector = in->d.line->frontsector;
+			isect.sector = &g_map.sectors[in->d.line->frontsector - sectors];
 		}
 		else {
 			int lineside = P_PointOnLineSide(StartX, StartY, in->d.line);
-			isect.sector = lineside ? wall->backsector : wall->frontsector;
+			sector_t* sec = lineside ? wall->backsector : wall->frontsector;
+			isect.sector = &g_map.sectors[sec - sectors];
 		}
 
 		intersections.push_back(isect);
@@ -476,7 +543,7 @@ bool TraceImpassable(FVector2 start, FVector2 end) {
 	while ((in = path.Next())) {
 		line_t* line = in->d.line;
 
-		if (IsImpassable(in->d.line)) {
+		if (!line->backsector || (line->flags & ML_BLOCKING)) {
 			fixed_t dist = FixedMul(maxDist, in->frac);
 			FVector2 pos = FVector2(StartX + FixedMul(Vx, dist), StartY + FixedMul(Vy, dist));
 			sector_t* hitSector = R_PointInSubsector(pos.X, pos.Y)->sector;
@@ -491,7 +558,7 @@ bool TraceImpassable(FVector2 start, FVector2 end) {
 	return false;
 }
 
-bool TraceSectorEdge(FVector2 start, FVector2 end, FVector2& edge, line_t** line) {
+bool TraceSectorEdge(FVector2 start, FVector2 end, FVector2& edge, MapLine** line) {
 	FPathTraverse path(start.X, start.Y, end.X, end.Y, PT_ADDLINES);
 	intercept_t* in = path.Next();
 
@@ -506,7 +573,7 @@ bool TraceSectorEdge(FVector2 start, FVector2 end, FVector2& edge, line_t** line
 		fixed_t Vy = dir.Y;
 
 		if (line) {
-			*line = in->d.line;
+			*line = &g_map.lines[in->d.line - ::lines];
 		}
 
 		edge = FVector2(StartX + FixedMul(Vx, dist), StartY + FixedMul(Vy, dist));
@@ -520,7 +587,7 @@ bool TraceSectorEdge(FVector2 start, FVector2 end, FVector2& edge, line_t** line
 	return false;
 }
 
-bool IsImpassable(line_t* line) {
+bool IsImpassable(MapLine* line) {
 	return !line->backsector || (line->flags & ML_BLOCKING);
 }
 
@@ -532,6 +599,14 @@ bool IsPropBlocker(AActor* actor) {
 		return false;
 
 	return true;
+}
+
+void SpawnBlood(FVector3 pos, int damage, AActor* owner) {
+	SERVERCOMMANDS_SpawnBlood(pos.X, pos.Y, pos.Z, 0, damage, owner);
+}
+
+void PrintNotification(const char* msg) {
+	SERVERCOMMANDS_Print(msg, PRINT_CHAT);
 }
 
 std::vector<int> debugv2(const FVector2& v) {

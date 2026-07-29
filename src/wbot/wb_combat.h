@@ -1,11 +1,14 @@
 #pragma once
-#include "bots.h"
 #include <unordered_set>
 #include <unordered_map>
 #include <vector>
 #include <string>
 
 class CWootBot;
+class APlayerPawn;
+class player_t;
+class AWeapon;
+class AActor;
 
 struct WeaponInfo {
 	int priority;

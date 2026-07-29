@@ -1,14 +1,11 @@
 #include "wb_nav_gen.h"
 #include "wb_map.h"
 #include "wb_util.h"
-#include "p_trace.h"
-#include "p_local.h"
-#include "r_state.h"
-#include "r_utility.h"
-#include "p_lnspec.h"
-#include "p_spec.h"
+#include "actor.h"
+#include "doomdata.h"
 
 using namespace std;
+using namespace wbot;
 
 bool SectorNavMeshGenerator::trace_jump(FVector3 start, FVector3 end, int fromMovement, int toMovement) {
 	const fixed_t rightStep = ((PLAYER_WIDTH / 2) / 2) << FRACBITS;
@@ -17,30 +14,29 @@ bool SectorNavMeshGenerator::trace_jump(FVector3 start, FVector3 end, int fromMo
 	FVector2 jumpDir = (end2d - start2d).Unit();
 	FVector3 rightDir(jumpDir.Y, -jumpDir.X, 0);
 	bool fromNavMovesDown = fromMovement & FL_SECTOR_MOVE_FLOOR_DOWN;
-	FTraceResults tr;
+	TraceResult tr;
 
 	for (int i = -2; i <= 2; i++) {
 		if (TraceLine(start + rightDir * i * rightStep, end + rightDir * i * rightStep, true, NULL, &tr)) {
-			if (tr.HitType == TRACE_HitWall && tr.Line && tr.Line->backsector) {
-				if (g_wb_mapinfo.sector_info[tr.Line->backsector - sectors].moveFlags) {
+			if (tr.hitType == TRACE_HitWall && tr.line && tr.line->backsector) {
+				if (tr.line->backsector->moveFlags) {
 					continue; // wall may move out of the way in the future
 				}
 			}
-			else if (tr.HitType == TRACE_HitCeiling && fromNavMovesDown && start.Z > tr.Z) {
+			else if (tr.hitType == TRACE_HitCeiling && fromNavMovesDown && start.Z > tr.endPos.Z) {
 				// sector may be fully lifted to the ceiling and so can't connect yet
 				continue; // may move out of the way in the future
 			}
-			else if (tr.HitType == TRACE_HitFloor) {
-				if (g_wb_mapinfo.sector_info[tr.Sector - sectors].moveFlags & FL_SECTOR_MOVE_FLOOR_DOWN) {
+			else if (tr.hitType == TRACE_HitFloor) {
+				if (tr.sector->moveFlags & FL_SECTOR_MOVE_FLOOR_DOWN) {
 					continue; // hit a floor that may move out of the way later
 				}
 			}
 
-			FVector3 impact(tr.X, tr.Y, tr.Z);
-			if (tr.HitType == TRACE_HitWall && tr.Line) {
+			if (tr.hitType == TRACE_HitWall && tr.line) {
 				// trace has a bug where you can impact a wall in a different sector
-				sector_t* impactSector = R_PointInSubsector(tr.X, tr.Y)->sector;
-				if (tr.Line->frontsector != impactSector && tr.Line->backsector != impactSector) {
+				MapSector* impactSector = g_map.GetSubsector(tr.endPos.X, tr.endPos.Y)->sector;
+				if (tr.line->frontsector != impactSector && tr.line->backsector != impactSector) {
 					continue; // impossible to have hit this line
 				}
 			}
@@ -76,11 +72,11 @@ bool SectorNavMeshGenerator::is_potential_jump_link(NavSector& fromNav, NavSecto
 		return false; // too far to link to, and the target won't ever lower
 	}
 
-	FVector2 e1v1(fromLink.seg->v1->x, fromLink.seg->v1->y);
-	FVector2 e1v2(fromLink.seg->v2->x, fromLink.seg->v2->y);
+	FVector2 e1v1 = fromLink.seg.a;
+	FVector2 e1v2 = fromLink.seg.b;
 
-	FVector2 e2v1(toLink.seg->v1->x, toLink.seg->v1->y);
-	FVector2 e2v2(toLink.seg->v2->x, toLink.seg->v2->y);
+	FVector2 e2v1 = toLink.seg.a;
+	FVector2 e2v2 = toLink.seg.b;
 
 	FVector2 dir1 = (e1v2 - e1v1).Unit();
 	FVector2 dir2 = (e2v2 - e2v1).Unit();
@@ -210,6 +206,8 @@ bool SectorNavMeshGenerator::create_jump_link(BotMeshData& mesh, NavSector& from
 	link.isTeleport = fromLink.isTeleport;
 	link.isCliff = fromLink.isCliff;
 	link.seg = fromLink.seg;
+	link.sector = fromLink.sector;
+	link.linedef = fromLink.linedef;
 
 	link.target = &toNav;
 	link.id = mesh.numLinks;
@@ -241,7 +239,7 @@ void SectorNavMeshGenerator::add_jump_links(BotMeshData& mesh, int nodeid) {
 		}
 
 		// find other other cliff segments to try linking to
-		for (int j = 0; j < numsubsectors; j++) {
+		for (int j = 0; j < g_map.numsubsectors; j++) {
 			NavSector& otherNav = mesh.nodes[j];
 
 			if (j == nodeid)
@@ -263,24 +261,24 @@ void SectorNavMeshGenerator::add_jump_links(BotMeshData& mesh, int nodeid) {
 
 void SectorNavMeshGenerator::add_jump_links(BotMeshData& mesh) {
 	// add jump links between cliff segments
-	for (int i = 0; i < numsubsectors; i++) {
+	for (int i = 0; i < g_map.numsubsectors; i++) {
 		add_jump_links(mesh, i);
 	}
 }
 
 void SectorNavMeshGenerator::calc_nav_centers(BotMeshData& mesh) {
-	for (int i = 0; i < numsubsectors; i++) {
-		subsector_t& sub = subsectors[i];
+	for (int i = 0; i < g_map.numsubsectors; i++) {
+		MapSubsector& sub = g_map.subsectors[i];
 		NavSector& nav = mesh.nodes[i];
 
 		float area = 0;
 		FVector2 centroid(0, 0);
 
-		for (int i = 0; i < sub.numlines; i++)
+		for (int i = 0; i < sub.numsegs; i++)
 		{
-			seg_t& seg = sub.firstline[i];
-			FVector2 a(seg.v1->x, seg.v1->y);
-			FVector2 b(seg.v2->x, seg.v2->y);
+			MapSeg& seg = g_map.segs[sub.firstseg + i];
+			FVector2 a = seg.start();
+			FVector2 b = seg.end();
 
 			float cross = a.X * b.Y - b.X * a.Y;
 
@@ -293,113 +291,98 @@ void SectorNavMeshGenerator::calc_nav_centers(BotMeshData& mesh) {
 }
 
 void SectorNavMeshGenerator::add_walkable_links(BotMeshData& mesh, int nodeid, std::vector<AActor*> propBlockers) {
-	subsector_t& sub = subsectors[nodeid];
+	MapSubsector& sub = g_map.subsectors[nodeid];
 	NavSector& nav = mesh.nodes[nodeid];
 
-	for (int k = 0; k < sub.numlines; k++) {
-		seg_t& seg = sub.firstline[k];
+	for (int k = 0; k < sub.numsegs; k++) {
+		MapSeg& seg = g_map.segs[sub.firstseg + k];
 
-		if (!g_wb_mapinfo.is_seg_potentially_crossable(&seg)) {
-			//if (nodeid == 67) { // debug possible link not created
-			//	g_wb_mapinfo.is_seg_potentially_crossable(&seg);
-			//}
-			continue;
-		}
+		for (LinkSeg& linkseg : g_map.get_neighbor_subsectors(&sub, &seg)) {
+			MapSubsector& neighbor = g_map.subsectors[linkseg.otherSub];
 
-		LinkSeg linkseg = g_wb_mapinfo.get_neighbor_subsector(&sub, &seg);
+			if (!g_map.is_sector_border_potentially_crossable(sub.sector, neighbor.sector)) {
+				continue;
+			}
 
-		if (linkseg.otherSub < 0)
-			continue;
+			NavSectorLink link;
+			link.target = &mesh.nodes[linkseg.otherSub];
+			link.movePos = FVector3(linkseg.overlap.center(), sub.sector->getFloorZ());
+			link.seg = linkseg.overlap;
+			link.linedef = linkseg.line;
+			link.id = mesh.numLinks;
+			link.sector = link.target->sector;
+			link.parent = &nav;
+			link.linkWidth = (int)linkseg.overlap.length() >> FRACBITS;
+			link.isJump = false;
+			link.isTeleport = false;
+			link.jumpDist = 0;
 
-		//if (i == 167 && linkseg.otherSub == 171) {
-		//	is_seg_potentially_crossable(&seg); // debug impossible link created
-		//}
+			const fixed_t mesh_radius = PLAYER_RADIUS << FRACBITS;
+			if (IsBoxWallClipped(link.movePos, mesh_radius)) {
+				int step = 8;
+				int steps = (link.linkWidth / step) / 2; // half len for left/right split
+				FVector2 delta = linkseg.overlap.b - linkseg.overlap.a;
+				FVector2 dir = delta.Unit() * FRACUNIT;
 
-		fixed_t cx = (linkseg.x1 + linkseg.x2) / 2;
-		fixed_t cy = (linkseg.y1 + linkseg.y2) / 2;
-		float z = sub.sector->floorplane.ZatPoint(cx, cy);
-		
+				bool foundUnclippedPos = false;
+				for (int s = 1; s <= steps; s++) {
+					FVector2 testLeft = link.movePos + dir * s * step;
+					FVector2 testRight = link.movePos + dir * s * -step;
 
-		NavSectorLink link;
-		link.target = &mesh.nodes[linkseg.otherSub];
-		link.movePos = FVector3(cx, cy, z);
-		link.seg = &seg;
-		link.id = mesh.numLinks;
-		link.parent = &nav;
-		link.linkWidth = (int)linkseg.length() >> FRACBITS;
-		link.isJump = false;
-		link.isTeleport = false;
-		link.jumpDist = 0;
-
-		subsector_t& neighbor = subsectors[linkseg.otherSub];
-
-		const fixed_t mesh_radius = PLAYER_RADIUS << FRACBITS;
-		if (IsBoxWallClipped(link.movePos, mesh_radius)) {
-			int step = 8;
-			int steps = (link.linkWidth / step) / 2; // half len for left/right split
-			FVector2 a(linkseg.x1, linkseg.y1);
-			FVector2 b(linkseg.x2, linkseg.y2);
-			FVector2 delta = b - a;
-			FVector2 dir = delta.Unit() * FRACUNIT;
-
-			bool foundUnclippedPos = false;
-			for (int s = 1; s <= steps; s++) {
-				FVector2 testLeft = link.movePos + dir * s * step;
-				FVector2 testRight = link.movePos + dir * s * -step;
-
-				if (!IsBoxWallClipped(testLeft, mesh_radius)) {
-					foundUnclippedPos = true;
-					link.movePos = testLeft;
-					break;
+					if (!IsBoxWallClipped(testLeft, mesh_radius)) {
+						foundUnclippedPos = true;
+						link.movePos = testLeft;
+						break;
+					}
+					if (!IsBoxWallClipped(testRight, mesh_radius)) {
+						foundUnclippedPos = true;
+						link.movePos = testRight;
+						break;
+					}
 				}
-				if (!IsBoxWallClipped(testRight, mesh_radius)) {
-					foundUnclippedPos = true;
-					link.movePos = testRight;
-					break;
+				if (!foundUnclippedPos) {
+					continue; // unable to fit a player anywhere along this link
 				}
 			}
-			if (!foundUnclippedPos) {
-				continue; // unable to fit a player anywhere along this link
+
+			link.isCliff = sub.sector->getFloorZ()
+				- neighbor.sector->getFloorZ() > (JUMP_HEIGHT << FRACBITS);
+
+			if (link.isCliff)
+				nav.hasCliffs = true;
+
+			// redirect target sector if this is the front side of a teleport
+			MapLine* line = link.linedef;
+			bool isPlayerTele = line && line->isTeleport() && (line->activation() & SPAC_Cross);
+			if (isPlayerTele && DistanceToLine(nav.pos(), line) < 0) {
+				FVector2 dest = line->getTeleportDest();
+				MapSubsector* destSub = g_map.GetSubsector(dest.X, dest.Y);
+				if (destSub) {
+					link.target = &mesh.nodes[destSub - g_map.subsectors];
+					link.isTeleport = true;
+				}
 			}
-		}
 
-		link.isCliff = sub.sector->floorplane.ZatPoint(cx, cy)
-			- neighbor.sector->floorplane.ZatPoint(cx, cy) > (JUMP_HEIGHT << FRACBITS);
-
-		if (link.isCliff)
-			nav.hasCliffs = true;
-
-		// redirect target sector if this is the front side of a teleport
-		line_t* line = seg.linedef;
-		bool isPlayerTele = line && line->special == Teleport && (line->activation & SPAC_Cross);
-		if (isPlayerTele && DistanceToLine(nav.pos(), line) < 0) {
-			AActor* dest = SelectTeleDest(line->args[0], line->args[1]);
-			if (dest) {
-				subsector_t* destSub = R_PointInSubsector(dest->x, dest->y);
-				link.target = &mesh.nodes[destSub - subsectors];
-				link.isTeleport = true;
+			// don't add links that are blocked by immovable props
+			bool propBlocked = false;
+			const fixed_t playerRadius = (PLAYER_WIDTH / 2) << FRACBITS;
+			FVector2 linkPos = link.movePos;
+			for (int i = 0; i < propBlockers.size(); i++) {
+				AActor* actor = propBlockers[i];
+				FVector2 propPos(actor->x, actor->y);
+				if ((propPos - linkPos).Length() < actor->radius + playerRadius) {
+					propBlocked = true;
+					break;
+				}
 			}
-		}
-
-		// don't add links that are blocked by immovable props
-		bool propBlocked = false;
-		const fixed_t playerRadius = (PLAYER_WIDTH / 2) << FRACBITS;
-		FVector2 linkPos = link.movePos;
-		for (int i = 0; i < propBlockers.size(); i++) {
-			AActor* actor = propBlockers[i];
-			FVector2 propPos(actor->x, actor->y);
-			if ((propPos - linkPos).Length() < actor->radius + playerRadius) {
-				propBlocked = true;
-				break;
+			if (propBlocked) {
+				continue;
 			}
-		}
-		if (propBlocked) {
-			continue;
-		}
 
-		mesh.links[mesh.numLinks] = link;
-		nav.links.push_back(&mesh.links[mesh.numLinks]);
-		mesh.numLinks++;
+			mesh.links[mesh.numLinks] = link;
+			nav.links.push_back(&mesh.links[mesh.numLinks]);
+			mesh.numLinks++;
+		}
 	}
 }
 
@@ -407,28 +390,30 @@ BotMeshData SectorNavMeshGenerator::generate(std::vector<AActor*> propBlockers) 
 	uint64_t genStart = getEpochMillis();
 
 	BotMeshData mesh;
-	mesh.nodes = new NavSector[numsubsectors];
+	mesh.nodes = new NavSector[g_map.numsubsectors];
 	mesh.links = new NavSectorLink[MAX_MESH_LINKS];
 	mesh.numLinks = 0;
-
-	g_wb_mapinfo.init();
 
 	calc_nav_centers(mesh);
 
 	// link sectors as a nav mesh
-	for (int i = 0; i < numsubsectors; i++) {
-		subsector_t& sub = subsectors[i];
+	for (int i = 0; i < g_map.numsubsectors; i++) {
+		MapSubsector& sub = g_map.subsectors[i];
 		NavSector& nav = mesh.nodes[i];
 
 		nav.id = i;
-		nav.doesDamage = g_wb_mapinfo.subsector_does_damage(&sub);
+		nav.doesDamage = g_map.subsector_does_damage(&sub);
+		nav.sector = sub.sector;
+	}
 
+	for (int i = 0; i < g_map.numsubsectors; i++) {
+		NavSector& nav = mesh.nodes[i];
 		add_walkable_links(mesh, i, propBlockers);
 	}
 
 	add_jump_links(mesh);
 
-	Printf("Generated %d nodes, %d links in %d ms\n", (int)numsubsectors, mesh.numLinks, (int)(getEpochMillis() - genStart));
+	Printf("Generated %d nodes, %d links in %d ms\n", (int)g_map.numsubsectors, mesh.numLinks, (int)(getEpochMillis() - genStart));
 
 	return mesh;
 }
@@ -446,7 +431,7 @@ int SectorNavMeshGenerator::relink_node(BotMeshData& mesh, int id, std::vector<A
 
 	// test that links to this sector are still valid if it's no longer possible to move
 	int removed = 0;
-	for (int i = 0; i < numsubsectors; i++) {
+	for (int i = 0; i < g_map.numsubsectors; i++) {
 		NavSector& otherNav = mesh.nodes[i];
 
 		// don't unlink yet if the source sectors can be elevated in the future
@@ -462,7 +447,7 @@ int SectorNavMeshGenerator::relink_node(BotMeshData& mesh, int id, std::vector<A
 			if (link.isJump)
 				stillValid = jumpsMayBePossibleLater || (nav.hasCliffs && link.isJumpValid());
 			else
-				stillValid = g_wb_mapinfo.is_seg_potentially_crossable(link.seg);
+				stillValid = g_map.is_sector_border_potentially_crossable(link.parent->sector, link.target->sector);
 
 			if (!stillValid) {
 				otherNav.links.erase(otherNav.links.begin() + k);

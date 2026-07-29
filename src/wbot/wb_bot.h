@@ -7,6 +7,7 @@
 
 struct FTraceResults;
 struct NavSectorLink;
+struct wbot::MapLine;
 
 #define FL_WBOT_WAIT_ELEV	(1<<0) // bot is waiting for an elevator to lift/descend
 #define FL_WBOT_WAIT_DOOR	(1<<1) // bot is waiting for a door or platform to move out of the way
@@ -53,7 +54,7 @@ public:
 	bool FindGoal(); // find something to do in the map
 	bool PushLevelEndGoal(); // try to beat the map
 	bool PushGoal(const BotGoal& goal, NavSectorLink* purposeLink); // returns false if this is already the current goal
-	bool PushKeyGoals(line_t* line);
+	bool PushKeyGoals(wbot::MapLine* line);
 	bool SelectGoal(std::vector<BotGoal>& goals, NavSectorLink* purposeLink);
 	void CompleteGoal();
 	void FailGoal(); // aborts the current goal and moves its blocked paths to the parent goal
@@ -74,7 +75,7 @@ public:
 	bool HandleStuckPath();
 	void GoalActionThink(); // do something with the goal object, after routing to it
 
-	bool TraceAhead(int dist, FVector3 offset, bool ignoreMonsters, FTraceResults* tr);
+	bool TraceAhead(int dist, FVector3 offset, bool ignoreMonsters, wbot::TraceResult* tr);
 
 	void DebugPrint(const char* msg);
 
@@ -87,5 +88,5 @@ public:
 	int GetSpeed2D();
 
 	// something somewhere triggered a line
-	void HandleLineActivation(line_t* line, AActor* activator);
+	void HandleLineActivation(wbot::MapLine* line, AActor* activator);
 };

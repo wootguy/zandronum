@@ -1,5 +1,7 @@
 #pragma once
-#include "bots.h"
+#include "vectors.h"
+#include "basictypes.h"
+#include "dobject.h"
 #include <unordered_set>
 #include <unordered_map>
 

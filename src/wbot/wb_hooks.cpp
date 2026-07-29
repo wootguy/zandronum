@@ -8,6 +8,7 @@
 #include "deathmatch.h"
 
 using namespace std;
+using namespace wbot;
 
 extern float g_GameSpeed;
 int g_kill_all_shootables_again_tick = 0;
@@ -38,18 +39,20 @@ TestState g_wb_test_state;
 #define MAX_TEST_TICS 21000 // 10 minutes
 
 void wbot_handle_line_activation(line_t* line, AActor* activator) {
+	MapLine& mapline = g_map.lines[line - lines];
+
 	if (!line->special) {
 		// line can no longer be activated. Remove trigger from possibly affected sectors
 		int tag = line->args[0];
 		for (int i = 0; i < numsectors; i++) {
 			if (sectors[i].tag == tag)
-				g_wb_mapinfo.remove_invalid_goals(i);
+				g_map.remove_invalid_goals(i);
 		}
 
 		if (line->backsector)
-			g_wb_mapinfo.remove_invalid_goals(line->backsector - sectors);
+			g_map.remove_invalid_goals(line->backsector - sectors);
 		if (line->frontsector)
-			g_wb_mapinfo.remove_invalid_goals(line->frontsector - sectors);
+			g_map.remove_invalid_goals(line->frontsector - sectors);
 	}
 
 	for (int i = 0; i < MAXPLAYERS; i++) {
@@ -58,7 +61,7 @@ void wbot_handle_line_activation(line_t* line, AActor* activator) {
 			continue;
 
 		CWootBot* bot = (CWootBot*)player->player->pSkullBot;
-		bot->HandleLineActivation(line, activator);
+		bot->HandleLineActivation(&mapline, activator);
 	}
 }
 
@@ -169,6 +172,8 @@ bool wbot_next_test() {
 }
 
 void wbot_map_init() {
+	g_map.init();
+
 	wbot_next_test();
 	wbot_init();
 
@@ -271,8 +276,8 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 			if (!playeringame[i] || !player)
 				continue;
 
-			if (player->player->bIsBot)	set_ori(player, 1240, 220, ANGLE_1 * 0);
-			else						set_ori(player, 978, -92, ANGLE_1 * 40);
+			if (player->player->bIsBot)	set_ori(player, 1231, 208, ANGLE_1 * 0);
+			else						set_ori(player, 1172, 550, ANGLE_1 * 40);
 
 			if (player->player->bIsBot) {
 				CWootBot* bot = (CWootBot*)player->player->pSkullBot;
@@ -316,9 +321,9 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 		int id = atoi(msg + 4);
 
 		if (id >= 0 && id < numlines) {
-			line_t* line = &lines[id];
+			MapLine* line = &g_map.lines[id];
 
-			BotGoal useGoal(g_wb_mapinfo.get_linedef_goal_action(line), id);
+			BotGoal useGoal(g_map.get_linedef_goal_action(line), id);
 
 			for (int i = 0; i < MAXPLAYERS; i++) {
 				AActor* player = players[i].mo;
@@ -336,9 +341,9 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 		int id = 685;
 
 		if (id >= 0 && id < numlines) {
-			line_t* line = &lines[id];
+			MapLine* line = &g_map.lines[id];
 
-			BotGoal useGoal(g_wb_mapinfo.get_linedef_goal_action(line), id);
+			BotGoal useGoal(g_map.get_linedef_goal_action(line), id);
 
 			for (int i = 0; i < MAXPLAYERS; i++) {
 				AActor* player = players[i].mo;

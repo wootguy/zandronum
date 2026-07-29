@@ -1,10 +1,7 @@
 #include "wb_combat.h"
 #include "wb_bot.h"
 #include "wb_util.h"
-#include "p_lnspec.h"
-#include "p_spec.h"
 #include "p_local.h"
-#include "r_utility.h"
 #include <algorithm>
 
 using namespace std;

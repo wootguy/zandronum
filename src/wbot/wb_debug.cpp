@@ -4,14 +4,11 @@
 #include "wb_util.h"
 #include "wb_route.h"
 #include "wb_map.h"
-#include "p_spec.h"
-#include "p_trace.h"
-#include "p_local.h"
-#include "r_utility.h"
 #include "d_event.h"
 #include "sv_commands.h"
 
 using namespace std;
+using namespace wbot;
 
 void wbot_debug_player_nav() {
 	AActor* player = getAnyPlayer();
@@ -20,8 +17,10 @@ void wbot_debug_player_nav() {
 
 	string navInfo;
 	int plrnavid = g_wb_nav.get_nav_id(player);
-	navInfo = "Sector " + to_string(plrnavid) + ":";
 	NavSector& nav = g_wb_nav.mesh.nodes[plrnavid];
+	MapSubsector& sub = g_map.subsectors[plrnavid];
+
+	navInfo += "Node " + to_string(plrnavid) + ":";
 
 	//int temp;
 	//AvoidLedges(player, temp);
@@ -46,25 +45,39 @@ void wbot_debug_player_nav() {
 		if (link.isJump) { navInfo += " J"; }
 	}
 
+	FVector2 playerPos(player->x, player->y);
+	int closestSeg = -1;
+	fixed_t bestDist = INT_MAX;
+	for (int i = 0; i < sub.numsegs; i++) {
+		MapSeg& seg = g_map.segs[sub.firstseg + i];
+		fixed_t dist = abs(DistanceToLine(playerPos, seg.start(), seg.end()));
+		if (dist < bestDist) {
+			bestDist = dist;
+			closestSeg = sub.firstseg + i;
+		}
+	}
+	navInfo += "\n   Segs: " + to_string(sub.numsegs);
+	navInfo += "\n   Seg: " + to_string(closestSeg);
+
+	navInfo += "\n   Sector: " + to_string(nav.sector->id);
+
 	FVector3 forward, right;
 	MakeVectors(player->angle, forward, right);
 	FVector3 start = FVector3(player->x, player->y, player->z + player->player->viewheight);
 	fixed_t testDist = 64 << FRACBITS;
-	sector_t* sector = R_PointInSubsector((fixed_t)start.X, (fixed_t)start.Y)->sector;
-	FTraceResults tr;
-	if (Trace((fixed_t)start.X, (fixed_t)start.Y, (fixed_t)start.Z, sector,
-		(fixed_t)forward.X, (fixed_t)forward.Y, 0, testDist, 0,
-		ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, NULL, tr))
+	MapSector* sector = g_map.GetSector((fixed_t)start.X, (fixed_t)start.Y);
+	TraceResult tr;
+	if (g_map.Trace(start, start + forward, 0, ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, NULL, &tr))
 	{
-		line_t* line = tr.Line;
-		navInfo += "\nLine " + to_string(tr.Line - lines) + ":";
+		MapLine* line = tr.line;
+		navInfo += "\nLine " + to_string(tr.line - g_map.lines) + ":";
 
-		if (line->special) {
-			navInfo += "\n   Special: " + to_string(line->special) + "\n   Tags:";
+		if (line->special()) {
+			navInfo += "\n   Special: " + to_string(line->special()) + "\n   Tags:";
 			for (int i = 0; i < 5; i++)
-				navInfo += " " + to_string(line->args[i]);
+				navInfo += " " + to_string(line->getArg(i));
 		}
-		navInfo += "\n   Use Sector: " + to_string(g_wb_mapinfo.line_subsectors[line - lines]);
+		navInfo += "\n   Use Sector: " + to_string(g_map.line_subsectors[line - g_map.lines]);
 	}
 
 	navInfo += "\nOrigin: " + to_string(player->x >> FRACBITS) + " " + to_string(player->y >> FRACBITS)

@@ -1,6 +1,6 @@
 #pragma once
-#include "bots.h"
 #include "wb_goal.h"
+#include "wb_map.h"
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -18,6 +18,8 @@
 #define MAX_MESH_LINKS 8192
 
 struct NavSector;
+struct wbot::MapSeg;
+struct wbot::MapSector;
 
 enum LinkBlockReason {
 	LINK_BLOCK_CLEAR,		// can walk into the next sector
@@ -33,13 +35,15 @@ struct NavSectorLink {
 	NavSector* parent = NULL;
 	NavSector* target = NULL;
 	NavSector* jumpNeighbor = NULL; // node that must be partially run into to begin the jump
+	wbot::MapSector* sector = NULL; // sector that the bot must enter to cross this link (may be different than the target sector in the case of teleports)
 	FVector2 movePos; // position to move to for crossing the link
 	int linkWidth = 0;
 	bool isTeleport = false;
 	bool isCliff = false; // crossing this segs drops you down to a floor so low that you can't get back
 	bool isJump = false; // jump required to reach the target sector
 	fixed_t jumpDist = 0; // distance to the nearest landing point in the target sector
-	seg_t* seg = NULL;
+	wbot::MapLine* linedef = NULL; // linedef this link crosses
+	wbot::FSegment2 seg; // overlapping region between the source and target nodes
 	
 	int routeNumIgnore; // ignore this path for the next route if set to the current route call num
 
@@ -52,7 +56,7 @@ struct NavSectorLink {
 	FVector2 GetJumpEndPos(FVector2 targetPos); // find the closest point to land
 	
 	int blocked(AActor* actor, bool recurse=true); // returns LinkBlockReason
-	std::vector<sector_t*> getClippedSectors(AActor* actor);
+	std::vector<wbot::MapSector*> getClippedSectors(AActor* actor);
 	bool walkable();
 	bool jumpable();
 	bool isJumpValid(); // checks if jump height and distance is valid currently
@@ -64,6 +68,7 @@ struct NavSector {
 	bool hasCliffs = false; // bot should be careful here
 	bool doesDamage = false; // bot should try to route around this
 	std::vector<NavSectorLink*> links;
+	wbot::MapSector* sector;
 
 	int routeNumIgnore; // ignore this sector for the next route if set to the current route call num
 
@@ -80,8 +85,6 @@ struct NavSector {
 	bool isFloorMoving();
 	bool isCeilMoving();
 	std::vector<BotGoal>& getTriggers();
-
-	sector_t* sector();
 
 	// get vertical space between the floor and ceiling at the center point of the subsector
 	fixed_t getHeight();
@@ -143,7 +146,7 @@ class SectorNavMesh {
 public:
 	BotMeshData mesh;
 	std::vector<AActor*> propBlockers;
-	std::vector<sector_t*> pending_sector_relinks; // sectors that will be relinked as soon as they stop moving
+	std::vector<wbot::MapSector*> pending_sector_relinks; // sectors that will be relinked as soon as they stop moving
 	AstarNode* astarNodes; // temp data for astar routing
 
 	int pathTests; // number of blocked path checks
@@ -158,7 +161,7 @@ public:
 	BotRoute get_astar_route(const RouteOpts& opts);
 	
 	// get key(s) required to use the linedef. Returns false if keys don't exist anywhere in the map.
-	bool get_key_goals_for_line(AActor* actor, line_t* linedef, std::vector<BotGoal>& keyGoals);
+	bool get_key_goals_for_line(AActor* actor, wbot::MapLine* linedef, std::vector<BotGoal>& keyGoals);
 
 	// find all weapons in the map with the given name
 	std::vector<BotGoal> get_weapon_goals(const char* wepname);
@@ -170,7 +173,7 @@ public:
 	int get_nav_id(AActor* actor);
 
 	// call to create or remove links on nodes that no longer move
-	void relink_sector(sector_t* sec);
+	void relink_sector(wbot::MapSector* sec);
 	void relink_pending_sector();
 
 private:

@@ -1,5 +1,4 @@
 #pragma once
-#include "bots.h"
 #include "wb_goal.h"
 #include "wb_nav.h"
 #include <unordered_set>
@@ -8,6 +7,8 @@
 #define RUN_SPEED 100 // max move speed allowed before the server kicks you
 
 class CWootBot;
+class APlayerPawn;
+class player_t;
 struct NavSector;
 struct NavSectorLink;
 
