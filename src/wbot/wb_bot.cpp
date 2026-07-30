@@ -230,6 +230,8 @@ void CWootBot::GoalActionThink() {
 			return;
 		}
 
+		//draw_debug_line(goal.shootAlignment.shootFrom, goal.shootAlignment.shootAt, pActor);
+
 		int dist = GetDistance(goal.shootAlignment.shootFrom) >> FRACBITS;
 		int moveSpeed = std::min(RUN_SPEED, dist);
 		if (MoveTo(goal.shootAlignment.shootFrom, 8, moveSpeed) && GetSpeed2D() < 10) {
@@ -297,10 +299,9 @@ bool CWootBot::MoveTo(FVector2 pos, int radius, int speed) {
 		int d = tr.frac * useDist;
 
 		// jump if not too far and this isn't an impassable wall
-		if (tr.line->backsector && d < 32) {
-			fixed_t curZ = pActor->Sector->floorplane.ZatPoint(pActor->x, pActor->y);
+		if (tr.line->backsector && d < 32 && m_pPlayer->onground) {
 			fixed_t backZ = tr.line->backsector->getFloorZ();
-			int jumpHeight = (backZ - curZ) >> FRACBITS;
+			int jumpHeight = (backZ - pActor->z) >> FRACBITS;
 
 			// ...and it's possible and necessary to jump up
 			if (jumpHeight > STEP_HEIGHT && jumpHeight <= JUMP_HEIGHT)
@@ -376,22 +377,34 @@ bool CWootBot::StopMoving() {
 FVector2 CWootBot::AvoidCornersVector(FVector2 wantDir) {
 	// strafe around objects/walls partially blocking the way
 	fixed_t zTest = (STEP_HEIGHT + 1) << FRACBITS;
-	FVector3 wantDirf(wantDir.X * (1 << FRACBITS), wantDir.Y * (1 << FRACBITS), 0);
+	FVector3 testDir = FVector3(wantDir.X * FRACUNIT, wantDir.Y * FRACUNIT, 0) * 32;
 	FVector3 viewPos = FVector3(pActor->x, pActor->y, pActor->z + zTest);
-	fixed_t testDist = 32 << FRACBITS;
 	fixed_t rightOfs = 16 << FRACBITS;
 	FVector3 rightDir(wantDir.Y, -wantDir.X, 0);
 	FVector3 rightPos = viewPos + rightDir * rightOfs;
 	FVector3 leftPos = viewPos + rightDir * -rightOfs;
 	TraceResult trLeft, trRight;
 
-	g_map.Trace(rightPos, rightPos + wantDirf, 0xffffffff, ML_BLOCKEVERYTHING, pActor, &trRight);
-	g_map.Trace(leftPos, leftPos + wantDirf, 0xffffffff, ML_BLOCKEVERYTHING, pActor, &trLeft);
-
-	//draw_debug_line(rightPos, rightPos + wantDirf * 32, pActor);
-	//draw_debug_line(leftPos, leftPos + wantDirf * 32, pActor);
+	g_map.Trace(rightPos, rightPos + testDir, 0xffffffff, ML_BLOCKEVERYTHING, pActor, &trRight);
+	g_map.Trace(leftPos, leftPos + testDir, 0xffffffff, ML_BLOCKEVERYTHING, pActor, &trLeft);
 
 	if (trLeft.frac != trRight.frac) {
+		/*
+		if (trRight.frac < trLeft.frac) {
+			if (trRight.actor)
+				DebugPrint(VarArgs("Avoid %s\n", trRight.actor->GetClass()->TypeName.GetChars()));
+			else
+				DebugPrint(VarArgs("Avoid line %d\n", trRight.line->id));
+			draw_debug_line(rightPos, rightPos + testDir * 32, pActor);
+		}
+		else {
+			if (trLeft.actor)
+				DebugPrint(VarArgs("Avoid %s\n", trLeft.actor->GetClass()->TypeName.GetChars()));
+			else
+				DebugPrint(VarArgs("Avoid line %d\n", trLeft.line->id));
+			draw_debug_line(leftPos, leftPos + testDir * 32, pActor);
+		}
+		*/
 		return trRight.frac < trLeft.frac ? -rightDir : rightDir;
 	}
 
@@ -407,12 +420,22 @@ FVector2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
 
 	int targetNav = -1;
 	int idealNav = -1;
+	unordered_set<int> ignoreLinks;
 	if (m_routeController.m_route.route.size() > 0) {
 		idealNav = m_routeController.m_route.route[0];
 		nav = &g_wb_nav.mesh.nodes[idealNav];
 	}
 	if (m_routeController.m_route.route.size() > 1) {
 		targetNav = m_routeController.m_route.route[1];
+		NavSectorLink* targlink = nav->getLink(targetNav);
+		if (targlink) {
+			// ignore any links overlapping the current route link
+			// (there may be multiple jump links on top of a walkable link)
+			for (NavSectorLink* link : nav->links) {
+				if (link->seg.a == targlink->seg.a && link->seg.b == targlink->seg.b)
+					ignoreLinks.insert(link->id);
+			}
+		}
 	}
 
 	fixed_t ignoreZ = actor->z + (STEP_HEIGHT << FRACBITS); // can't fall off a cliff above us
@@ -446,6 +469,9 @@ FVector2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
 
 			if (link->target->id == targetNav || link->target->id == idealNav)
 				continue; // don't back off from segments that must be crossed
+
+			if (ignoreLinks.count(link->id))
+				continue;
 
 			FVector2 v1 = link->seg.a;
 			FVector2 v2 = link->seg.b;
@@ -489,13 +515,13 @@ FVector2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
 }
 
 void CWootBot::UpdatePositionFlags() {
-	m_routeController.m_navid = g_wb_nav.get_nav_id(pActor);
+	m_routeController.m_navid = g_wb_nav.get_nav_id(m_pPlayer);
 
-	stateFlags &= ~(FL_WBOT_FLYING | FL_WBOT_ON_ELEV);
+	stateFlags &= ~(FL_WBOT_FLYING | FL_WBOT_ON_ELEV | FL_WBOT_OVERHANG);
 	if (m_routeController.m_navCur) {
 		NavSector& nav = g_wb_nav.mesh.nodes[m_routeController.m_navid];
 		if (pActor->z > nav.getFloorZ())
-			stateFlags |= FL_WBOT_FLYING;
+			stateFlags |= m_pPlayer->onground ? FL_WBOT_OVERHANG : FL_WBOT_FLYING;
 		if (nav.sector->isFloorMoving())
 			stateFlags |= FL_WBOT_ON_ELEV;
 	}
@@ -742,12 +768,19 @@ void CWootBot::FailGoal() {
 		pActor->velz = 0;
 	}
 
+	bool bubbleFailure = curGoal.required;
+
+	if ((!bubbleFailure || m_goals.size() == 1)) {
+		if (++goalFailCounter > 10) {
+			DebugPrint("I can't reach any goals from here! Time to die.\n");
+			P_DamageMobj(pActor, pActor, pActor, TELEFRAG_DAMAGE, NAME_Suicide);
+		}
+	}
+
 	if (m_goals.size() == 1) {
 		m_goals.clear();
 		return;
 	}
-
-	bool bubbleFailure = curGoal.required;
 
 	// bubble up the blockers from this goal and try another route to the parent goal
 	BotGoal& prevGoal = m_goals[m_goals.size() - 2];
@@ -756,9 +789,6 @@ void CWootBot::FailGoal() {
 
 	if (bubbleFailure) {
 		FailGoal(); // fail until hitting an optional/parent goal
-	} else if (++goalFailCounter > 10) {
-		DebugPrint("I can't reach any goals from here! Time to die.\n");
-		P_DamageMobj(pActor, pActor, pActor, TELEFRAG_DAMAGE, NAME_Suicide);
 	}
 }
 

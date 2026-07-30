@@ -30,6 +30,9 @@ FVector3 NavSectorLink::pos3D() {
 int NavSectorLink::blocked(AActor* actor, bool recurse) {
 	g_wb_nav.pathTests++;
 
+	// TODO: only do this when sectors move
+	updateFlags();
+
 	int walkability = g_map.sector_border_walkability(parent->sector, sector);
 	if (walkability != LINK_BLOCK_CLEAR) {
 		MapLine* line = linedef;
@@ -47,17 +50,17 @@ int NavSectorLink::blocked(AActor* actor, bool recurse) {
 		return walkability;
 	}
 
-	// check if jumps are valid for dynamic links that depend on from/to sector states
-	if (!jumpable()) {
-		return LINK_BLOCK_CANT_JUMP;
-	}
-
 	const fixed_t pradius = PLAYER_RADIUS << FRACBITS;
 	fixed_t parentFloorZ = parent->getFloorZ();
 	FVector3 jumpOverPos = FVector3(movePos, parentFloorZ + (JUMP_HEIGHT << FRACBITS));
 	FVector3 duckUnderPos = FVector3(movePos, parentFloorZ + (DUCK_HEIGHT << FRACBITS));
 	if (IsBoxClipped(jumpOverPos, pradius, 0) && IsBoxClipped(duckUnderPos, pradius, 0)) {
 		return LINK_BLOCK_CLIPPED;
+	}
+
+	// check if jumps are valid for dynamic links that depend on from/to sector states
+	if (!jumpable()) {
+		return LINK_BLOCK_CANT_JUMP;
 	}
 
 	return LINK_BLOCK_CLEAR;
@@ -83,6 +86,14 @@ bool NavSectorLink::jumpable() {
 	FVector3 start = pos3D() + FVector3(0, 0, 56 << FRACBITS);
 	FVector3 end = target->pos3D() + FVector3(0, 0, 56 << FRACBITS);
 
+	const fixed_t pradius = PLAYER_RADIUS << FRACBITS;
+	fixed_t targetFloorZ = target->getFloorZ();
+	FVector3 jumpOverPos = FVector3(end, targetFloorZ + (JUMP_HEIGHT << FRACBITS));
+	FVector3 duckUnderPos = FVector3(end, targetFloorZ + (DUCK_HEIGHT << FRACBITS));
+	if (IsBoxClipped(jumpOverPos, pradius, 0) && IsBoxClipped(duckUnderPos, pradius, 0)) {
+		return false;
+	}
+
 	if (TraceLine(start, end, true, NULL, NULL)) {
 		return false;
 	}
@@ -103,6 +114,24 @@ bool NavSectorLink::isJumpValid() {
 		return false; // not currently an edge that can help with jumping
 
 	return true;
+}
+
+void NavSectorLink::updateFlags() {
+	bool oldCliff = isCliff;
+	isCliff = parent->getFloorZ() - target->getFloorZ() > (JUMP_HEIGHT << FRACBITS);
+
+	if (isCliff && !oldCliff) {
+		parent->hasCliffs = true;
+	}
+	else if (!isCliff && oldCliff) {
+		parent->hasCliffs = false;
+		for (NavSectorLink* link : parent->links) {
+			if (link->isCliff) {
+				parent->hasCliffs = true;
+				break;
+			}
+		}
+	}
 }
 
 FVector2 NavSectorLink::GetJumpStartPos(FVector2 targetPos) {	
@@ -426,11 +455,26 @@ int SectorNavMesh::get_nav_id(AActor* actor) {
 	return get_nav_id(actor->x, actor->y);
 }
 
+int SectorNavMesh::get_nav_id(player_t* plr) {
+	AActor* pActor = plr->mo;
+	FVector3 pos(pActor->x, pActor->y, pActor->z);
+
+	MapSubsector* centeredSub = g_map.GetSubsector(pos.X, pos.Y);
+	
+	if (centeredSub->sector->getFloorZ() + (STEP_HEIGHT << FRACBITS) < pos.Z && plr->onground) {
+		// above the centered subsector because of hanging over a ledge
+		FVector2 floorPoint = GetFloorPosition(pos, pActor->radius);
+		return g_map.GetSubsector(floorPoint.X, floorPoint.Y)->id;
+	}
+
+	return centeredSub->id;
+}
+
 float SectorNavMesh::node_heuristic(int a, int b) {
 	NavSector& nodea = mesh.nodes[a];
 	NavSector& nodeb = mesh.nodes[b];
 	FVector2 delta = nodea.pos() - nodeb.pos();
-	return delta.Length();
+	return delta.Length() / (float)FRACUNIT;
 }
 
 float SectorNavMesh::path_dist(NavSectorLink& link) {
@@ -438,9 +482,9 @@ float SectorNavMesh::path_dist(NavSectorLink& link) {
 	NavSector& target = *link.target;
 
 	if (link.isTeleport)
-		return (link.pos() - parent.pos()).Length();
+		return (link.pos() - parent.pos()).Length() / (float)FRACUNIT;
 
-	return (parent.pos() - target.pos()).Length();
+	return (parent.pos() - target.pos()).Length() / (float)FRACUNIT;
 }
 
 
@@ -451,35 +495,44 @@ float SectorNavMesh::path_cost(NavSectorLink& link, float dist, const RouteOpts&
 
 	if (link.linkWidth < PLAYER_WIDTH) {
 		// try to avoid tiny links. They gets the bot stuck on corners.
-		cost += 200 << FRACBITS;
+		cost += 200;
 	}
 
 	if (!opts.timeSensitive) {
 		// avoid things that are hard to navigate if speed isn't important
 
 		if (target.doesDamage) {
-			cost += dist * (8 << FRACBITS); // avoid damage sectors
+			cost += dist * 8; // avoid damage sectors
 		}
 
 		if (link.isJump) {
 			// jumps are error-prone. If you must take one, choose the shortest
-			cost += dist * (4 << FRACBITS);
+			cost += dist * 4;
 		}
 	}
 	
-	if (link.isJump && !link.isJumpValid()) {
-		// jumps that can't be made yet are error prone
-		cost += 4000 << FRACBITS;
+	if (link.isJump) {
+		if (!link.isJumpValid()) {
+			// jumps that can't be made yet are error prone
+			cost += 4000;
+		}
+		if (link.jumpNeighbor->doesDamage) {
+			// failing this jump will hurt
+			cost += 2000;
+		}
+	} else if (link.isCliff) {
+		// avoid dropping down cliffs
+		cost += 2000;
 	}
 
 	if (g_map.sector_border_walkability(link.parent->sector, link.sector) == LINK_BLOCK_TOO_HIGH) {
 		// avoid elevators, so that jumping into a pit to take an elevator isn't preferred
 		// over walking around it
-		cost += (2000 << FRACBITS);
-	}
+		cost += 2000;
+	}	
 
 	if (opts.blockedPathHandling == WBOT_ROUTE_BLOCK_EXPENSIVE && link.blocked(opts.actor))
-		cost += 4000 << FRACBITS;
+		cost += 4000;
 
 	return cost;
 }

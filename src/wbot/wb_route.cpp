@@ -183,6 +183,15 @@ bool CBotRouteController::BeCareful() {
 		shouldBeCareful = true;
 	}
 
+	if (!(pBot->stateFlags & FL_WBOT_RUSHING)) {
+		// slowly drop down cliffs to avoid overshooting the target sector
+		if (m_navLink && m_navLink->isCliff && !m_navLink->isJump) {
+			m_routeSpeed *= 0.5f;
+			m_nodeRadius = 8;
+			shouldBeCareful = true;
+		}
+	}
+
 	if (shouldBeCareful && pBot->GetSpeed2D() > m_routeSpeed) {
 		pBot->stateFlags |= FL_WBOT_SLOW_DOWN;
 		pBot->StopMoving();
@@ -193,6 +202,8 @@ bool CBotRouteController::BeCareful() {
 }
 
 void CBotRouteController::JumpThink() {
+	FVector3 pos(pActor->z, pActor->y, pActor->z);
+
 	switch (jumpState) {
 	case WBOT_JUMP_PREP: {
 		int dist = pBot->GetDistance(jumpBackupPos) >> FRACBITS;
@@ -213,22 +224,24 @@ void CBotRouteController::JumpThink() {
 		break;
 	}
 	case WBOT_JUMP_RUN: {
-		// run to the jumping off point
 		if (pBot->MoveTo(jumpStartPos, 16, m_routeSpeed)) {
-			// now aim for the landing position
-			pBot->MoveTo(jumpEndPos, 0, m_routeSpeed);
+			jumpState = WBOT_JUMP_LAUNCH;
+		}
+		break;
+	}
+	case WBOT_JUMP_LAUNCH: {
+		pBot->MoveTo(jumpEndPos, 0, m_routeSpeed);
 
-			if (pBot->stateFlags & FL_WBOT_FLYING) {
-				// bot is off a ledge now, start the jump
-				bool bigJump = m_navLink->jumpDist > 100 << FRACBITS;
-				if (m_navTarget->getFloorZ() > m_navIdeal->getFloorZ() + (STEP_HEIGHT << FRACBITS))
-					bigJump = true;
+		if (pBot->stateFlags & (FL_WBOT_OVERHANG | FL_WBOT_FLYING)) {
+			// bot is over a ledge now, start the jump
+			bool bigJump = m_navLink->jumpDist > 100 << FRACBITS;
+			if (m_navTarget->getFloorZ() > m_navIdeal->getFloorZ() + (STEP_HEIGHT << FRACBITS))
+				bigJump = true;
 
-				if (bigJump)
-					pBot->m_lButtons |= BT_JUMP;
+			if (bigJump)
+				pBot->m_lButtons |= BT_JUMP;
 
-				jumpState = WBOT_JUMP_FLY;
-			}
+			jumpState = WBOT_JUMP_FLY;
 		}
 		break;
 	}
@@ -253,7 +266,6 @@ void CBotRouteController::JumpThink() {
 		else {
 			// try to land in the right spot
 			FVector3 landPos = FVector3(jumpEndPos, m_navTarget->getFloorZ());
-			FVector3 pos(pActor->z, pActor->y, pActor->z);
 			FVector3 idealDir = (landPos - pos).Unit();
 			FVector3 velDir = FVector3(pActor->velx, pActor->vely, pActor->velz).Unit();
 			fixed_t distLeft = pBot->GetDistance(landPos);
@@ -306,6 +318,8 @@ void CBotRouteController::JumpFail() {
 			// and many jumps just don't work
 			curgoal->blockers.insert(m_navLink->id);
 		}
+
+		CancelRoute();
 	}
 }
 
@@ -355,8 +369,20 @@ bool CBotRouteController::ElevatorThink(bool linkBlocked) {
 			fixed_t elevZ = thisSector->getFloorZ();
 			fixed_t moveDelta = elevZ - m_lastElevZ;
 
-			// elevator stopped at the top or started going down?
-			waitedLongEnough = !linkBlocked && moveDelta <= 0;
+			// elevator stopped at the top
+			waitedLongEnough = !linkBlocked && moveDelta == 0;
+
+			if (linkBlocked && moveDelta < 0 && m_elevRaiseTics > 1) {
+				// elevator is lowering after reaching the top or getting blocked,
+				// and the jump link still isn't doable.
+				BlockedPathThink(m_navLink, LINK_BLOCK_CANT_JUMP);
+				return false;
+			}
+
+			if (moveDelta > 0) {
+				// must be 2 or greater to exclude the first tic the elev is tracked, prevent false positives
+				m_elevRaiseTics++;
+			}
 
 			m_lastElevZ = elevZ;
 		}
@@ -387,6 +413,7 @@ bool CBotRouteController::ElevatorThink(bool linkBlocked) {
 	}
 	else {
 		m_lastElevZ = 0;
+		m_elevRaiseTics = 0;
 	}
 
 	return false;
@@ -432,8 +459,15 @@ void CBotRouteController::MoveThruLink() {
 				pBot->MoveTo(teleGoal, 0, m_routeSpeed);
 			}
 			else {
-				// move towards the target sector until we end up inside it
-				pBot->MoveTo(m_navTarget->pos(), 0, m_routeSpeed);
+				if (m_navLink->isCliff) {
+					// may need to move past the center in case its a tiny polygon under a cliff
+					FVector2 dropDir = (m_navTarget->pos() - m_navLink->pos()).Unit();
+					pBot->MoveTo(m_navLink->pos() + dropDir * (100 << FRACBITS), 0, m_routeSpeed);
+				}
+				else {
+					// move towards the target sector until we end up inside it
+					pBot->MoveTo(m_navTarget->pos(), 0, m_routeSpeed);
+				}
 			}
 			break;
 		}
@@ -533,7 +567,7 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link, int blockReason)
 		if (!(targetMovement & (FL_SECTOR_MOVE_FLOOR_DOWN | FL_SECTOR_MOVE_CEIL_UP))) {
 			tryTargetTrigger = false;
 		}
-		if (!(targetMovement & FL_SECTOR_MOVE_FLOOR_UP)) {
+		if (!(parentMovement & FL_SECTOR_MOVE_FLOOR_UP)) {
 			tryParentTrigger = false;
 		}
 		break;

@@ -247,6 +247,52 @@ bool IsBoxWallClipped(const FVector2& pos, fixed_t radius) {
 	return false;
 }
 
+FVector2 GetFloorPosition(const FVector3& pos, fixed_t radius) {
+	FBoundingBox box(pos.X, pos.Y, radius);
+	FBlockLinesIterator it(box);
+	line_t* ld;
+
+	fixed_t bestDist = INT_MAX;
+
+	FVector2 bestFloorPoint = pos;
+
+	while ((ld = it.Next())) {
+
+		if (box.Right() <= ld->bbox[BOXLEFT]
+			|| box.Left() >= ld->bbox[BOXRIGHT]
+			|| box.Top() <= ld->bbox[BOXBOTTOM]
+			|| box.Bottom() >= ld->bbox[BOXTOP]) {
+			continue;
+		}
+
+		if (box.BoxOnLineSide(ld) != -1)
+			continue; // doesn't cross the line
+
+		if (!ld->backsector || (ld->flags & ML_BLOCKING))
+			return pos; // crosses an impassable line. stuck.
+
+		fixed_t frontFloor = ld->frontsector->floorplane.Zat0();
+		fixed_t backFloor = ld->backsector->floorplane.Zat0();
+
+		if (pos.Z == backFloor || pos.Z == frontFloor) {
+			MapLine& line = g_map.lines[ld - lines];
+			
+			// find a position just beyond this line
+			FVector2 moveDir = pos.Z == backFloor ? line.normal() * -1 : line.normal();
+			FVector2 floorPoint = line.start() + moveDir * FRACUNIT;
+			fixed_t dist = fabs(DistanceToLine(pos, floorPoint, floorPoint + line.dir() * FRACUNIT));
+
+			if (dist < bestDist) {
+				fixed_t asd = fabs(DistanceToLine(pos, floorPoint, floorPoint + line.dir() * FRACUNIT));
+				bestDist = dist;
+				bestFloorPoint = pos + moveDir * dist;
+			}
+		}
+	}
+
+	return bestFloorPoint;
+}
+
 bool IsBoxClipped(const FVector3& pos, fixed_t radius, fixed_t height) {
 	FBoundingBox box(pos.X, pos.Y, radius);
 	FBlockLinesIterator it(box);
@@ -548,8 +594,12 @@ bool TraceImpassable(FVector2 start, FVector2 end) {
 			FVector2 pos = FVector2(StartX + FixedMul(Vx, dist), StartY + FixedMul(Vy, dist));
 			sector_t* hitSector = R_PointInSubsector(pos.X, pos.Y)->sector;
 
-			if (hitSector != line->frontsector && hitSector != line->backsector)
-				continue; // bug in trace where lines in other sectors nowhere near the impact point are hit
+			if (hitSector != line->frontsector && hitSector != line->backsector) {
+				FVector2 lineStart(line->v1->x, line->v1->y);
+				FVector2 lineEnd(line->v2->x, line->v2->y);
+				if (!PointAlignedSegment(pos, lineStart, lineEnd))
+					continue; // bug in trace where lines in other sectors nowhere near the impact point are hit
+			}
 
 			return true;
 		}

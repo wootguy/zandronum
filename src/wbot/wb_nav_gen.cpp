@@ -19,7 +19,7 @@ bool SectorNavMeshGenerator::trace_jump(FVector3 start, FVector3 end, int fromMo
 	for (int i = -2; i <= 2; i++) {
 		if (TraceLine(start + rightDir * i * rightStep, end + rightDir * i * rightStep, true, NULL, &tr)) {
 			if (tr.hitType == TRACE_HitWall && tr.line && tr.line->backsector) {
-				if (tr.line->backsector->moveFlags) {
+				if (tr.sector != tr.line->backsector && tr.line->backsector->moveFlags) {
 					continue; // wall may move out of the way in the future
 				}
 			}
@@ -37,7 +37,8 @@ bool SectorNavMeshGenerator::trace_jump(FVector3 start, FVector3 end, int fromMo
 				// trace has a bug where you can impact a wall in a different sector
 				MapSector* impactSector = g_map.GetSubsector(tr.endPos.X, tr.endPos.Y)->sector;
 				if (tr.line->frontsector != impactSector && tr.line->backsector != impactSector) {
-					continue; // impossible to have hit this line
+					if (!PointAlignedSegment(tr.endPos, tr.line->start(), tr.line->end()))
+						continue; // impossible to have hit this line
 				}
 			}
 
@@ -453,6 +454,10 @@ int SectorNavMeshGenerator::relink_node(BotMeshData& mesh, int id, std::vector<A
 				otherNav.links.erase(otherNav.links.begin() + k);
 				k--;
 				removed++;
+			}
+			else {
+				// still valid. Update cliff flag
+				link.updateFlags();
 			}
 		}
 	}

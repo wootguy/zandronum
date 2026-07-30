@@ -15,12 +15,15 @@ void wbot_debug_player_nav() {
 	if (!player)
 		return;
 
+	FVector2 playerPos(player->x, player->y);
+
 	string navInfo;
 	int plrnavid = g_wb_nav.get_nav_id(player);
 	NavSector& nav = g_wb_nav.mesh.nodes[plrnavid];
 	MapSubsector& sub = g_map.subsectors[plrnavid];
 
-	navInfo += "Node " + to_string(plrnavid) + ":";
+	navInfo += "Hover Node: " + to_string(g_wb_nav.get_nav_id(player->player));
+	navInfo += "\nNode " + to_string(plrnavid) + ":";
 
 	//int temp;
 	//AvoidLedges(player, temp);
@@ -29,6 +32,17 @@ void wbot_debug_player_nav() {
 	vector<BotGoal>& triggers = nav.getTriggers();
 	for (int i = 0; i < triggers.size(); i++) {
 		navInfo += "\n      " + triggers[i].desc();
+	}
+
+	int closestLink = -1;
+	fixed_t bestDist = INT_MAX;
+	for (int i = 0; i < nav.links.size(); i++) {
+		NavSectorLink& link = *nav.links[i];
+		fixed_t dist = (playerPos - link.pos()).Length();
+		if (dist < bestDist || (dist == bestDist && link.isJump)) {
+			bestDist = dist;
+			closestLink = link.id;
+		}
 	}
 
 	navInfo += "\n   Links:";
@@ -43,11 +57,21 @@ void wbot_debug_player_nav() {
 		if (link.isCliff) { navInfo += " C"; }
 		if (link.isTeleport) { navInfo += " T"; }
 		if (link.isJump) { navInfo += " J"; }
+
+		if (closestLink == link.id) {
+			RouteOpts opts;
+			opts.actor = player;
+			float dist = g_wb_nav.path_dist(link);
+			float cost = g_wb_nav.path_cost(link, dist, opts);
+
+			navInfo += " *";
+			navInfo += "\n         dist: " + to_string((int)dist >> 16);
+			navInfo += "\n         cost: " + to_string((int)cost);
+		}
 	}
 
-	FVector2 playerPos(player->x, player->y);
 	int closestSeg = -1;
-	fixed_t bestDist = INT_MAX;
+	bestDist = INT_MAX;
 	for (int i = 0; i < sub.numsegs; i++) {
 		MapSeg& seg = g_map.segs[sub.firstseg + i];
 		fixed_t dist = abs(DistanceToLine(playerPos, seg.start(), seg.end()));
@@ -60,24 +84,32 @@ void wbot_debug_player_nav() {
 	navInfo += "\n   Seg: " + to_string(closestSeg);
 
 	navInfo += "\n   Sector: " + to_string(nav.sector->id);
+	if (nav.sector->special())
+		navInfo += "\n      Special: " + to_string(nav.sector->special());
 
 	FVector3 forward, right;
 	MakeVectors(player->angle, forward, right);
 	FVector3 start = FVector3(player->x, player->y, player->z + player->player->viewheight);
-	fixed_t testDist = 64 << FRACBITS;
 	MapSector* sector = g_map.GetSector((fixed_t)start.X, (fixed_t)start.Y);
 	TraceResult tr;
-	if (g_map.Trace(start, start + forward, 0, ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, NULL, &tr))
+	if (g_map.Trace(start, start + forward*64, 0xffffffff, ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, player, &tr))
 	{
 		MapLine* line = tr.line;
-		navInfo += "\nLine " + to_string(tr.line - g_map.lines) + ":";
 
-		if (line->special()) {
-			navInfo += "\n   Special: " + to_string(line->special()) + "\n   Tags:";
-			for (int i = 0; i < 5; i++)
-				navInfo += " " + to_string(line->getArg(i));
+		if (line) {
+			navInfo += "\nLine " + to_string(tr.line - g_map.lines) + ":";
+
+			if (line->special()) {
+				navInfo += "\n   Special: " + to_string(line->special()) + "\n   Tags:";
+				for (int i = 0; i < 5; i++)
+					navInfo += " " + to_string(line->getArg(i));
+				navInfo += "\n   Use Sector: " + to_string(g_map.line_subsectors[line - g_map.lines]);
+			}
 		}
-		navInfo += "\n   Use Sector: " + to_string(g_map.line_subsectors[line - g_map.lines]);
+		if (tr.actor) {
+			navInfo += string("\nActor ") + tr.actor->GetClass()->TypeName.GetChars() + ":";
+			navInfo += "\n   radius: " + to_string(tr.actor->radius >> 16);
+		}
 	}
 
 	navInfo += "\nOrigin: " + to_string(player->x >> FRACBITS) + " " + to_string(player->y >> FRACBITS)
@@ -100,7 +132,7 @@ void wbot_debug(CWootBot* pBot) {
 	AActor* pActor = pBot->pActor;
 	g_wb_nav.draw_nodes(pActor);
 
-	int thisSubId = g_wb_nav.get_nav_id(pActor);
+	int thisSubId = g_wb_nav.get_nav_id(pActor->player);
 
 	string routeStr = "Route: " + to_string(thisSubId);
 	if (pBot->m_routeController.pretendRouteSector >= 0) {
@@ -137,11 +169,13 @@ void wbot_debug(CWootBot* pBot) {
 	if (walkState == WBOT_WALK_NODE_CENTER) { stateStr += " WALK_CENTER"; }
 	if (jumpState == WBOT_JUMP_PREP) { stateStr += " JUMP_PREP"; }
 	if (jumpState == WBOT_JUMP_RUN) { stateStr += " JUMP_RUN"; }
+	if (jumpState == WBOT_JUMP_LAUNCH) { stateStr += " JUMP_LAUNCH"; }
 	if (jumpState == WBOT_JUMP_FLY) { stateStr += " JUMP_FLY"; }
 	if (pBot->stateFlags & FL_WBOT_WAIT_ELEV) { stateStr += " WAIT_ELEV"; }
 	if (pBot->stateFlags & FL_WBOT_ON_ELEV) { stateStr += " ON_ELEV"; }
 	if (pBot->stateFlags & FL_WBOT_WAIT_DOOR) { stateStr += " WAIT_DOOR"; }
 	if (pBot->stateFlags & FL_WBOT_FLYING) { stateStr += " FLY"; }
+	if (pBot->stateFlags & FL_WBOT_OVERHANG) { stateStr += " OVERHANG"; }
 	if (pBot->stateFlags & FL_WBOT_RUSHING) { stateStr += " RUSH"; }
 	if (pBot->stateFlags & FL_WBOT_SLOW_DOWN) { stateStr += " SLOW_DOWN"; }
 	if (pPlayer->cheats & (CF_FROZEN | CF_TOTALLYFROZEN)) { stateStr += " FROZEN"; }

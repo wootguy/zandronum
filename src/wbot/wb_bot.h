@@ -11,10 +11,11 @@ struct wbot::MapLine;
 
 #define FL_WBOT_WAIT_ELEV	(1<<0) // bot is waiting for an elevator to lift/descend
 #define FL_WBOT_WAIT_DOOR	(1<<1) // bot is waiting for a door or platform to move out of the way
-#define FL_WBOT_FLYING		(1<<2) // bot is jumping, falling, or above a gap in the floor
-#define FL_WBOT_RUSHING		(1<<3) // bot is hurrying to reach a sector before a timed event ends
-#define FL_WBOT_ON_ELEV		(1<<4) // bot is standing on a platform that is moving or about to move
-#define FL_WBOT_SLOW_DOWN	(1<<5) // bot is trying to reduce their speed
+#define FL_WBOT_FLYING		(1<<2) // bot is jumping or falling
+#define FL_WBOT_OVERHANG	(1<<3) // bot is overhanging a ledge
+#define FL_WBOT_RUSHING		(1<<4) // bot is hurrying to reach a sector before a timed event ends
+#define FL_WBOT_ON_ELEV		(1<<5) // bot is standing on a platform that is moving or about to move
+#define FL_WBOT_SLOW_DOWN	(1<<6) // bot is trying to reduce their speed
 
 class CWootBot : public CSkullBot {
 public:

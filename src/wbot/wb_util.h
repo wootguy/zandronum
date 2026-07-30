@@ -43,6 +43,9 @@ bool IsBoxClipped(const FVector3& pos, fixed_t radius, fixed_t height);
 // true if the box is stuck inside an impassable wall
 bool IsBoxWallClipped(const FVector2& pos, fixed_t radius);
 
+// returns the position inside the box which is preventing the box from falling
+FVector2 GetFloorPosition(const FVector3& pos, fixed_t radius);
+
 // get sectors the box is clipping into
 std::vector<wbot::MapSector*> GetBoxClipSectors(const FVector3& pos, fixed_t radius, fixed_t height);
 

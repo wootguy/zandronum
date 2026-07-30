@@ -276,8 +276,8 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 			if (!playeringame[i] || !player)
 				continue;
 
-			if (player->player->bIsBot)	set_ori(player, 1231, 208, ANGLE_1 * 0);
-			else						set_ori(player, 1172, 550, ANGLE_1 * 40);
+			if (player->player->bIsBot)	set_ori(player, -1771, -1531, ANGLE_1 * 0);
+			else						set_ori(player, -1630, -1498, ANGLE_1 * 110);
 
 			if (player->player->bIsBot) {
 				CWootBot* bot = (CWootBot*)player->player->pSkullBot;

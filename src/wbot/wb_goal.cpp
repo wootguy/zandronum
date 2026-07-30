@@ -178,6 +178,13 @@ void BotGoal::TestBossBrainShootRay(FVector3 brainPos, FVector3 rayStart, FVecto
 	FVector3 shootDelta = shootPos - impactPos;
 	fixed_t shootLen = shootDelta.Length();
 
+	// check vertical clearance for the rocket
+	FVector3 lowerPos = impactPos - FVector3(0, 0, (ROCKET_RADIUS / 2) << FRACBITS);
+	TraceLine(lowerPos, shootPos, true, NULL, &tr);
+	if (tr.frac < 0.9f) {
+		return; // not enough clearance
+	}
+
 	// find which sectors are interesected
 	std::unordered_set<MapSector*> isectors;
 	for (TraceIsect& isect : TraceIntersections(rayStart, shootPos)) {

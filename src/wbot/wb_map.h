@@ -112,7 +112,6 @@ namespace wbot {
 	struct MapSector {
 		int id; // index into sectors array
 		int16_t tag;
-		int16_t special;
 
 		int moveFlags = 0;
 		std::vector<BotGoal> triggers;
@@ -123,6 +122,7 @@ namespace wbot {
 		bool isMoving();
 		bool isFloorMoving();
 		bool isCeilMoving();
+		int special();
 	};
 
 	struct MapLine {

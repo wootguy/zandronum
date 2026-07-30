@@ -16,6 +16,7 @@ enum BotJumpState {
 	WBOT_JUMP_NONE, // not jumping
 	WBOT_JUMP_PREP, // carefully move to the starting position for a running start
 	WBOT_JUMP_RUN,	// run towards the jumpoff point
+	WBOT_JUMP_LAUNCH, // run towards the landing point and jump once overhanging a ledge
 	WBOT_JUMP_FLY,	// flying through the air
 };
 
@@ -34,6 +35,7 @@ public:
 	bool m_freezeOnRouteChange = false; // set to true to stop moving when the route changes. For debugging
 	bool m_freezeOnGoalFail = false;	// set to true to stop moving when a goal fails.
 	fixed_t m_lastElevZ = 0;			// last height of the elevator we've been standing on
+	int m_elevRaiseTics = 0;			// increases each tic an elevator moves upward
 	NavSector* m_navCur = NULL;			// current physical node (or "pretend" node)
 	NavSector* m_navIdeal = NULL;		// current node in the route
 	NavSector* m_navTarget = NULL;		// next node in the route

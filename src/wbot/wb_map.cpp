@@ -43,6 +43,9 @@ bool MapSector::isCeilMoving() {
 	return ::sectors[id].ceilingdata;
 }
 
+int MapSector::special() {
+	return ::sectors[id].special;
+}
 
 FVector2 MapLine::center() {
 	return (start() + end()) * 0.5f;
@@ -176,7 +179,6 @@ void BotMapInfo::load_lumps() {
 
 			dst.id = i;
 			dst.tag = src.tag;
-			dst.special = src.special;
 		}
 
 		numlines = lumps.numlines;
@@ -648,7 +650,7 @@ int BotMapInfo::get_linedef_goal_action(MapLine* line) {
 }
 
 bool BotMapInfo::subsector_does_damage(MapSubsector* sub) {
-	switch (sub->sector->special) {
+	switch (sub->sector->special()) {
 	case dDamage_Hellslime:
 	case dDamage_LavaHefty:
 	case dDamage_LavaWimpy:
@@ -805,7 +807,7 @@ void BotMapInfo::find_linedef_sectors() {
 
 		if (lineAction == WBOT_GOAL_ACTION_CROSS || lineAction == WBOT_GOAL_ACTION_TOUCH) {
 			// need to be very close to the line
-			useDist = FRACUNIT;
+			useDist = FRACUNIT * 2;
 		}
 
 		FVector2 frontPoint = center + normal * useDist;
@@ -813,6 +815,9 @@ void BotMapInfo::find_linedef_sectors() {
 		int frontSubId = GetSubsector(frontPoint.X, frontPoint.Y)->id;
 		int backSubId = GetSubsector(backPoint.X, backPoint.Y)->id;
 		int routeToId = frontSubId;
+
+		if (frontSubId == backSubId)
+			Printf("Front/back subsectors of line %d are the same!\n", i);
 
 		if (doubleSidedCrossLine) {
 			// pick the side that allows crossing so that bot doesn't try to cross lines from the bottom of a cliff

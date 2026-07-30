@@ -20,6 +20,7 @@
 struct NavSector;
 struct wbot::MapSeg;
 struct wbot::MapSector;
+class player_t;
 
 enum LinkBlockReason {
 	LINK_BLOCK_CLEAR,		// can walk into the next sector
@@ -54,12 +55,13 @@ struct NavSectorLink {
 	NavSector* GetJumpBackupBlocker(FVector2 targetPos); // get the movable sector that blocks the backup position, if any
 	FVector2 GetJumpStartPos(FVector2 targetPos); // find the best place to begin the jump
 	FVector2 GetJumpEndPos(FVector2 targetPos); // find the closest point to land
-	
+
 	int blocked(AActor* actor, bool recurse=true); // returns LinkBlockReason
 	std::vector<wbot::MapSector*> getClippedSectors(AActor* actor);
 	bool walkable();
 	bool jumpable();
 	bool isJumpValid(); // checks if jump height and distance is valid currently
+	void updateFlags();
 };
 
 struct NavSector {
@@ -171,12 +173,12 @@ public:
 
 	int get_nav_id(fixed_t x, fixed_t y);
 	int get_nav_id(AActor* actor);
+	int get_nav_id(player_t* plr);
 
 	// call to create or remove links on nodes that no longer move
 	void relink_sector(wbot::MapSector* sec);
 	void relink_pending_sector();
 
-private:
 	float node_heuristic(int a, int b); // how "close" node a is to b (may not be physical distance)
 	float path_dist(NavSectorLink& link);
 	float path_cost(NavSectorLink& link, float dist, const RouteOpts& opts);
