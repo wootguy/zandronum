@@ -12,6 +12,7 @@
 #include <unordered_map>
 #include <queue>
 #include <vector>
+#include <string>
 
 using namespace std;
 using namespace wbot;

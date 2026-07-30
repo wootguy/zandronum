@@ -17,7 +17,8 @@ struct MapData;
 
 namespace wbot {
 	struct FSegment2 {
-		FVector2 a, b;
+		FVector2 a = FVector2(0, 0);
+		FVector2 b = FVector2(0, 0);
 		inline float length() { return (b - a).Length(); }
 		inline FVector2 center() { return (a + b) * 0.5f; }
 		inline FVector2 normal() { FVector2 dir = (b - a).Unit(); return FVector2(dir.Y, -dir.X); }

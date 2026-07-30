@@ -6,6 +6,7 @@
 #include "m_cheat.h"
 #include "sv_commands.h"
 #include "deathmatch.h"
+#include <string>
 
 using namespace std;
 using namespace wbot;

@@ -3,6 +3,7 @@
 #include "wb_util.h"
 #include "actor.h"
 #include "doomdata.h"
+#include <string>
 
 using namespace std;
 using namespace wbot;

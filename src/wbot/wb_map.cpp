@@ -494,7 +494,7 @@ std::vector<LinkSeg> BotMapInfo::get_neighbor_subsectors(MapSubsector* ignoreSec
 							lineFound = true;
 						}
 						else {
-							Printf("Multiple lines touch link!\n");
+							//Printf("Multiple lines touch link!\n");
 						}
 
 						link.line = &line;
