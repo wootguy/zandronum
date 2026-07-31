@@ -4,6 +4,7 @@
 #include "wb_nav.h"
 #include "c_dispatch.h"
 #include "m_cheat.h"
+#include "sbar.h"
 #include "sv_commands.h"
 #include "deathmatch.h"
 #include <string>
@@ -63,7 +64,7 @@ void wbot_handle_line_activation(line_t* line, AActor* activator) {
 		if (!playeringame[i] || !player || !player->player->bIsBot)
 			continue;
 
-		CWootBot* bot = (CWootBot*)player->player->pSkullBot;
+		CWootBot* bot = player->player->pWootBot;
 		bot->HandleLineActivation(&mapline, activator);
 	}
 }
@@ -97,7 +98,7 @@ void wbot_run_tests() {
 		if (!playeringame[i] || !player || !player->player->bIsBot)
 			continue;
 
-		CWootBot* bot = (CWootBot*)player->player->pSkullBot;
+		CWootBot* bot = (CWootBot*)player->player->pWootBot;
 		bot->Reset();
 		bot->m_autoWinMap = true;
 		bot->m_debug = false;
@@ -182,7 +183,7 @@ void wbot_map_init() {
 		if (!playeringame[i] || !player || !player->player->bIsBot)
 			continue;
 
-		CWootBot* bot = (CWootBot*)player->player->pSkullBot;
+		CWootBot* bot = player->player->pWootBot;
 		bot->Reset();
 	}
 
@@ -251,7 +252,7 @@ void wbot_abort_test() {
 			if (!playeringame[i] || !player || !player->player->bIsBot)
 				continue;
 
-			CWootBot* bot = (CWootBot*)player->player->pSkullBot;
+			CWootBot* bot = player->player->pWootBot;
 			bot->m_debug = true;
 		}
 
@@ -280,7 +281,7 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 			else						set_ori(player, -1630, -1498, ANGLE_1 * 110);
 
 			if (player->player->bIsBot) {
-				CWootBot* bot = (CWootBot*)player->player->pSkullBot;
+				CWootBot* bot = player->player->pWootBot;
 				bot->Reset();
 				bot->m_followPlayer = true;
 				player->player->cheats &= ~CF_FROZEN;
@@ -304,7 +305,7 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 			if (!playeringame[i] || !player || !player->player->bIsBot)
 				continue;
 
-			CWootBot* bot = (CWootBot*)player->player->pSkullBot;
+			CWootBot* bot = player->player->pWootBot;
 			//set_ori(player, 3211, -131, ANGLE_1 * 40);
 			bot->PushLevelEndGoal();
 			bot->m_autoWinMap = true;
@@ -330,7 +331,7 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 				if (!playeringame[i] || !player || !player->player->bIsBot)
 					continue;
 
-				CWootBot* bot = (CWootBot*)player->player->pSkullBot;
+				CWootBot* bot = player->player->pWootBot;
 				bot->PushGoal(useGoal, NULL);
 			}
 		}
@@ -350,7 +351,7 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 				if (!playeringame[i] || !player || !player->player->bIsBot)
 					continue;
 
-				CWootBot* bot = (CWootBot*)player->player->pSkullBot;
+				CWootBot* bot = player->player->pWootBot;
 				bot->Reset();
 				set_ori(player, 653, -1008, ANGLE_1 * 0);
 				bot->PushGoal(useGoal, NULL);
@@ -365,7 +366,7 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 			if (!playeringame[i] || !player || !player->player->bIsBot)
 				continue;
 
-			CWootBot* bot = (CWootBot*)player->player->pSkullBot;
+			CWootBot* bot = player->player->pWootBot;
 			bot->m_followPlayer = true;
 		}
 	}
@@ -386,7 +387,7 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 			if (!playeringame[i] || !player || !player->player->bIsBot)
 				continue;
 
-			CWootBot* bot = (CWootBot*)player->player->pSkullBot;
+			CWootBot* bot = player->player->pWootBot;
 			bot->Reset();
 			bot->m_followPlayer = false;
 			bot->m_autoWinMap = false;
@@ -488,7 +489,7 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 			if (!playeringame[i] || !player || !player->player->bIsBot)
 				continue;
 
-			CWootBot* bot = (CWootBot*)player->player->pSkullBot;
+			CWootBot* bot = player->player->pWootBot;
 			bot->m_speedMult = slowMotion ? 0.1f : 1.0f;
 		}
 	}
@@ -506,6 +507,48 @@ void wbot_tick() {
 		wbot_abort_test();
 	}
 }
+
+void wbot_tick(CWootBot* pBot) {
+	pBot->Tick();
+}
+void wbot_pre_delete(CWootBot* pBot) {
+	// If this player is the displayplayer, revert the camera back to the console player's eyes.
+	if (pBot->m_pPlayer->mo && (pBot->m_pPlayer->mo->CheckLocalView(consoleplayer)) && (NETWORK_GetState() != NETSTATE_SERVER))
+	{
+		players[consoleplayer].camera = players[consoleplayer].mo;
+		S_UpdateSounds(players[consoleplayer].camera);
+		StatusBar->AttachToPlayer(&players[consoleplayer]);
+	}
+
+	// Remove the bot from the game.
+	playeringame[(pBot->m_pPlayer - players)] = false;
+
+	// Delete the actor attached to the player.
+	if (pBot->m_pPlayer->mo)
+		pBot->m_pPlayer->mo->Destroy();
+
+	// [RK] Remove the corpse's thinkers to prevent a crash later
+	if ((NETWORK_GetState() == NETSTATE_SINGLE || NETWORK_GetState() == NETSTATE_SINGLE_MULTIPLAYER) && pBot->m_pPlayer->mo) {
+		TThinkerIterator<APlayerPawn> it;
+		APlayerPawn* pawn, * next;
+
+		next = it.Next();
+		while ((pawn = next) != NULL)
+		{
+			next = it.Next();
+
+			if ((pawn->player == NULL) && (pBot->m_pPlayer->mo->id == pawn->id))
+				pawn->Destroy();
+		}
+	}
+
+	// Finally, fix some pointers.
+	// [BB] We have to delete the CSkullBot pointer before setting it to NULL.
+	//m_pPlayer->pWootBot = NULL;
+	pBot->m_pPlayer->mo = NULL;
+	pBot->m_pPlayer = NULL;
+}
+
 
 CCMD(addbotw) {
 	wbot_add_bot();

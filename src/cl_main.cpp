@@ -3132,6 +3132,7 @@ void PLAYER_ResetPlayerData( player_t *pPlayer )
 	pPlayer->MaxHealthBonus = 0;
 	pPlayer->ulWins = 0;
 	pPlayer->pSkullBot = 0;
+	pPlayer->pWootBot = 0;
 	pPlayer->bIsBot = 0;
 	pPlayer->ulPing = 0;
 	pPlayer->ulPingAverages = 0;

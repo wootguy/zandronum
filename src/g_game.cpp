@@ -1945,6 +1945,8 @@ void G_Ticker ()
 
 				if ( players[ulIdx].pSkullBot )
 					players[ulIdx].pSkullBot->Tick( );
+				if (players[ulIdx].pWootBot)
+					wbot_tick(players[ulIdx].pWootBot);
 			}
 		}
 
@@ -2140,6 +2142,7 @@ void G_PlayerReborn (int player, bool bGiveInventory)
 	ULONG		ulDeathsWithoutFrag;
 	ULONG		ulUnrewardedDamageDealt;
 	CSkullBot	*pSkullBot;
+	CWootBot	*pWootBot;
 	IgnoreComm	ignoreChat;
 	IgnoreComm	ignoreVoice;
 	ULONG		ulPing;
@@ -2179,6 +2182,7 @@ void G_PlayerReborn (int player, bool bGiveInventory)
 	ulDeathsWithoutFrag = p->ulDeathsWithoutFrag;
 	ulUnrewardedDamageDealt = p->ulUnrewardedDamageDealt;
 	pSkullBot = p->pSkullBot;
+	pWootBot = p->pWootBot;
 	ignoreChat = p->ignoreChat;
 	ignoreVoice = p->ignoreVoice;
 	ulPing = p->ulPing;
@@ -2244,6 +2248,7 @@ void G_PlayerReborn (int player, bool bGiveInventory)
 	p->ulDeathsWithoutFrag = ulDeathsWithoutFrag;
 	p->ulUnrewardedDamageDealt = ulUnrewardedDamageDealt;
 	p->pSkullBot = pSkullBot;
+	p->pWootBot = pWootBot;
 	p->ignoreChat = ignoreChat;
 	p->ignoreVoice = ignoreVoice;
 	p->ulPing = ulPing;
@@ -2258,7 +2263,7 @@ void G_PlayerReborn (int player, bool bGiveInventory)
 	// should also be able to do so after being reborn.
 	p->timefreezer = timefreezer;
 	p->StartingWeaponName = StartingWeaponName;
-	p->bIsBot = p->pSkullBot ? true : false;
+	p->bIsBot = (p->pSkullBot || p->pWootBot) ? true : false;
 
 	p->playerstate = PST_LIVE;
 

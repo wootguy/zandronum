@@ -84,6 +84,7 @@ const char *GetPrintableDisplayName(const PClass *cls);
 
 class player_t;
 class	CSkullBot;
+class	CWootBot;
 class	AFloatyIcon;
 
 class APlayerPawn : public AActor
@@ -762,6 +763,9 @@ public:
 
 	// Pointer to the bot information for this player.
 	CSkullBot	*pSkullBot;
+
+	// Alternate bot AI.
+	CWootBot	*pWootBot;
 
 	// Is this player a bot?
 	bool		bIsBot;

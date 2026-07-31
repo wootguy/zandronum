@@ -78,6 +78,7 @@
 #include "invasion.h"
 #include "d_netinf.h"
 #include "g_shared/pwo.h"
+#include "wbot/wb_hooks.h"
 
 static FRandom pr_skullpop ("SkullPop");
 
@@ -534,6 +535,7 @@ player_t &player_t::operator=(const player_t &p)
 	MaxHealthBonus = p.MaxHealthBonus;
 	ulWins = p.ulWins;
 	pSkullBot = p.pSkullBot;
+	pWootBot = p.pWootBot;
 	bIsBot = p.bIsBot;
 	ignoreChat = p.ignoreChat;
 	ignoreVoice = p.ignoreVoice;
@@ -3562,7 +3564,7 @@ void P_PlayerThink (player_t *player)
 	if (player->mo == NULL)
 	{
 		// Just print an error if a bot tried to spawn.
-		if ( player->pSkullBot )
+		if ( player->pSkullBot || player->pWootBot)
 		{
 			Printf( "%s left: No player %td start\n", player->userinfo.GetName(), player - players + 1 );
 			BOTS_RemoveBot( player - players, false );
@@ -3737,8 +3739,12 @@ void P_PlayerThink (player_t *player)
 	}
 
 	// If this is a bot, run its logic.
-	if ( player->pSkullBot )
-		player->pSkullBot->Tick( );
+	if (player->pSkullBot) {
+		player->pSkullBot->Tick();
+	}
+	if (player->pWootBot) {
+		wbot_tick(player->pWootBot);
+	}
 
 	// [BB] Since the game is currently suspended, prevent the player from doing anything.
 	// Note: This needs to be done after ticking the bot, otherwise the bot could still act.
@@ -3883,7 +3889,7 @@ void P_PlayerThink (player_t *player)
 		else
 		{
 			// Servers read in the pitch value. It is not calculated.
-			if (( NETWORK_GetState( ) != NETSTATE_SERVER ) || ( player->pSkullBot != NULL ))
+			if (( NETWORK_GetState( ) != NETSTATE_SERVER ) || ( player->pSkullBot != NULL ) || (player->pWootBot != NULL))
 			{
 				int look = cmd->ucmd.pitch << 16;
 

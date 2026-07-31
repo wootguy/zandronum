@@ -3157,7 +3157,7 @@ void SERVER_WriteCommands( void )
 bool SERVER_IsValidClient( ULONG ulClient )
 {
 	// Don't transmit data to players not in the game, or bots.
-	if (( ulClient >= MAXPLAYERS ) || ( playeringame[ulClient] == false ) || ( players[ulClient].pSkullBot ))
+	if (( ulClient >= MAXPLAYERS ) || ( playeringame[ulClient] == false ) || ( players[ulClient].pSkullBot ) || (players[ulClient].pWootBot))
 		return ( false );
 
 	return ( true );

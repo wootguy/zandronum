@@ -3,15 +3,15 @@
 #include "wb_nav.h"
 #include "wb_map.h"
 #include "wb_util.h"
-#include "p_local.h"
 #include "d_event.h"
+#include "d_player.h"
 #include <algorithm>
 
 using namespace std;
 using namespace wbot;
 
 CBotRouteController::CBotRouteController(CWootBot* pBot)
-	: pBot(pBot), pActor(pBot->pActor), pPlayer(pBot->GetPlayer()) {}
+	: pBot(pBot), pActor(pBot->pActor), pPlayer(pBot->m_pPlayer) {}
 
 void CBotRouteController::Think() {
 	m_routeSpeed = RUN_SPEED;
@@ -99,7 +99,8 @@ void CBotRouteController::UpdateRoute() {
 		}
 		else {
 			FVector2 center = g_wb_nav.mesh.nodes[route[1]].pos();
-			fixed_t dist = P_AproxDistance(pActor->x - (fixed_t)center.X, pActor->y - (fixed_t)center.Y);
+			FVector2 apos(pActor->x, pActor->y);
+			fixed_t dist = (center - apos).Length();
 			if (pBot->stuckCounter >= 200 && dist < (16 << FRACBITS)) {
 				// already very close to the center, so this is probably a tiny polygon jammed
 				// up against a wall. The bot can't get close enough in this case, so advance
@@ -356,7 +357,6 @@ bool CBotRouteController::HandleBlockedPaths() {
 		NavSectorLink* nextLink = m_navLink->target->getLink(route[2]);
 
 		if (nextLink && !nextLink->isJump) {
-			sector_t* nextNextSector = subsectors[route[2]].sector;
 			int blockReason = nextLink->blocked(pActor);
 
 			if (blockReason != LINK_BLOCK_CLEAR) {
@@ -403,8 +403,8 @@ bool CBotRouteController::ElevatorThink(bool linkBlocked) {
 
 			// stay centered on the elevator to avoid blocking it or falling off
 			FVector2 navPos = m_navCur->pos();
-			fixed_t dist = P_AproxDistance(pActor->x - (fixed_t)navPos.X, pActor->y - (fixed_t)navPos.Y);
-			if (dist > (16 << FRACBITS))
+			FVector2 plrPos(pActor->x, pActor->y);
+			if ((navPos - plrPos).Length() > (16 << FRACBITS))
 				pBot->MoveTo(navPos, 0, RUN_SPEED / 4);
 
 			if (linkBlocked) {

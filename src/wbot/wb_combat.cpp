@@ -23,7 +23,7 @@ unordered_map<string, WeaponInfo> g_wbot_weapon_info = {
 };
 
 CBotCombatController::CBotCombatController(CWootBot* pBot)
-	: pBot(pBot), pActor(pBot->pActor), pPlayer(pBot->GetPlayer()) {}
+	: pBot(pBot), pActor(pBot->pActor), pPlayer(pBot->m_pPlayer) {}
 
 void CBotCombatController::Think() {
 	AActor* bestEnemy = BestEnemy();

@@ -467,6 +467,14 @@ void BOTS_Destruct( void )
 			players[ulIdx].pSkullBot = NULL;
 			players[ulIdx].bIsBot = false;
 		}
+
+		if (players[ulIdx].pWootBot)
+		{
+			wbot_pre_delete(players[ulIdx].pWootBot);
+			delete players[ulIdx].pWootBot;
+			players[ulIdx].pWootBot = NULL;
+			players[ulIdx].bIsBot = false;
+		}
 	}
 }
 
@@ -585,7 +593,7 @@ void BOTS_RemoveBot( ULONG ulPlayerIdx, bool bExitMsg )
 	ULONG	ulIdx;
 
 	if (( ulPlayerIdx >= MAXPLAYERS ) ||
-		( players[ulPlayerIdx].pSkullBot == NULL ))
+		( players[ulPlayerIdx].pSkullBot == NULL && players[ulPlayerIdx].pWootBot == NULL))
 	{
 		return;
 	}
@@ -646,7 +654,7 @@ void BOTS_RemoveBot( ULONG ulPlayerIdx, bool bExitMsg )
 		SERVER_RCON_UpdateInfo( SVRCU_PLAYERDATA );
 	}
 
-	if ( g_bBotIsInitialized[ulPlayerIdx] )
+	if ( g_bBotIsInitialized[ulPlayerIdx] && players[ulPlayerIdx].pSkullBot )
 		players[ulPlayerIdx].pSkullBot->PreDelete( );
 /*
 	else
@@ -662,6 +670,11 @@ void BOTS_RemoveBot( ULONG ulPlayerIdx, bool bExitMsg )
 	{
 		delete ( players[ulPlayerIdx].pSkullBot );
 		players[ulPlayerIdx].pSkullBot = NULL;
+	}
+	if (players[ulPlayerIdx].pWootBot) {
+		wbot_pre_delete(players[ulPlayerIdx].pWootBot);
+		delete (players[ulPlayerIdx].pWootBot);
+		players[ulPlayerIdx].pWootBot = NULL;
 	}
 	players[ulPlayerIdx].bIsBot = false;
 
@@ -696,7 +709,7 @@ void BOTS_RemoveAllBots( bool bExitMsg )
 	// Loop through all the players and delete all the bots.
 	for ( ulIdx = 0; ulIdx < MAXPLAYERS; ulIdx++ )
 	{
-		if ( playeringame[ulIdx] && players[ulIdx].pSkullBot && g_bBotIsInitialized[ulIdx] )
+		if ( playeringame[ulIdx] && ((players[ulIdx].pSkullBot && g_bBotIsInitialized[ulIdx]) || players[ulIdx].pWootBot)  )
 			BOTS_RemoveBot( ulIdx, bExitMsg );
 	}
 }
@@ -711,7 +724,7 @@ bool BOTS_RemoveRandomBot( void )
 	// First, verify that there's a bot in the game.
 	for ( unsigned int i = 0; i < MAXPLAYERS; i++ )
 	{
-		if (( playeringame[i] ) && ( players[i].pSkullBot ))
+		if (( playeringame[i] ) && ( players[i].pSkullBot || players[i].pWootBot ))
 		{
 			botInGame = true;
 			break;
@@ -726,7 +739,7 @@ bool BOTS_RemoveRandomBot( void )
 	do
 	{
 		randomIndex = ( BotRemove( ) % MAXPLAYERS );
-	} while (( playeringame[randomIndex] == false ) || ( players[randomIndex].pSkullBot == nullptr ));
+	} while (( playeringame[randomIndex] == false ) || ( players[randomIndex].pSkullBot == nullptr && players[randomIndex].pWootBot == nullptr));
 
 	// Now that we've found a valid bot, remove it.
 	BOTS_RemoveBot( randomIndex, true );
@@ -4023,7 +4036,7 @@ CCMD( removebot )
 	{
 		for ( ulIdx = 0; ulIdx < MAXPLAYERS; ulIdx++ )
 		{
-			if (( playeringame[ulIdx] == false ) || ( players[ulIdx].pSkullBot == NULL ))
+			if (( playeringame[ulIdx] == false ) || ( players[ulIdx].pSkullBot == NULL && players[ulIdx].pWootBot == NULL))
 				continue;
 
 			playerName = players[ulIdx].userinfo.GetName( );
@@ -4072,7 +4085,7 @@ CCMD( listbots )
 	// Loop through all the players and count up the bots.
 	for ( ulIdx = 0; ulIdx < MAXPLAYERS; ulIdx++ )
 	{
-		if ( playeringame[ulIdx] && players[ulIdx].pSkullBot )
+		if ( playeringame[ulIdx] && (players[ulIdx].pSkullBot || players[ulIdx].pWootBot) )
 		{
 			Printf( "%s\n", players[ulIdx].userinfo.GetName() );
 			ulNumBots++;

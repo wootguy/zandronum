@@ -1,8 +1,8 @@
 #pragma once
-#include "bots.h"
 #include "wb_route.h"
 #include "wb_combat.h"
 #include "wb_goal.h"
+#include "tables.h"
 #include <unordered_set>
 
 struct FTraceResults;
@@ -17,8 +17,13 @@ struct wbot::MapLine;
 #define FL_WBOT_ON_ELEV		(1<<5) // bot is standing on a platform that is moving or about to move
 #define FL_WBOT_SLOW_DOWN	(1<<6) // bot is trying to reduce their speed
 
-class CWootBot : public CSkullBot {
+class CWootBot {
 public:
+	player_t* m_pPlayer = NULL;
+	int m_lButtons = 0;
+	int m_lForwardMove = 0;
+	int m_lSideMove = 0;
+
 	APlayerPawn* pActor = NULL;
 	std::vector<BotGoal> m_goals;	// stack of goals
 	int m_forwardMove = 0;		// range of +/-100
@@ -49,7 +54,8 @@ public:
 	CWootBot(const char* pszName, const char* pszTeamName, ULONG ulPlayerNum);
 	~CWootBot() {}
 
-	void ParseScript(void) override { Think(); } // called by skullbot tick
+	void PreDelete();
+	void Tick();
 
 	void Reset(); // clear all memory and restart the bot
 

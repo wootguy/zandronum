@@ -128,7 +128,7 @@ void wbot_debug_player_nav() {
 void wbot_debug(CWootBot* pBot) {
 	wbot_debug_player_nav();
 
-	player_t* pPlayer = pBot->GetPlayer();
+	player_t* pPlayer = pBot->m_pPlayer;
 	AActor* pActor = pBot->pActor;
 	g_wb_nav.draw_nodes(pActor);
 

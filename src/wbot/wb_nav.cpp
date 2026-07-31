@@ -6,6 +6,7 @@
 #include "wb_hooks.h"
 #include "p_lnspec.h"
 #include "a_keys.h"
+#include "d_player.h"
 
 #include <algorithm>
 #include <unordered_set>

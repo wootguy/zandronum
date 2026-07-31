@@ -3,10 +3,10 @@
 #include "wb_map.h"
 #include "wb_util.h"
 #include "wb_debug.h"
+#include "wb_eiface.h"
 #include "d_event.h"
 #include "p_lnspec.h"
 #include "doomdata.h"
-#include "actor.h"
 #include "p_local.h"
 #include <string>
 #include <float.h>
@@ -16,13 +16,52 @@ using namespace std;
 using namespace wbot;
 
 CWootBot::CWootBot(const char* pszName, const char* pszTeamName, ULONG ulPlayerNum)
-	: CSkullBot(pszName, pszTeamName, ulPlayerNum), m_routeController(this), m_combatController(this) {
+	: m_routeController(this), m_combatController(this) {
 	
+	m_pPlayer = add_bot(this, ulPlayerNum, "", "", "", pszTeamName);
+
 	m_fov = ANGLE_180;
-	m_bForwardMovePersist = true;
-	m_bSideMovePersist = true;
 	m_debug = true;
 	Reset();
+}
+
+void CWootBot::Tick() {
+	ticcmd_t* cmd = &m_pPlayer->cmd;
+
+	// Don't execute bot logic during demos, or if the console player is a client.
+	//if (NETWORK_InClientMode() || (demoplayback)) {
+	//	return;
+	//}
+
+	// Reset the bots keypresses.
+	memset(cmd, 0, sizeof(ticcmd_t));
+
+	// Don't run their script if the game is frozen.
+	if (level.flags2 & LEVEL2_FROZEN)
+		return;
+
+	// [BB] Don't run their script if they are frozen either.
+	if (m_pPlayer->cheats & CF_TOTALLYFROZEN)
+	{
+		// [BB] Don't freeze dead bots. Otherwise they can't respawn.
+		if (m_pPlayer->mo && m_pPlayer->mo->health > 0)
+			return;
+	}
+
+	Think();
+
+	// [AK] Don't allow the bot to move while frozen.
+	if ((m_pPlayer->cheats & CF_FROZEN) == false)
+	{
+		m_pPlayer->cmd.ucmd.forwardmove = static_cast<short>(m_lForwardMove << 8);
+		m_pPlayer->cmd.ucmd.sidemove = static_cast<short>(m_lSideMove << 8);
+	}
+	else
+	{
+		m_pPlayer->cmd.ucmd.forwardmove = m_pPlayer->cmd.ucmd.sidemove = 0;
+	}
+
+	m_pPlayer->cmd.ucmd.buttons |= m_lButtons;
 }
 
 void CWootBot::Think() {
@@ -95,6 +134,9 @@ void CWootBot::Reset() {
 	goalFailCounter = 0;
 	m_lastAvoidPropDirChange = 0;
 	m_lastAvoidPropDir = 0;
+	m_lForwardMove = 0;
+	m_lSideMove = 0;
+	m_lButtons = 0;
 	rushNav = -1;
 	rushTrigger = BotGoal();
 	UpdatePositionFlags();
