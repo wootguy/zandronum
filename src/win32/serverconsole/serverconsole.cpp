@@ -126,6 +126,7 @@ static	unsigned int		g_CurrentBanList;
 //--------------------------------------------------------------------------------------------------------------------------------------------------
 
 extern	HINSTANCE	g_hInst;
+extern bool g_windows_console_mode;
 
 // For the right click|ban dialogs.
 static	char		g_szScoreboard_SelectedUser[64];
@@ -2263,6 +2264,11 @@ void SERVERCONSOLE_Print( char *pszString )
 	// Start with a timestamp.
 	char	szInputString[SERVERCONSOLE_TEXTLENGTH];	
 	serverconsole_InsertTimestamp( szInputString );
+
+	if (g_windows_console_mode) {
+		// print to stdout for the windows console
+		printf("%s", pszString);
+	}
 
 	// Copy the input string, and convert the line endings to Windows format.
 	char	c;	

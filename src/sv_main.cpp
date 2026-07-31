@@ -134,6 +134,9 @@ FPolyObj	*GetPolyobj( int polyNum );
 FPolyObj	*GetPolyobjByIndex( ULONG ulPoly );
 extern fixed_t	sidemove[2];
 
+bool g_windows_console_mode; // true if launched with -console argument
+char* I_ConsoleInput(void);
+
 void SERVERCONSOLE_UpdatePlayerInfo( LONG lPlayer, ULONG ulUpdateFlags );
 void SERVERCONSOLE_ReListPlayers( void );
 
@@ -735,9 +738,17 @@ void SERVER_Tick( void )
 		AddCommandString (cmd);
 	fflush(stdout);
 #else
-	// Execute any commands that have been issued through server menus.
-	while ( g_ServerCommandQueue.Size( ))
-		SERVER_DeleteCommand( );
+	if (g_windows_console_mode) {
+		char* cmd = I_ConsoleInput();
+		if (cmd)
+			AddCommandString(cmd);
+		fflush(stdout);
+	}
+	else {
+		// Execute any commands that have been issued through server menus.
+		while (g_ServerCommandQueue.Size())
+			SERVER_DeleteCommand();
+	}
 #endif
 
 	int oldTime = level.time;

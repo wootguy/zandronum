@@ -12,6 +12,8 @@ using namespace std;
 using namespace wbot;
 
 extern float g_GameSpeed;
+extern bool g_windows_console_mode;
+
 int g_kill_all_shootables_again_tick = 0;
 bool g_wbot_test_mode = false;
 
@@ -128,7 +130,7 @@ void wbot_init() {
 	}
 }
 
-bool wbot_next_test() {
+void wbot_next_test() {
 	if (g_wbot_test_mode && g_wb_test_state.startMap == string(level.mapname)) {
 		g_wbot_test_mode = false;
 		g_GameSpeed = 1.0f;
@@ -155,21 +157,14 @@ bool wbot_next_test() {
 		Printf("tics:        %d ktics\n", g_wb_test_state.totalTics / 1000);
 		Printf("---------------------\n");
 
-		// stop bots from completing the levels
-		for (int i = 0; i < MAXPLAYERS; i++) {
-			AActor* player = players[i].mo;
-			if (!playeringame[i] || !player || !player->player->bIsBot)
-				continue;
-
-			CWootBot* bot = (CWootBot*)player->player->pSkullBot;
-			bot->Reset();
-			bot->m_autoWinMap = false;
+		if (g_windows_console_mode) {
+			printf("\nPress Enter to exit...");
+			getchar(); // keep console open to see test results
 		}
 
-		return true;
+		// exit program when tests finish
+		std::exit(numPass < g_wb_test_state.results.size() ? 1 : 0);
 	}
-
-	return false;
 }
 
 void wbot_map_init() {

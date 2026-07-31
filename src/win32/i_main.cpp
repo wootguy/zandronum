@@ -122,6 +122,7 @@ void I_FlushBufferedConsoleStuff();
 extern EXCEPTION_POINTERS CrashPointers;
 extern BITMAPINFO *StartupBitmap;
 extern UINT TimerPeriod;
+extern bool g_windows_console_mode;
 
 // PUBLIC DATA DEFINITIONS -------------------------------------------------
 
@@ -827,6 +828,29 @@ void DoMain (HINSTANCE hInstance)
 #endif
 
 		Args = new DArgs(__argc, __argv);
+
+		if (Args->CheckParm("-console")) {
+			g_windows_console_mode = true;
+
+			if (!AttachConsole(ATTACH_PARENT_PROCESS)) {
+				AllocConsole();
+			}
+
+			FILE* fp;
+			freopen_s(&fp, "CONOUT$", "w", stdout);
+			setvbuf(stdout, nullptr, _IONBF, 0);
+
+			freopen_s(&fp, "CONOUT$", "w", stderr);
+			setvbuf(stderr, nullptr, _IONBF, 0);
+
+			freopen_s(&fp, "CONIN$", "r", stdin);
+			setvbuf(stdin, nullptr, _IONBF, 0);
+
+			std::ios::sync_with_stdio(true);
+
+			D_DoomMain();
+			return;
+		}
 
 		// [SB] Zandronum version
 		if ( ZA_PrintVersion( ) )
