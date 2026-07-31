@@ -16,6 +16,8 @@ struct LumpSeg;
 struct MapData;
 
 namespace wbot {
+	struct MapSubsector;
+
 	struct FSegment2 {
 		FVector2 a = FVector2(0, 0);
 		FVector2 b = FVector2(0, 0);
@@ -116,6 +118,7 @@ namespace wbot {
 
 		int moveFlags = 0;
 		std::vector<BotGoal> triggers;
+		std::vector<MapSubsector*> subsectors;
 
 		fixed_t getHeight();
 		fixed_t getFloorZ();
@@ -149,6 +152,7 @@ namespace wbot {
 
 	struct MapSeg {
 		FVector2 v1, v2; // may be off grid for implicit segs
+		std::vector<MapLine*> lines; // linedefs that this segment overlaps
 
 		inline FVector2 start() { return v1 * FRACUNIT; }
 		inline FVector2 end() { return v2 * FRACUNIT; }
@@ -162,6 +166,7 @@ namespace wbot {
 		int firstseg = 0;
 		int numsegs = 0;
 		MapSector* sector = NULL;
+		FVector2 mins, maxs; // bounding box
 	};
 
 	struct LinkSeg {
@@ -246,7 +251,7 @@ namespace wbot {
 		int get_linedef_move_flag(MapLine* line);
 
 		// get subsector touching the the given borderSeg
-		std::vector<LinkSeg> get_neighbor_subsectors(MapSubsector* ignoreSector, MapSeg* borderSeg);
+		std::vector<LinkSeg> get_neighbor_subsectors(MapSubsector* rootSub, MapSeg* borderSeg, std::unordered_set<MapSector*>& checkSectors);
 
 		// true if the target sector can ever be reached fromt the source
 		bool is_sector_border_potentially_crossable(MapSector* from, MapSector* to);

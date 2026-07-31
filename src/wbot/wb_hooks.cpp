@@ -141,7 +141,7 @@ void wbot_next_test() {
 		int numPass = 0;
 		Printf("\n---------------------\nTESTS FINISHED\n---------------------\n");
 		for (TestResult& result : g_wb_test_state.results) {
-			Printf("  %-8s = %4dms gen,   %4dms solve,   %3.1f ktics  %s\n", result.mapname.c_str(),
+			Printf("  %-8s = %4dms gen,   %4dms solve,   %4.1f ktics  %s\n", result.mapname.c_str(),
 				result.gen_nav_millis, result.solve_millis, result.tics / 1000.0f,
 				result.success ? "PASS" : "FAIL <--");
 			numPass += result.success;
@@ -195,6 +195,10 @@ void wbot_map_init() {
 
 void wbot_map_exit() {
 	if (g_wbot_test_mode) {
+		int sz = g_wb_test_state.results.size();
+		if (sz > 0 && level.mapname == g_wb_test_state.results[sz - 1].mapname)
+			return; // level exits are sometimes triggered multiple times
+
 		int testTime = level.time;
 		uint32_t millis = getEpochMillis() - g_wb_test_state.levelStartTime;
 		g_wb_test_state.totalTics += level.time;

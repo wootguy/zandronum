@@ -58,7 +58,6 @@ jobs:
     - name: Install runtime dependencies
       shell: bash
       run: |
-        sudo apt update
         sudo apt install libsdl1.2debian
 
     - name: Download build artifacts

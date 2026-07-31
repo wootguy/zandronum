@@ -296,10 +296,23 @@ void SectorNavMeshGenerator::add_walkable_links(BotMeshData& mesh, int nodeid, s
 	MapSubsector& sub = g_map.subsectors[nodeid];
 	NavSector& nav = mesh.nodes[nodeid];
 
+	std::unordered_set<MapSector*> neighborSectors = { sub.sector };
+
+	for (int i = 0; i < sub.numsegs; i++) {
+		MapSeg& seg = g_map.segs[sub.firstseg + i];
+
+		for (MapLine* line : seg.lines) {
+			if (line->frontsector)
+				neighborSectors.insert(line->frontsector);
+			if (line->backsector)
+				neighborSectors.insert(line->backsector);
+		}
+	}
+
 	for (int k = 0; k < sub.numsegs; k++) {
 		MapSeg& seg = g_map.segs[sub.firstseg + k];
 
-		for (LinkSeg& linkseg : g_map.get_neighbor_subsectors(&sub, &seg)) {
+		for (LinkSeg& linkseg : g_map.get_neighbor_subsectors(&sub, &seg, neighborSectors)) {
 			MapSubsector& neighbor = g_map.subsectors[linkseg.otherSub];
 
 			if (!g_map.is_sector_border_potentially_crossable(sub.sector, neighbor.sector)) {

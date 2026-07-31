@@ -9,6 +9,7 @@
 #include "p_local.h"
 #include "a_keys.h"
 #include <algorithm>
+#include <float.h>
 
 using namespace std;
 using namespace wbot;
@@ -231,6 +232,7 @@ void BotMapInfo::load_lumps() {
 		int16_t side = lumps.lines[seg.linedef].sidenum[seg.side];
 		subsectors[i].id = i;
 		subsectors[i].sector = &sectors[lumps.sides[side].sector];
+		subsectors[i].sector->subsectors.push_back(&subsectors[i]);
 	}
 
 	std::vector<MapSeg> totalSegs;
@@ -239,8 +241,8 @@ void BotMapInfo::load_lumps() {
 
 	segs = new MapSeg[totalSegs.size()];
 	numsegs = totalSegs.size();
-	memcpy(segs, &totalSegs[0], numsegs * sizeof(MapSeg));
-
+	for (int i = 0; i < numsegs; i++)
+		segs[i] = totalSegs[i];
 
 	delete[] lumps.lines;
 	delete[] lumps.nodes;
@@ -302,17 +304,42 @@ void BotMapInfo::build_subsector(int subid, std::vector<BspClip>& clips,
 
 	sub.firstseg = totalSegs.size();
 	sub.numsegs = poly.size();
+	sub.mins = FVector2(FLT_MAX, FLT_MAX);
+	sub.maxs = FVector2(-FLT_MAX, -FLT_MAX);
 
 	for (int i = 0; i < poly.size(); i++) {
 		FVector2& start = poly[i];
 		FVector2& end = poly[(i + 1) % poly.size()];
 		
+		if (start.X > sub.maxs.X) sub.maxs.X = start.X;
+		if (start.Y > sub.maxs.Y) sub.maxs.Y = start.Y;
+		
+		if (start.X < sub.mins.X) sub.mins.X = start.X;
+		if (start.Y < sub.mins.Y) sub.mins.Y = start.Y;
+
 		MapSeg seg;
 		seg.v1 = start;
 		seg.v2 = end;
 
+		for (int k = 0; k < lumpSub.numsegs; k++) {
+			LumpSeg& lseg = lumps.segs[lumpSub.firstseg + k];
+			MapLine& line = lines[lseg.linedef];
+
+			FSegment2 overlap = LineSegmentOverlap(line.v1, line.v2, seg.v1, seg.v2);
+			if (overlap.length() >= 1.0f) {
+				seg.lines.push_back(&line);
+			}
+		}
+
 		totalSegs.push_back(seg);
 	}
+
+	// to ensure boxes overlap
+	const float eps = 1.0f;
+	sub.mins.X -= eps;
+	sub.mins.Y -= eps;
+	sub.maxs.X += eps;
+	sub.maxs.Y += eps;
 }
 
 MapSubsector* BotMapInfo::GetSubsector(fixed_t x, fixed_t y) {
@@ -449,7 +476,7 @@ int BotMapInfo::sector_border_walkability(MapSector* from, MapSector* to) {
 	return LINK_BLOCK_CLEAR;
 }
 
-std::vector<LinkSeg> BotMapInfo::get_neighbor_subsectors(MapSubsector* ignoreSector, MapSeg* borderSeg) {
+std::vector<LinkSeg> BotMapInfo::get_neighbor_subsectors(MapSubsector* rootSub, MapSeg* borderSeg, std::unordered_set<MapSector*>& checkSectors) {
 	const fixed_t epsilonWidth = 2;
 
 	std::vector<LinkSeg> links;
@@ -458,63 +485,50 @@ std::vector<LinkSeg> BotMapInfo::get_neighbor_subsectors(MapSubsector* ignoreSec
 	bool foundSeg = false;
 	FVector2 borderNormal = borderSeg->normal();
 
-	for (int j = 0; j < numsubsectors; j++) {
-		MapSubsector& otherSub = subsectors[j];
+	FVector2& mins1 = rootSub->mins;
+	FVector2& maxs1 = rootSub->maxs;
 
-		if (&otherSub == ignoreSector)
-			continue;
+	for (MapSector* sector : checkSectors) {
+		for (MapSubsector* otherSub : sector->subsectors) {
+			if (otherSub == rootSub)
+				continue;
 
-		for (int s = 0; s < otherSub.numsegs; s++) {
-			MapSeg& tseg = segs[otherSub.firstseg + s];
+			FVector2& mins2 = otherSub->mins;
+			FVector2& maxs2 = otherSub->maxs;
+			if ((maxs1.X < mins2.X || mins1.X > maxs2.X) ||
+				(maxs1.Y < mins2.Y || mins1.Y > maxs2.Y)) {
+				continue;
+			}
 
-			//if (borderSeg - g_map.segs == 1070 && &tseg - g_map.segs == 1085)
-			//	Printf(""); // debug link not created
+			for (int s = 0; s < otherSub->numsegs; s++) {
+				MapSeg& tseg = segs[otherSub->firstseg + s];
 
-			// TODO: Allow thin segments for tightrope areas
-			FSegment2 overlap = LineSegmentOverlap(tseg.v1, tseg.v2, borderSeg->v1, borderSeg->v2);
-			if (overlap.length() >= epsilonWidth) {
-				LinkSeg link;
-				link.overlap.a = overlap.a * FRACUNIT;
-				link.overlap.b = overlap.b * FRACUNIT;
-				link.otherSub = j;
+				FSegment2 overlap = LineSegmentOverlap(tseg.v1, tseg.v2, borderSeg->v1, borderSeg->v2);
+				if (overlap.length() >= epsilonWidth) {
+					LinkSeg link;
+					link.overlap.a = overlap.a * FRACUNIT;
+					link.overlap.b = overlap.b * FRACUNIT;
+					link.otherSub = otherSub->id;
 
-				// now check if this segment is part of any linedef (todo: slow!!)
-				FVector2 b1 = overlap.a;
-				FVector2 b2 = overlap.b;
-				float minLen = overlap.length() - 0.1f;
-				bool lineFound = false;
-				bool anyOverlap = false;
-
-				for (int i = 0; i < numlines; i++) {
-					MapLine& line = lines[i];
-
-					FSegment2 overlap = LineSegmentOverlap(line.v1, line.v2, b1, b2);
-					if (overlap.length() >= minLen) {
-						if (!lineFound) {
-							lineFound = true;
+					float bestOverlap = 0;
+					for (MapLine* line : tseg.lines) {
+						FSegment2 lineOverlap = LineSegmentOverlap(overlap.a, overlap.b, borderSeg->v1, borderSeg->v2);
+						float overlapLen = lineOverlap.length();
+						if (overlapLen > bestOverlap) {
+							bestOverlap = overlapLen;
+							link.line = line;
 						}
-						else {
-							//Printf("Multiple lines touch link!\n");
-						}
-
-						link.line = &line;
 					}
-					else if (overlap.length() > 0.1f) {
-						anyOverlap = true;
+
+					if (DotProduct(link.overlap.normal(), borderNormal) < 0) {
+						// segment normals should always point inward towards the subsector
+						FVector2 temp = link.overlap.a;
+						link.overlap.a = link.overlap.b;
+						link.overlap.b = temp;
 					}
+
+					links.push_back(link);
 				}
-
-				if (anyOverlap && !lineFound)
-					Printf("Some overlap but no line matches!\n");
-
-				if (DotProduct(link.overlap.normal(), borderNormal) < 0) {
-					// segment normals should always point inward towards the subsector
-					FVector2 temp = link.overlap.a;
-					link.overlap.a = link.overlap.b;
-					link.overlap.b = temp;
-				}
-
-				links.push_back(link);
 			}
 		}
 	}
