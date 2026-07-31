@@ -4,72 +4,29 @@
 #include "wb_util.h"
 #include "wb_debug.h"
 #include "wb_eiface.h"
-#include "d_event.h"
-#include "p_lnspec.h"
-#include "doomdata.h"
-#include "p_local.h"
+
 #include <string>
 #include <float.h>
 #include <algorithm>
+#include <limits.h>
 
 using namespace std;
 using namespace wbot;
 
 CWootBot::CWootBot(const char* pszName, const char* pszTeamName, ULONG ulPlayerNum)
-	: m_routeController(this), m_combatController(this) {
-	
-	m_pPlayer = add_bot(this, ulPlayerNum, "", "", "", pszTeamName);
+	: m_pPlayer(add_bot(this, ulPlayerNum, "", "", "", pszTeamName)), m_routeController(this), m_combatController(this) {
 
-	m_fov = ANGLE_180;
+	m_fov = 180;
 	m_debug = true;
 	Reset();
 }
 
-void CWootBot::Tick() {
-	ticcmd_t* cmd = &m_pPlayer->cmd;
-
-	// Don't execute bot logic during demos, or if the console player is a client.
-	//if (NETWORK_InClientMode() || (demoplayback)) {
-	//	return;
-	//}
-
-	// Reset the bots keypresses.
-	memset(cmd, 0, sizeof(ticcmd_t));
-
-	// Don't run their script if the game is frozen.
-	if (level.flags2 & LEVEL2_FROZEN)
-		return;
-
-	// [BB] Don't run their script if they are frozen either.
-	if (m_pPlayer->cheats & CF_TOTALLYFROZEN)
-	{
-		// [BB] Don't freeze dead bots. Otherwise they can't respawn.
-		if (m_pPlayer->mo && m_pPlayer->mo->health > 0)
-			return;
-	}
-
-	Think();
-
-	// [AK] Don't allow the bot to move while frozen.
-	if ((m_pPlayer->cheats & CF_FROZEN) == false)
-	{
-		m_pPlayer->cmd.ucmd.forwardmove = static_cast<short>(m_lForwardMove << 8);
-		m_pPlayer->cmd.ucmd.sidemove = static_cast<short>(m_lSideMove << 8);
-	}
-	else
-	{
-		m_pPlayer->cmd.ucmd.forwardmove = m_pPlayer->cmd.ucmd.sidemove = 0;
-	}
-
-	m_pPlayer->cmd.ucmd.buttons |= m_lButtons;
-}
-
 void CWootBot::Think() {
-	if (gamestate == GS_INTERMISSION) {
+	if (intermission_active()) {
 		return;
 	}
 
-	if (m_wasDead && m_pPlayer->health > 0) {
+	if (m_wasDead && m_health > 0) {
 		Reset();
 		m_wasDead = false;
 	}
@@ -80,11 +37,11 @@ void CWootBot::Think() {
 		wbot_debug(this);
 	}
 
-	if (level.time < m_nextThink || (m_pPlayer->cheats & CF_FROZEN)) {
+	if (get_game_tics() < m_nextThink || m_isFrozen) {
 		return;
 	}
 
-	if (m_pPlayer->health <= 0) {
+	if (m_health <= 0) {
 		DeadThink();
 		return;
 	}
@@ -93,7 +50,7 @@ void CWootBot::Think() {
 
 	m_combatController.Think();
 
-	if (!pActor->target) {
+	if (!target) {
 		if (!m_routeController.HasRoute()) {
 			if (!HasGoal()) {
 				FindGoal();
@@ -121,8 +78,8 @@ void CWootBot::Think() {
 }
 
 void CWootBot::Reset() {
-	pActor = m_pPlayer->mo;
-	pActor->target = NULL;
+	pActor = get_player(m_pPlayer);
+	target = NULL;
 	m_routeController = CBotRouteController(this);
 	m_combatController = CBotCombatController(this);
 	m_goals.clear();
@@ -145,7 +102,7 @@ void CWootBot::Reset() {
 void CWootBot::DebugPrint(const char* msg) {
 	if (m_debug) {
 		PrintNotification(msg);
-		Printf(msg);
+		gprintf(msg);
 	}
 }
 
@@ -153,20 +110,20 @@ void CWootBot::DeadThink() {
 	// tap a button to respawn
 	m_lForwardMove = 0;
 	m_lSideMove = 0;
-	m_lButtons ^= BT_ATTACK;
+	m_lButtons ^= IN_ATTACK;
 	m_wasDead = true;
 }
 
 void CWootBot::IdleThink() {
 	m_forwardMove = 0;
 	m_sideMove = 0;
-	pActor->pitch = 0;
+	m_pitch = 0;
 
 	if (StopMoving()) {
-		m_lButtons |= BT_CROUCH;
+		m_lButtons |= IN_DUCK;
 
 		if (rand() % 20 == 0) {
-			pActor->angle = (rand() % 360) * ANGLE_1;
+			m_yaw = rand();
 		}
 	}
 }
@@ -186,7 +143,7 @@ void CWootBot::GoalActionThink() {
 
 	if (m_routeController.m_navid != goalSector && m_routeController.pretendRouteSector != goalSector) {
 		// actor may be routed here but technically in an adjacent sector
-		bool actorReachable = nav.touches(goal.actor);
+		bool actorReachable = nav.touches(goal.h_actor.get());
 
 		if (!actorReachable) {
 			// route was cancelled or the target moved. Route to it again.
@@ -206,14 +163,14 @@ void CWootBot::GoalActionThink() {
 		CompleteGoal(); // nothing to do
 		break;
 	case WBOT_GOAL_ACTION_USE: {
-		int useDist = (pActor->UseRange >> FRACBITS) - 1;
+		int useDist = m_useDistance - 1;
 		if (MoveTo(goal.pos(), useDist)) {
 			Use();
 		}
 		break;
 	}
 	case WBOT_GOAL_ACTION_TOUCH:
-		if (MoveTo(goal.pos(), goal.touchDistance(pActor))) {
+		if (MoveTo(goal.pos(), goal.touchDistance((AActor*)pActor))) {
 			if (goal.lineid == -1)
 				CompleteGoal(); // only lines are hooked and pop goals automatically
 		}
@@ -225,7 +182,7 @@ void CWootBot::GoalActionThink() {
 			FVector2 backDir = line->normal() * -1;
 			FVector2 backGoal = line->center() + backDir * 32;
 
-			fixed_t dist = (backGoal - FVector2(pActor->x, pActor->y)).Length();
+			fixed_t dist = (backGoal - m_origin).Length();
 
 			// be careful not to miss skinny lines
 			int speed = line->length() > 32 ? RUN_SPEED : RUN_SPEED / 4;
@@ -241,15 +198,15 @@ void CWootBot::GoalActionThink() {
 	case WBOT_GOAL_ACTION_SHOOT: {
 		int shootRange = 200;
 
-		if (m_pPlayer->ReadyWeapon) {
-			WeaponInfo& info = g_wbot_weapon_info[m_pPlayer->ReadyWeapon->GetClass()->TypeName.GetChars()];
+		if (m_weaponName) {
+			WeaponInfo& info = g_wbot_weapon_info[m_weaponName];
 			shootRange = info.maxRange;
 		}
 
 		MoveTo(goal.pos(), 100);
 
 		TraceResult tr;
-		TraceAhead(shootRange, FVector3(0, 0, m_pPlayer->viewheight), false, &tr);
+		TraceAhead(shootRange, FVector3(0, 0, m_viewHeight), false, &tr);
 		if (tr.line && (tr.line - g_map.lines) == goal.lineid) {
 			Attack();
 		}
@@ -292,9 +249,8 @@ void CWootBot::GoalActionThink() {
 }
 
 bool CWootBot::StuckThink(int maxStuck) {
-	FVector2 curPos = FVector2(pActor->x, pActor->y);
-	fixed_t movedDist = (curPos - lastPos).Length();
-	lastPos = curPos;
+	fixed_t movedDist = (m_origin - lastPos).Length();
+	lastPos = m_origin;
 
 	if ((m_forwardMove || m_sideMove) && movedDist <= (1 << FRACBITS) * m_speedMult) {
 		stuckCounter += 10;
@@ -313,43 +269,42 @@ bool CWootBot::StuckThink(int maxStuck) {
 }
 
 void CWootBot::AimAtPos(FVector3 pos) {
-	POS_t lookPos = { (fixed_t)pos.X, (fixed_t)pos.Y, (fixed_t)pos.Z };
-	fixed_t viewZ = pActor->z + m_pPlayer->viewheight;
-	fixed_t dist = (FVector2(lookPos.x, lookPos.y) - FVector2(pActor->x, pActor->y)).Length();
-	pActor->pitch = -(SDWORD)R_PointToAngle2(0, viewZ, dist, lookPos.z);
-	pActor->angle = R_PointToAngle2(pActor->x, pActor->y, lookPos.x, lookPos.y);
+	fixed_t viewZ = m_origin.Z + m_viewHeight;
+	fixed_t dist = (FVector2(pos.X, pos.Y) - m_origin).Length();
+	m_pitch = -(SDWORD)PointToAngle2(0, viewZ, dist, pos.Z);
+	m_yaw = PointToAngle2(m_origin.X, m_origin.Y, pos.X, pos.Y);
 }
 
 bool CWootBot::TraceAhead(int dist, FVector3 offset, bool ignoreMonsters, TraceResult* tr) {
 	FVector3 forward, right;
-	MakeVectors(pActor->angle, forward, right);
-	FVector3 start = FVector3(pActor->x, pActor->y, pActor->z) + offset;
+	MakeVectors(m_yaw, forward, right);
+	FVector3 start = m_origin + offset;
 	FVector3 end = start + forward * dist;
 
-	return g_map.Trace(start, end, ignoreMonsters ? 0 : 0xffffffff, ML_BLOCKEVERYTHING, pActor, tr);
+	return g_map.Trace(start, end, ignoreMonsters, (AActor*)pActor, tr);
 }
 
 bool CWootBot::MoveTo(FVector2 pos, int radius, int speed) {
-	float z = (float)(pActor->z + m_pPlayer->viewheight);
+	float z = (float)(m_origin.Z + m_viewHeight);
 	AimAtPos(FVector3(pos.X, pos.Y, z));
 
-	FVector2 wantDir = pos - FVector2(pActor->x, pActor->y);
+	FVector2 wantDir = pos - m_origin;
 	wantDir.MakeUnit();
 
 	// jump over walls and activate things in front of us
 	TraceResult tr;
-	int useDist = (pActor->UseRange >> FRACBITS) - 1;
+	int useDist = m_useDistance - 1;
 	if (TraceAhead(useDist, FVector3(0, 0, STEP_HEIGHT << FRACBITS), true, &tr)) {
 		int d = tr.frac * useDist;
 
 		// jump if not too far and this isn't an impassable wall
-		if (tr.line->backsector && d < 32 && m_pPlayer->onground) {
+		if (tr.line->backsector && d < 32 && m_onGround) {
 			fixed_t backZ = tr.line->backsector->getFloorZ();
-			int jumpHeight = (backZ - pActor->z) >> FRACBITS;
+			int jumpHeight = (fixed_t)(backZ - m_origin.Z) >> FRACBITS;
 
 			// ...and it's possible and necessary to jump up
 			if (jumpHeight > STEP_HEIGHT && jumpHeight <= JUMP_HEIGHT)
-				m_lButtons |= BT_JUMP;
+				m_lButtons |= IN_JUMP;
 		}
 
 		// only use walls that aren't already moving, so doors aren't closed while opening
@@ -370,7 +325,7 @@ bool CWootBot::MoveTo(FVector2 pos, int radius, int speed) {
 
 	// combine desired vector with avoidance vectors
 	FVector2 avoidCornersDir = AvoidCornersVector(wantDir);
-	FVector2 avoidLedgeDir = AvoidLedges(pActor, m_cliffDist);
+	FVector2 avoidLedgeDir = AvoidLedges((AActor*)pActor, m_cliffDist);
 	FVector2 moveDir = wantDir + avoidCornersDir;
 
 	if (!m_routeController.jumpState) {
@@ -393,20 +348,20 @@ bool CWootBot::MoveTo(FVector2 pos, int radius, int speed) {
 
 	// convert directinal vectors to forward/strafe movents relative to the look direction
 	FVector3 forward, right;
-	MakeVectors(pActor->angle, forward, right);
+	MakeVectors(m_yaw, forward, right);
 	forward.MakeUnit();
 	right.MakeUnit();
 	m_forwardMove = DotProduct(moveDir, forward);
 	m_sideMove = DotProduct(moveDir, right);
 
-	fixed_t dist = (pos - FVector2(pActor->x, pActor->y)).Length();
+	fixed_t dist = (pos - m_origin).Length();
 	return dist < (radius << FRACBITS);
 }
 
 bool CWootBot::StopMoving() {
-	FVector2 pos(pActor->x, pActor->y);
-	FVector2 vel(pActor->velx, pActor->vely);
-	FVector2 opposingPos = pos - (vel.Unit() * (100 << FRACBITS));
+	FVector2 pos = m_origin;
+	FVector2 vel = m_velocity;
+	FVector2 opposingPos = m_origin - (vel.Unit() * (100 << FRACBITS));
 
 	int speed = GetSpeed2D();
 
@@ -422,18 +377,18 @@ FVector2 CWootBot::AvoidCornersVector(FVector2 wantDir) {
 	// strafe around objects/walls partially blocking the way
 	fixed_t zTest = (STEP_HEIGHT + 1) << FRACBITS;
 	FVector3 testDir = FVector3(wantDir.X * FRACUNIT, wantDir.Y * FRACUNIT, 0) * 32;
-	FVector3 viewPos = FVector3(pActor->x, pActor->y, pActor->z + zTest);
+	FVector3 viewPos = m_origin + FVector3(0, 0, zTest);
 	fixed_t rightOfs = 16 << FRACBITS;
 	FVector3 rightDir(wantDir.Y, -wantDir.X, 0);
 	FVector3 rightPos = viewPos + rightDir * rightOfs;
 	FVector3 leftPos = viewPos + rightDir * -rightOfs;
 	TraceResult trLeft, trRight;
 
-	g_map.Trace(rightPos, rightPos + testDir, MF_SOLID, ML_BLOCKEVERYTHING, pActor, &trRight);
-	g_map.Trace(leftPos, leftPos + testDir, MF_SOLID, ML_BLOCKEVERYTHING, pActor, &trLeft);
+	g_map.Trace(rightPos, rightPos + testDir, false, (AActor*)pActor, &trRight);
+	g_map.Trace(leftPos, leftPos + testDir, false, (AActor*)pActor, &trLeft);
 
 	bool hitProp = trRight.actor || trLeft.actor;
-	bool canChangeDir = !hitProp || level.time - m_lastAvoidPropDirChange > 70;
+	bool canChangeDir = !hitProp || get_game_tics() - m_lastAvoidPropDirChange > 70;
 	if (!canChangeDir) {
 		if (trLeft.frac < 1.0f || trRight.frac < 1.0f) {
 			return rightDir * m_lastAvoidPropDir;
@@ -457,7 +412,7 @@ FVector2 CWootBot::AvoidCornersVector(FVector2 wantDir) {
 				draw_debug_line(leftPos, leftPos + testDir * 32, pActor);
 			}
 			*/
-			m_lastAvoidPropDirChange = level.time;
+			m_lastAvoidPropDirChange = get_game_tics();
 			m_lastAvoidPropDir = trRight.frac < trLeft.frac ? -1 : 1;
 			return rightDir * m_lastAvoidPropDir;
 		}
@@ -469,9 +424,9 @@ FVector2 CWootBot::AvoidCornersVector(FVector2 wantDir) {
 FVector2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
 	//NavSector& nav = g_wb_nav.mesh[m_navid];
 	//FVector2 plrPos(pActor->x, pActor->y);
-	int subid = g_map.GetSubsector(actor->x, actor->y) - g_map.subsectors;
+	int subid = g_map.GetSubsector(m_origin.X, m_origin.Y) - g_map.subsectors;
 	NavSector* nav = &g_wb_nav.mesh.nodes[subid];
-	FVector2 plrPos(actor->x, actor->y);
+	FVector2 plrPos = m_origin;
 
 	int targetNav = -1;
 	int idealNav = -1;
@@ -493,7 +448,7 @@ FVector2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
 		}
 	}
 
-	fixed_t ignoreZ = actor->z + (STEP_HEIGHT << FRACBITS); // can't fall off a cliff above us
+	fixed_t ignoreZ = m_origin.Z + (STEP_HEIGHT << FRACBITS); // can't fall off a cliff above us
 
 	// get nearby sectors in case nearest ledge is at the corner of the current
 	std::vector<NavSector*> sectors;
@@ -538,7 +493,7 @@ FVector2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
 			if (dist < 0 && testSec != nav)
 				continue; // can't have fallen off a cliff in a neighbor sector
 
-			ExtendSegment(v1, v2, actor->radius);
+			ExtendSegment(v1, v2, m_radius);
 			if (!PointAlignedSegment(plrPos, v1, v2))
 				continue; // off to the side of this segment
 
@@ -575,28 +530,24 @@ void CWootBot::UpdatePositionFlags() {
 	stateFlags &= ~(FL_WBOT_FLYING | FL_WBOT_ON_ELEV | FL_WBOT_OVERHANG);
 	if (m_routeController.m_navCur) {
 		NavSector& nav = g_wb_nav.mesh.nodes[m_routeController.m_navid];
-		if (pActor->z > nav.getFloorZ())
-			stateFlags |= m_pPlayer->onground ? FL_WBOT_OVERHANG : FL_WBOT_FLYING;
+		if (m_origin.Z > nav.getFloorZ())
+			stateFlags |= m_onGround ? FL_WBOT_OVERHANG : FL_WBOT_FLYING;
 		if (nav.sector->isFloorMoving())
 			stateFlags |= FL_WBOT_ON_ELEV;
 	}
 }
 
 FVector3 CWootBot::GetViewPos() {
-	return FVector3(pActor->x, pActor->y, pActor->z + pActor->ViewHeight);
+	return m_origin + FVector3(0, 0, m_viewHeight);
 }
 
 fixed_t CWootBot::GetDistance(FVector2 p) {
-	return (p - FVector2(pActor->x, pActor->y)).Length();
-}
-
-FVector3 CWootBot::GetVelocity() {
-	return FVector3(pActor->velx, pActor->vely, pActor->velz);
+	return (p - m_origin).Length();
 }
 
 int CWootBot::GetSpeed2D() {
 	// TODO: why is this conversion to cmd speeds weird?
-	return (FVector2(pActor->velx, pActor->vely).Length() / FRACUNIT) * 8.0f;
+	return (FVector2(m_velocity.X, m_velocity.Y).Length() / FRACUNIT) * 8.0f;
 }
 
 bool CWootBot::FindGoal() {
@@ -605,26 +556,8 @@ bool CWootBot::FindGoal() {
 		PushLevelEndGoal();
 	}
 	else if (m_followPlayer) {
-		int thisSubId = g_wb_nav.get_nav_id(pActor);
-
-		AActor* player = NULL;
-		for (int i = 0; i < MAXPLAYERS; i++)
-		{
-			if (!playeringame[i])
-				continue;
-
-			AActor* actor = players[i].mo;
-			if (!actor || actor->player->bIsBot)
-				continue;
-
-			if (actor->player->cheats & (CF_NOCLIP | CF_NOCLIP2))
-				continue; // for testing
-
-			if (thisSubId == g_wb_nav.get_nav_id(actor))
-				continue; // already with this player
-
-			PushGoal(BotGoal(WBOT_GOAL_ACTION_MOVE_TO, actor), NULL);
-		}
+		int thisSubId = g_wb_nav.get_nav_id((AActor*)pActor);
+		AActor* player = find_followable_player(thisSubId);
 	}
 
 	return m_routeController.HasRoute();
@@ -635,23 +568,16 @@ bool CWootBot::PushLevelEndGoal() {
 
 	for (int i = 0; i < g_map.numlines; i++) {
 		MapLine& line = g_map.lines[i];
-		if (line.special() == Exit_Normal || line.special() == Exit_Secret) {
+		if (line.isLevelExit()) {
 			if (PushGoal(BotGoal(g_map.get_linedef_goal_action(&line), i), NULL)) {
 				return true;
 			}
 		}
 	}
 
-	TThinkerIterator<AActor> it;
-	AActor* actor;
-	while ((actor = it.Next())) {
-		if ((actor->flags & MF_SHOOTABLE) && !actor->player) {
-			if (!strcmp(actor->GetClass()->TypeName.GetChars(), "BossBrain")) {
-				if (PushGoal(BotGoal(WBOT_GOAL_ACTION_BOSS_BRAIN, actor), NULL)) {
-					return true;
-				}
-			}
-		}
+	AActor* boss = find_boss_brain();
+	if (boss && PushGoal(BotGoal(WBOT_GOAL_ACTION_BOSS_BRAIN, boss), NULL)) {
+		return true;
 	}
 
 	return false;
@@ -697,11 +623,11 @@ bool CWootBot::PushGoal(const BotGoal& goal, NavSectorLink* purposeLink) {
 }
 
 bool CWootBot::PushKeyGoals(MapLine* line) {
-	if (line->special() == Door_LockedRaise && !g_map.CheckKeys(pActor, line)) {
+	if (line->isLockedDoor() && !g_map.CheckKeys((AActor*)pActor, line)) {
 		vector<BotGoal> keyGoals;
 
 		m_routeController.MarkBlockedPaths();
-		g_wb_nav.get_key_goals_for_line(pActor, line, keyGoals);
+		g_wb_nav.get_key_goals_for_line((AActor*)pActor, line, keyGoals);
 
 		for (BotGoal& keyGoal : keyGoals) {
 			m_goals.push_back(keyGoal);
@@ -811,7 +737,7 @@ void CWootBot::CompleteGoal() {
 }
 
 void CWootBot::FailGoal() {
-	m_nextThink = level.time + 7; // failing lots of goals at once could cause lag
+	m_nextThink = get_game_tics() + 7; // failing lots of goals at once could cause lag
 
 	if (m_goals.empty()) {
 		return;
@@ -823,10 +749,7 @@ void CWootBot::FailGoal() {
 	DebugPrint(VarArgs("FAILED %s '%s'\n", m_goals.size() == 1 ? "goal" : "subgoal", curGoal.desc().c_str()));
 
 	if (m_routeController.m_freezeOnGoalFail) {
-		m_pPlayer->cheats |= CF_FROZEN;
-		pActor->velx = 0;
-		pActor->vely = 0;
-		pActor->velz = 0;
+		freeze_player(m_pPlayer, true);
 	}
 
 	bool bubbleFailure = curGoal.required;
@@ -834,7 +757,7 @@ void CWootBot::FailGoal() {
 	if ((!bubbleFailure || m_goals.size() == 1)) {
 		if (++goalFailCounter > 10) {
 			DebugPrint("I can't reach any goals from here! Time to die.\n");
-			P_DamageMobj(pActor, pActor, pActor, TELEFRAG_DAMAGE, NAME_Suicide);
+			kill_actor((AActor*)pActor);
 		}
 	}
 
@@ -854,24 +777,24 @@ void CWootBot::FailGoal() {
 }
 
 void CWootBot::Use(int ticsBetweenUses) {
-	if (level.time - m_lastUse < ticsBetweenUses) {
+	if (get_game_tics() - m_lastUse < ticsBetweenUses) {
 		return;
 	}
 
-	m_lButtons |= BT_USE;
-	m_lastUse = level.time;
+	m_lButtons |= IN_USE;
+	m_lastUse = get_game_tics();
 }
 
 void CWootBot::Attack() {
-	m_lButtons |= BT_ATTACK;
-	m_combatController.m_lastAttack = level.time;
+	m_lButtons |= IN_ATTACK;
+	m_combatController.m_lastAttack = get_game_tics();
 }
 
 void CWootBot::HandleLineActivation(MapLine* line, AActor* activator) {
-	if (line->special() && line->special() == Door_LockedRaise) {
+	if (line->special() && line->isLockedDoor()) {
 		if (!g_map.CheckKeys(activator, line)) {
 			// door wasn't actually opened
-			if (activator == pActor) {
+			if (activator == (AActor*)pActor) {
 				// we tried to activate this. Add the key goals now. They may have been skipped if this
 				// isn't our current goal line, but it blocks access to an unblocked line in the same
 				// goal sector ID (doom2 map27 thin blue door in front of switch)

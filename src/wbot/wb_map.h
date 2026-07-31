@@ -147,6 +147,8 @@ namespace wbot {
 		int special();
 		int getArg(int idx);
 		bool isTeleport();
+		bool isLockedDoor();
+		bool isLevelExit();
 		bool canPlayerActivate();
 		FVector2 getTeleportDest();
 	};
@@ -269,7 +271,7 @@ namespace wbot {
 		// remove trigger goals for single-use lines that have been used
 		void remove_invalid_goals(int secid);
 
-		bool Trace(FVector3 start, FVector3 end, uint32_t actorMask, uint32_t wallMask, AActor* ignore, TraceResult* tr);
+		bool Trace(FVector3 start, FVector3 end, bool ignoreMonsters, AActor* ignore, TraceResult* tr);
 
 		bool CheckKeys(AActor* activator, MapLine* line);
 

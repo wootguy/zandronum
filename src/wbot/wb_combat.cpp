@@ -1,10 +1,11 @@
 #include "wb_combat.h"
 #include "wb_bot.h"
 #include "wb_util.h"
-#include "p_local.h"
+#include "wb_eiface.h"
 #include <algorithm>
 
 using namespace std;
+using namespace wbot;
 
 unordered_map<string, WeaponInfo> g_wbot_weapon_info = {
 	{"Fist",			{0,  0,   0,   64,		0}},
@@ -29,27 +30,29 @@ void CBotCombatController::Think() {
 	AActor* bestEnemy = BestEnemy();
 
 	if (bestEnemy) {
-		pActor->target = bestEnemy;
+		pBot->target = bestEnemy;
 	}
 
-	AActor* targ = pActor->target;
+	AActor* targ = pBot->target;
 
-	if (!targ || targ->health <= 0) {
-		pActor->target = NULL;
+	if (!targ || get_actor_health(targ) <= 0) {
+		pBot->target = NULL;
 		return;
 	}
 
 	SelectBestWeapon();
 
-	fixed_t dist = P_AproxDistance(pActor->x - targ->x, pActor->y - targ->y);
+	FVector2 targPos = get_actor_pos(targ);
+
+	fixed_t dist = (targPos - pBot->m_origin).Length();
 	fixed_t minChaseDist = 200 << FRACBITS;
 	fixed_t maxChaseDist = 500 << FRACBITS;
 	fixed_t maxRange = 2000 << FRACBITS;
 	fixed_t minRange = 0;
 	bool isMeleeWeapon = false;
 
-	if (pPlayer->ReadyWeapon) {
-		WeaponInfo& info = g_wbot_weapon_info[pPlayer->ReadyWeapon->GetClass()->TypeName.GetChars()];
+	if (pBot->m_weaponName) {
+		WeaponInfo& info = g_wbot_weapon_info[pBot->m_weaponName];
 		minChaseDist = (info.minRange << FRACBITS) + 64;
 		maxChaseDist = std::max(minChaseDist, (info.idealRange << FRACBITS));
 		minRange = info.minRange << FRACBITS;
@@ -57,25 +60,27 @@ void CBotCombatController::Think() {
 		isMeleeWeapon = info.maxRange < 200;
 	}
 
-	if (isMeleeWeapon && dist > maxRange && targ->Sector != pActor->Sector) {
-		pActor->target = NULL;
+	MapSector* botSector = get_actor_sector((AActor*)pActor);
+	MapSector* targSector = get_actor_sector(targ);
+	if (isMeleeWeapon && dist > maxRange && targSector != botSector) {
+		pBot->target = NULL;
 		return; // ignore enemies not close enough to punch
 	}
 
-	bool hasLineOfSight = P_CheckSight(pActor, targ, SF_SEEPASTSHOOTABLELINES);
+	bool hasLineOfSight = check_line_of_sight((AActor*)pActor, targ);
 
 	if (!hasLineOfSight) {
 		// forget about the target if not seen for a while
-		if (level.maptime - m_targetLastSeenTic < 35) {
-			pActor->target = NULL;
+		if (get_game_tics() - m_targetLastSeenTic < 35) {
+			pBot->target = NULL;
 			return;
 		}
 	}
 
-	m_targetLastSeenTic = level.maptime;
+	m_targetLastSeenTic = get_game_tics();
 
 	// aim at enemy
-	pBot->AimAtPos(FVector3(targ->x, targ->y, targ->z + targ->height / 2));
+	pBot->AimAtPos(get_actor_pos(targ) + FVector3(0, 0, get_actor_height(targ) / 2));
 
 	pBot->m_forwardMove = 0;
 	pBot->m_sideMove = 0;
@@ -103,125 +108,43 @@ void CBotCombatController::Think() {
 }
 
 void CBotCombatController::SelectBestWeapon() {
-	AWeapon* bestWeapon = NULL;
+	AActor* bestWeapon = NULL;
 	int bestPriority = -1;
-	for (AInventory* item = pActor->Inventory; item != NULL; item = item->Inventory) {
-		if (item->IsKindOf(RUNTIME_CLASS(AWeapon))) {
-			AWeapon* weapon = static_cast<AWeapon*>(item);
-
-			WeaponInfo& info = g_wbot_weapon_info[weapon->GetClass()->TypeName.GetChars()];
-			int prio = info.priority;
-			bool hasAmmo = !weapon->Ammo1 || weapon->Ammo1->Amount >= info.minAmmo;
-			if (hasAmmo && prio > bestPriority) {
-				bestPriority = prio;
-				bestWeapon = weapon;
-			}
+	for (AActor* weapon : get_player_weapons(pBot->pActor, true)) {
+		WeaponInfo& info = g_wbot_weapon_info[get_actor_type_name(weapon)];
+		int prio = info.priority;
+		if (prio > bestPriority) {
+			bestPriority = prio;
+			bestWeapon = weapon;
 		}
 	}
 
-	SelectWeapon(bestWeapon);
+	player_select_weapon(pBot->m_pPlayer, bestWeapon);
 }
 
-void CBotCombatController::SelectWeapon(AWeapon* weapon) {
-	if (weapon && pPlayer->ReadyWeapon != weapon && pPlayer->PendingWeapon != weapon) {
-		pPlayer->PendingWeapon = weapon;
-		if (pPlayer->ReadyWeapon != NULL) {
-			P_DropWeapon(pPlayer);
-		}
-		else if (pPlayer->PendingWeapon != WP_NOCHANGE) {
-			P_BringUpWeapon(pPlayer);
-		}
-	}
-}
+AActor* CBotCombatController::GetWeaponByName(const char* selname) {
 
-AWeapon* CBotCombatController::GetWeaponByName(const char* selname) {
-	for (AInventory* item = pActor->Inventory; item != NULL; item = item->Inventory) {
-		if (item->IsKindOf(RUNTIME_CLASS(AWeapon))) {
-			AWeapon* weapon = static_cast<AWeapon*>(item);
-			const char* wepname = weapon->GetClass()->TypeName.GetChars();
-
-			if (!strcmp(wepname, selname))
-				return weapon;
-		}
+	for (AActor* weapon : get_player_weapons(pBot->pActor, true)) {
+		if (!strcmp(get_actor_type_name(weapon), selname))
+			return weapon;
 	}
 
 	return NULL;
 }
 
 bool CBotCombatController::SelectWeapon(const char* selname) {
-	AWeapon* weapon = GetWeaponByName(selname);
+	AActor* weapon = GetWeaponByName(selname);
 
 	if (weapon) {
-		WeaponInfo& info = g_wbot_weapon_info[selname];
-		bool hasAmmo = !weapon->Ammo1 || weapon->Ammo1->Amount >= info.minAmmo;
-		if (hasAmmo) {
-			SelectWeapon(weapon);
-			return true;
-		}
+		player_select_weapon(pBot->m_pPlayer, weapon);
+		return true;
 	}
 
 	return false;
 }
 
-AActor* wbot_LookForEnemiesInBlock(AActor* lookee, int index, void* extparam)
-{
-	FBlockNode* block;
-	AActor* link;
-	CWootBot* pbot = (CWootBot*)extparam;
-	angle_t fov = pbot->m_fov;
-	AActor* plr = pbot->pActor;
-	AActor* oldTarget = plr->target;
-	fixed_t oldDist = oldTarget ? P_AproxDistance(oldTarget->x - plr->x, oldTarget->y - plr->y) : 0;
-
-	for (block = blocklinks[index]; block != NULL; block = block->NextActor)
-	{
-		link = block->Me;
-
-		if (!(link->flags & MF_SHOOTABLE))
-			continue;			// not shootable (observer or dead)
-
-		if (link == lookee)
-			continue;
-
-		if (link->health <= 0)
-			continue;			// dead
-
-		if (link->flags2 & MF2_DORMANT)
-			continue;			// don't target dormant things
-
-		if (link->flags7 & MF7_NEVERTARGET)
-			continue;
-
-		if (lookee->IsFriend(link))
-			continue;
-
-		if (fov && fov < ANGLE_MAX)
-		{
-			angle_t an = R_PointToAngle2(lookee->x, lookee->y, link->x, link->y) - lookee->angle;
-
-			if (an > (fov / 2) && an < (ANGLE_MAX - (fov / 2))) {
-				continue;	// outside of fov
-			}
-		}
-
-		// P_CheckSight is by far the most expensive operation in here so let's do it last.
-		if (!P_CheckSight(lookee, link, SF_SEEPASTSHOOTABLELINES)) {
-			continue;
-		}
-
-		// only retarget to closer enemies
-		if (oldTarget && P_AproxDistance(plr->x - link->x, plr->y - link->y) >= oldDist) {
-			continue;
-		}
-
-		return link;
-	}
-
-	return NULL;
-}
-
 AActor* CBotCombatController::BestEnemy() {
-	return P_BlockmapSearch(pActor, 10, wbot_LookForEnemiesInBlock, pBot);
+	return find_enemy(pBot);
 }
 
 void CBotCombatController::DebugPrint(const char* msg) {

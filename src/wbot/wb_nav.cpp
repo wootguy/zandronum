@@ -4,9 +4,7 @@
 #include "wb_nav_gen.h"
 #include "wb_util.h"
 #include "wb_hooks.h"
-#include "p_lnspec.h"
-#include "a_keys.h"
-#include "d_player.h"
+#include "wb_eiface.h"
 
 #include <algorithm>
 #include <unordered_set>
@@ -14,6 +12,7 @@
 #include <queue>
 #include <vector>
 #include <string>
+#include <limits.h>
 
 using namespace std;
 using namespace wbot;
@@ -40,7 +39,7 @@ int NavSectorLink::blocked(AActor* actor, bool recurse) {
 		MapLine* line = linedef;
 
 		if (line && line->getArg(0) == 0 && g_map.get_linedef_move_flag(line)) {
-			if (actor && line->special() == Door_LockedRaise && !g_map.CheckKeys(actor, line)) {
+			if (actor && line->isLockedDoor() && !g_map.CheckKeys(actor, line)) {
 				return walkability; // don't have the keys required to use this
 			}
 
@@ -96,7 +95,7 @@ bool NavSectorLink::jumpable() {
 		return false;
 	}
 
-	if (TraceLine(start, end, true, NULL, NULL)) {
+	if (g_map.Trace(start, end, true, NULL, NULL)) {
 		return false;
 	}
 
@@ -280,7 +279,7 @@ bool NavSector::touches(AActor* actor) {
 	if (!actor)
 		return false;
 
-	FVector2 actorPos = FVector2(actor->x, actor->y);
+	FVector2 actorPos = get_actor_pos(actor);
 
 	int subid = g_map.GetSubsector(actorPos.X, actorPos.Y)->id;
 	if (subid == id)
@@ -290,7 +289,7 @@ bool NavSector::touches(AActor* actor) {
 	for (int i = 0; i < sub.numsegs; i++) {
 		MapSeg& seg = g_map.segs[sub.firstseg + i];
 
-		if (CircleIntersectsSegment(actorPos, actor->radius, seg.start(), seg.end())) {
+		if (CircleIntersectsSegment(actorPos, get_actor_radius(actor), seg.start(), seg.end())) {
 			return true;
 		}
 	}
@@ -331,17 +330,8 @@ fixed_t NavSector::getCeilZ() {
 }
 
 void SectorNavMesh::init() {
-	propBlockers.clear();
 	pending_sector_relinks.clear();
-
-	// find all immovable and invulnerable props
-	TThinkerIterator<AActor> it;
-	AActor* actor;
-	while ((actor = it.Next())) {
-		if (IsPropBlocker(actor))
-			propBlockers.push_back(actor);
-		//Printf("Prop '%s' %d\n", actor->GetClass()->TypeName.GetChars(), actor->health);
-	}
+	propBlockers = find_prop_blockers();
 
 	mesh = SectorNavMeshGenerator::generate(propBlockers);
 	astarNodes = new AstarNode[g_map.numsubsectors];
@@ -351,17 +341,20 @@ void SectorNavMesh::init() {
 void SectorNavMesh::draw_nodes(AActor* actor) {
 	static int lastDraw;
 
-	if (level.time - lastDraw < 10 && lastDraw < level.time) {
+	if (get_game_tics() - lastDraw < 10 && lastDraw < get_game_tics()) {
 		return;
 	}
 
-	lastDraw = level.time;
+	lastDraw = get_game_tics();
 
-	AActor* player = getAnyPlayer();
+	player_t* player = getAnyPlayer();
 	if (!player)
 		return;
 
-	MapSubsector* sub = g_map.GetSubsector(player->x, player->y);
+	AActor* playerActor = (AActor*)get_player(player);
+
+	FVector3 playerPos = get_actor_pos(playerActor);
+	MapSubsector* sub = g_map.GetSubsector(playerPos.X, playerPos.Y);
 
 	if (sub && sub->id < g_map.numsubsectors) {
 		NavSector& nav = mesh.nodes[sub->id];
@@ -371,7 +364,7 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 		for (int k = 0; k < nav.links.size() && spritesDrawn < maxSprites; k++) {
 			NavSectorLink& link = *nav.links[k];
 			
-			if (!link.blocked(player)) {
+			if (!link.blocked(playerActor)) {
 				FVector3 linkPos = link.pos3D();
 				FVector2 targetPos = link.target->pos();
 
@@ -385,7 +378,7 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 					jumpStart.Z = link.parent->getFloorZ() + (56 << FRACBITS);
 					jumpEnd.Z = link.target->getFloorZ() + (56 << FRACBITS);
 					
-					FVector2 backupPos = link.GetJumpBackupPos(targetPos, player);
+					FVector2 backupPos = link.GetJumpBackupPos(targetPos, playerActor);
 					FVector3 backupEnd = FVector3(backupPos.X, backupPos.Y, jumpStart.Z);
 
 					spritesDrawn += draw_debug_line(nav.pos3D(), jumpStartFloor, actor);
@@ -412,7 +405,6 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 			spritesDrawn += draw_debug_line(start, end, actor);
 		}
 
-		FVector2 playerPos(player->x, player->y);
 		int closestSeg = -1;
 		fixed_t bestDist = INT_MAX;
 		for (int i = 0; i < sub->numsegs; i++) {
@@ -432,7 +424,7 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 		}
 
 		if (spritesDrawn >= maxSprites) {
-			Printf("Overflow sprites!\n");
+			gprintf("Overflow sprites!\n");
 		}
 	}
 
@@ -440,12 +432,12 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 		NavSector& node = mesh.nodes[i];
 		FVector3 pos = node.pos3D();
 
-		FVector2 delta = (FVector2)pos - FVector2(player->x, player->y);
+		FVector2 delta = (FVector2)pos - playerPos;
 		if (delta.Length() > (1000 << FRACBITS)) {
 			continue;
 		}
 
-		SpawnBlood(pos + FVector3(0, 0, (16 << FRACBITS)), 100, player);
+		SpawnBlood(pos + FVector3(0, 0, (16 << FRACBITS)), 100, actor);
 	}
 }
 
@@ -454,18 +446,19 @@ int SectorNavMesh::get_nav_id(fixed_t x, fixed_t y) {
 }
 
 int SectorNavMesh::get_nav_id(AActor* actor) {
-	return get_nav_id(actor->x, actor->y);
+	FVector2 pos = get_actor_pos(actor);
+	return get_nav_id(pos.X, pos.Y);
 }
 
 int SectorNavMesh::get_nav_id(player_t* plr) {
-	AActor* pActor = plr->mo;
-	FVector3 pos(pActor->x, pActor->y, pActor->z);
+	AActor* pActor = (AActor*)get_player(plr);
+	FVector3 pos = get_actor_pos(pActor);
 
 	MapSubsector* centeredSub = g_map.GetSubsector(pos.X, pos.Y);
 	
-	if (centeredSub->sector->getFloorZ() + (STEP_HEIGHT << FRACBITS) < pos.Z && plr->onground) {
+	if (centeredSub->sector->getFloorZ() + (STEP_HEIGHT << FRACBITS) < pos.Z && player_on_ground(plr)) {
 		// above the centered subsector because of hanging over a ledge
-		FVector2 floorPoint = GetFloorPosition(pos, pActor->radius);
+		FVector2 floorPoint = GetFloorPosition(pos, get_actor_radius(pActor));
 		return g_map.GetSubsector(floorPoint.X, floorPoint.Y)->id;
 	}
 
@@ -554,11 +547,11 @@ BotRoute SectorNavMesh::get_astar_route(const RouteOpts& opts)
 	BotRoute emptyRoute;
 
 	if (verbose) {
-		Printf("START route from %d to %d\n", opts.start, opts.end);
+		gprintf("START route from %d to %d\n", opts.start, opts.end);
 	}
 
 	if (opts.start < 0 || opts.end < 0 || opts.start >= g_map.numsubsectors || opts.end >= g_map.numsubsectors) {
-		Printf("AStarRoute: invalid start/end nodes\n");
+		gprintf("AStarRoute: invalid start/end nodes\n");
 		g_route_ignore_num++;
 		return emptyRoute;
 	}
@@ -584,7 +577,7 @@ BotRoute SectorNavMesh::get_astar_route(const RouteOpts& opts)
 	while (!openQueue.empty()) {
 
 		if (++curIter > maxIter) {
-			Printf("AStarRoute exceeded max iterations searching path (%d)", maxIter);
+			gprintf("AStarRoute exceeded max iterations searching path (%d)", maxIter);
 			break;
 		}
 
@@ -615,7 +608,7 @@ BotRoute SectorNavMesh::get_astar_route(const RouteOpts& opts)
 			reverse(route.route.begin(), route.route.end());
 
 			if (verbose) {
-				Printf("FINISH route calculation from %d to %d. Size is %d.\n",
+				gprintf("FINISH route calculation from %d to %d. Size is %d.\n",
 					opts.start, opts.end, route.route.size());
 			}
 
@@ -667,27 +660,28 @@ BotRoute SectorNavMesh::get_astar_route(const RouteOpts& opts)
 	return emptyRoute;
 }
 
+class AKey;
+
 bool SectorNavMesh::get_key_goals_for_line(AActor* actor, MapLine* line, vector<BotGoal>& keyGoals) {
-	if (line->special() != Door_LockedRaise)
+	if (!line->isLockedDoor())
 		return true; // not a locked door
 
 	if (g_map.CheckKeys(actor, line))
 		return true; // already have all the keys
 
-	TArray<TArray<PClass*>> keyGroups = P_GetRequiredKeys(line->getArg(3));
+	vector<vector<PClass*>> keyGroups = get_required_key_types(line);
 
-	if (keyGroups.Size() == 0)
+	if (keyGroups.size() == 0)
 		return true; // no keys required
 
 	// Get routes to all keys in the map, so the closest one can be selected
 	struct KeyRoute {
-		AKey* key;
+		AActor* key;
 		int routeSize;
 	};
 
 	int actorNavId = get_nav_id(actor);
 	unordered_map<PClass*, KeyRoute> mapKeys;
-	TThinkerIterator<AKey> it;
 	AKey* mapKey;
 	
 	RouteOpts opts;
@@ -695,10 +689,7 @@ bool SectorNavMesh::get_key_goals_for_line(AActor* actor, MapLine* line, vector<
 
 	int oldRouteIgnoreNum = g_route_ignore_num;
 
-	while ((mapKey = it.Next()) != NULL) {
-		if (mapKey->Owner)
-			continue; // key in someone's inventory
-
+	for (AActor* mapKey : find_map_keys()) {
 		int keyNavId = get_nav_id(mapKey);
 		opts.end = keyNavId;
 
@@ -708,17 +699,17 @@ bool SectorNavMesh::get_key_goals_for_line(AActor* actor, MapLine* line, vector<
 		keyRoute.key = mapKey;
 		keyRoute.routeSize = get_astar_route(opts).dist;
 
-		mapKeys[mapKey->GetClass()] = keyRoute;
+		mapKeys[get_actor_class(mapKey)] = keyRoute;
 	}
 
-	for (int i = 0; i < keyGroups.Size(); i++) {
-		TArray<PClass*>& group = keyGroups[i];
+	for (int i = 0; i < keyGroups.size(); i++) {
+		vector<PClass*>& group = keyGroups[i];
 
 		int bestKeyDist = INT_MAX;
-		AKey* bestKey = NULL;
+		AActor* bestKey = NULL;
 
-		if (group.Size()) {
-			for (int k = 0; k < group.Size(); k++) {
+		if (group.size()) {
+			for (int k = 0; k < group.size(); k++) {
 				auto key = mapKeys.find(group[k]);
 				if (key != mapKeys.end() && key->second.routeSize < bestKeyDist) {
 					bestKeyDist = key->second.routeSize;
@@ -738,20 +729,20 @@ bool SectorNavMesh::get_key_goals_for_line(AActor* actor, MapLine* line, vector<
 
 		if (!bestKey) {
 			// no key satisfies the group requirement
-			Printf("Impossible key requirements for line %d:\n", line->id);
+			gprintf("Impossible key requirements for line %d:\n", line->id);
 
-			for (int i = 0; i < keyGroups.Size(); i++) {
-				TArray<PClass*>& group = keyGroups[i];
-				for (int k = 0; k < group.Size(); k++) {
-					Printf("  %s", group[k]->TypeName.GetChars());
+			for (int i = 0; i < keyGroups.size(); i++) {
+				vector<PClass*>& group = keyGroups[i];
+				for (int k = 0; k < group.size(); k++) {
+					gprintf("  %s", get_class_type_name(group[k]));
 				}
-				Printf("\n");
+				gprintf("\n");
 			}
-			Printf("Map keys:\n");
+			gprintf("Map keys:\n");
 			for (auto item : mapKeys) {
-				Printf("   %s", item.second.key->GetClass()->TypeName.GetChars());
+				gprintf("   %s", get_actor_type_name(item.second.key));
 			}
-			Printf("\n");
+			gprintf("\n");
 
 			return false;
 		}
@@ -766,35 +757,20 @@ bool SectorNavMesh::get_key_goals_for_line(AActor* actor, MapLine* line, vector<
 }
 
 vector<BotGoal> SectorNavMesh::get_weapon_goals(const char* wepname) {
-	TThinkerIterator<AWeapon> it;
-	AWeapon* weapon;
-
 	vector<BotGoal> goals;
 
-	while ((weapon = it.Next()) != NULL) {
-		if (weapon->Owner)
-			continue; // weapon in someone's inventory
-
-		if (!strcmp(weapon->GetClass()->TypeName.GetChars(), wepname))
-			goals.push_back(BotGoal(WBOT_GOAL_ACTION_TOUCH, weapon));
+	for (AActor* weapon : find_map_weapons(wepname)) {
+		goals.push_back(BotGoal(WBOT_GOAL_ACTION_TOUCH, weapon));
 	}
 
 	return goals;
 }
 
 vector<BotGoal> SectorNavMesh::get_ammo_goals(const char* ammoname, const char* ammoname2) {
-	TThinkerIterator<AAmmo> it;
-	AAmmo* ammo;
-
 	vector<BotGoal> goals;
 
-	while ((ammo = it.Next()) != NULL) {
-		if (ammo->Owner)
-			continue; // weapon in someone's inventory
-
-		const char* name = ammo->GetClass()->TypeName.GetChars();
-		if (!strcmp(name, ammoname) || (ammoname2 && !strcmp(name, ammoname2)))
-			goals.push_back(BotGoal(WBOT_GOAL_ACTION_TOUCH, ammo));
+	for (AActor* weapon : find_map_ammo(ammoname, ammoname2)) {
+		goals.push_back(BotGoal(WBOT_GOAL_ACTION_TOUCH, weapon));
 	}
 
 	return goals;
@@ -837,7 +813,7 @@ void SectorNavMesh::relink_pending_sector() {
 	}
 	
 	if (!g_wbot_test_mode)
-		Printf("Relinked sector %d (%+d links)\n", secid, linksAdded);
+		gprintf("Relinked sector %d (%+d links)\n", secid, linksAdded);
 
 	pending_sector_relinks.erase(pending_sector_relinks.begin() + idx);
 }

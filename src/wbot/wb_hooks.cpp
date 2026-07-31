@@ -2,6 +2,7 @@
 #include "wb_bot.h"
 #include "wb_map.h"
 #include "wb_nav.h"
+#include "wb_eiface.h"
 #include "c_dispatch.h"
 #include "m_cheat.h"
 #include "sbar.h"
@@ -169,6 +170,7 @@ void wbot_next_test() {
 }
 
 void wbot_map_init() {
+	init_eiface();
 	g_map.init();
 
 	wbot_next_test();
@@ -410,10 +412,12 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 
 	// teleport the bot to the player
 	if (!strcmp(msg, "tp")) {
-		AActor* target = getAnyPlayer();
+		player_t* target = getAnyPlayer();
 
 		if (target) {
-			FVector3 pos(target->x + ((PLAYER_WIDTH + 1) << FRACBITS), target->y, target->z);
+			AActor* actor = (AActor*)get_player(target);
+			FVector3 pos = get_actor_pos(actor);
+			pos.X += ((PLAYER_WIDTH + 1) << FRACBITS);
 
 			for (int i = 0; i < MAXPLAYERS; i++) {
 				AActor* player = players[i].mo;
@@ -509,8 +513,63 @@ void wbot_tick() {
 }
 
 void wbot_tick(CWootBot* pBot) {
-	pBot->Tick();
+	ticcmd_t* cmd = &pBot->m_pPlayer->cmd;
+
+	// Don't execute bot logic during demos, or if the console player is a client.
+	//if (NETWORK_InClientMode() || (demoplayback)) {
+	//	return;
+	//}
+
+	// Reset the bots keypresses.
+	memset(cmd, 0, sizeof(ticcmd_t));
+
+	// Don't run their script if the game is frozen.
+	if (level.flags2 & LEVEL2_FROZEN)
+		return;
+
+	// [BB] Don't run their script if they are frozen either.
+	if (pBot->m_pPlayer->cheats & CF_TOTALLYFROZEN)
+	{
+		// [BB] Don't freeze dead bots. Otherwise they can't respawn.
+		if (pBot->m_pPlayer->mo && pBot->m_pPlayer->mo->health > 0)
+			return;
+	}
+
+	player_t* plr = pBot->m_pPlayer;
+	APlayerPawn* actor = pBot->m_pPlayer->mo;
+	pBot->m_health = actor->health;
+	pBot->m_origin = FVector3(actor->x, actor->y, actor->z);
+	pBot->m_velocity = FVector3(actor->velx, actor->vely, actor->velz);
+	pBot->m_viewHeight = plr->viewheight;
+	pBot->m_useDistance = actor->UseRange >> FRACBITS;
+	pBot->m_radius = actor->radius;
+	pBot->m_isFrozen = plr->cheats & CF_FROZEN;
+	pBot->m_onGround = plr->onground;
+	pBot->m_pitch = actor->pitch;
+	pBot->m_weaponName = NULL;
+	pBot->pActor = actor;
+	if (plr->ReadyWeapon)
+		pBot->m_weaponName = plr->ReadyWeapon->GetClass()->TypeName.GetChars();
+
+	pBot->Think();
+
+	actor->pitch = pBot->m_pitch;
+	actor->angle = pBot->m_yaw;
+
+	// [AK] Don't allow the bot to move while frozen.
+	if ((pBot->m_pPlayer->cheats & CF_FROZEN) == false)
+	{
+		pBot->m_pPlayer->cmd.ucmd.forwardmove = static_cast<short>(pBot->m_lForwardMove << 8);
+		pBot->m_pPlayer->cmd.ucmd.sidemove = static_cast<short>(pBot->m_lSideMove << 8);
+	}
+	else
+	{
+		pBot->m_pPlayer->cmd.ucmd.forwardmove = pBot->m_pPlayer->cmd.ucmd.sidemove = 0;
+	}
+
+	pBot->m_pPlayer->cmd.ucmd.buttons |= pBot->m_lButtons;
 }
+
 void wbot_pre_delete(CWootBot* pBot) {
 	// If this player is the displayplayer, revert the camera back to the console player's eyes.
 	if (pBot->m_pPlayer->mo && (pBot->m_pPlayer->mo->CheckLocalView(consoleplayer)) && (NETWORK_GetState() != NETSTATE_SERVER))

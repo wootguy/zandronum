@@ -1,8 +1,6 @@
 #pragma once
 #include "wb_map.h"
-#include "tables.h"
-#include <unordered_map>
-#include <string>
+#include <vector>
 
 struct FTraceResults;
 
@@ -15,7 +13,7 @@ struct TraceIsect {
 
 char* VarArgs(const char* format, ...);
 
-AActor* getAnyPlayer();
+player_t* getAnyPlayer();
 
 bool DoLinesIntersect(const FVector2& la1, const FVector2& la2, const FVector2& lb1, const FVector2& lb2);
 
@@ -28,7 +26,7 @@ FVector2 ClosestPointOnSegment(const FVector2& p, const FVector2& a, const FVect
 // returns an empty segment if no overlap
 wbot::FSegment2 LineSegmentOverlap(const FVector2& a1, const FVector2& a2, const FVector2& b1, const FVector2& b2);
 
-void set_ori(AActor* actor, int x, int y, angle_t angle);
+void set_ori(AActor* actor, int x, int y, uint32_t angle);
 
 float DistanceToLine(const FVector2& p, const FVector2& a, const FVector2& b);
 
@@ -62,7 +60,7 @@ bool CircleIntersectsSegment(const FVector2& center, float radius, const FVector
 
 void ExtendSegment(FVector2& a, FVector2& b, float amount);
 
-void MakeVectors(angle_t angle, FVector3& forward, FVector3& right);
+void MakeVectors(uint32_t angle, FVector3& forward, FVector3& right);
 
 float DotProduct(const FVector2& a, const FVector2& b);
 
@@ -71,8 +69,6 @@ float CrossProduct(const FVector2& a, const FVector2& b);
 uint64_t getEpochMillis();
 
 int draw_debug_line(FVector3 start, FVector3 end, AActor* actor);
-
-bool TraceLine(FVector3 start, FVector3 end, bool ignoreMonsters=true, AActor* ignoreEnt=NULL, wbot::TraceResult* tr=NULL);
 
 bool TraceRadius(FVector3 start, FVector3 end, fixed_t radius, bool ignoreMonsters=true, AActor* ignoreEnt=NULL, wbot::TraceResult* tr=NULL);
 

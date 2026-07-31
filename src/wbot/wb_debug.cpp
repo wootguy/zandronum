@@ -4,25 +4,26 @@
 #include "wb_util.h"
 #include "wb_route.h"
 #include "wb_map.h"
-#include "d_event.h"
-#include "sv_commands.h"
+
+#include <limits.h>
 
 using namespace std;
 using namespace wbot;
 
 void wbot_debug_player_nav() {
-	AActor* player = getAnyPlayer();
+	player_t* player = getAnyPlayer();
 	if (!player)
 		return;
 
-	FVector2 playerPos(player->x, player->y);
+	AActor* pActor = (AActor*)get_player(player);
+	FVector3 playerPos = get_actor_pos((AActor*)get_player(player));
 
 	string navInfo;
 	int plrnavid = g_wb_nav.get_nav_id(player);
 	NavSector& nav = g_wb_nav.mesh.nodes[plrnavid];
 	MapSubsector& sub = g_map.subsectors[plrnavid];
 
-	navInfo += "Hover Node: " + to_string(g_wb_nav.get_nav_id(player->player));
+	navInfo += "Hover Node: " + to_string(g_wb_nav.get_nav_id(player));
 	navInfo += "\nNode " + to_string(plrnavid) + ":";
 
 	//int temp;
@@ -49,7 +50,7 @@ void wbot_debug_player_nav() {
 	for (int i = 0; i < nav.links.size(); i++) {
 		NavSectorLink& link = *nav.links[i];
 		NavSector& targ = *link.target;
-		string arrow = link.blocked(player) ? " -X> " : " --> ";
+		string arrow = link.blocked(pActor) ? " -X> " : " --> ";
 		navInfo += "\n      " + to_string(link.id) + arrow + to_string(link.target->id);
 		vector<BotGoal>& targtriggers = targ.getTriggers();
 		if (targtriggers.size())
@@ -60,7 +61,7 @@ void wbot_debug_player_nav() {
 
 		if (closestLink == link.id) {
 			RouteOpts opts;
-			opts.actor = player;
+			opts.actor = pActor;
 			float dist = g_wb_nav.path_dist(link);
 			float cost = g_wb_nav.path_cost(link, dist, opts);
 
@@ -88,11 +89,11 @@ void wbot_debug_player_nav() {
 		navInfo += "\n      Special: " + to_string(nav.sector->special());
 
 	FVector3 forward, right;
-	MakeVectors(player->angle, forward, right);
-	FVector3 start = FVector3(player->x, player->y, player->z + player->player->viewheight);
+	MakeVectors(get_actor_angle(pActor), forward, right);
+	FVector3 start = playerPos + FVector3(0, 0, get_player_viewheight(player));
 	MapSector* sector = g_map.GetSector((fixed_t)start.X, (fixed_t)start.Y);
 	TraceResult tr;
-	if (g_map.Trace(start, start + forward*64, 0xffffffff, ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, player, &tr))
+	if (g_map.Trace(start, start + forward*64, false, pActor, &tr))
 	{
 		MapLine* line = tr.line;
 
@@ -107,32 +108,34 @@ void wbot_debug_player_nav() {
 			}
 		}
 		if (tr.actor) {
-			navInfo += string("\nActor ") + tr.actor->GetClass()->TypeName.GetChars() + ":";
-			navInfo += "\n   radius: " + to_string(tr.actor->radius >> 16);
+			navInfo += string("\nActor ") + get_actor_type_name(tr.actor) + ":";
+			navInfo += "\n   radius: " + to_string(get_actor_radius(tr.actor) >> 16);
 		}
 	}
 
-	navInfo += "\nOrigin: " + to_string(player->x >> FRACBITS) + " " + to_string(player->y >> FRACBITS)
-		+ " " + to_string(player->z >> FRACBITS);
+	navInfo += "\nOrigin: " + to_string((int)playerPos.X >> FRACBITS)
+		+ " "+ to_string((int)playerPos.Y >> FRACBITS)
+		+ " " + to_string((int)playerPos.Z >> FRACBITS);
 
-	int yaw = (int)((uint64_t)player->angle * 360 / 0x100000000ULL);
-	int pitch = (int)((uint64_t)player->pitch * 360 / 0x100000000ULL);
+	int yaw = (int)((uint64_t)get_actor_angle(pActor) * 360 / 0x100000000ULL);
+	int pitch = (int)((uint64_t)get_actor_pitch(pActor) * 360 / 0x100000000ULL);
 	navInfo += "\nAngles: " + to_string(yaw) + " " + to_string(pitch);
 
-	bool isClipped = IsBoxClipped(FVector3(player->x, player->y, player->z), player->radius, DUCK_HEIGHT);
+	bool isClipped = IsBoxClipped(playerPos, get_actor_radius(pActor), DUCK_HEIGHT);
 	//navInfo += string("\nClipped: ") + (isClipped ? "Yes" : "No");
 
-	SERVERCOMMANDS_PrintHUDMessage(navInfo.c_str(), 0.94f, 0.5f, 0, 0, 0, CR_RED, 1.0f, 0, 0, "SmallFont", MAKE_ID('W', 'N', 'A', 'V'));
+	print_hud_test(navInfo.c_str(), 0.94f, 0.5f, 1234);
 }
 
 void wbot_debug(CWootBot* pBot) {
 	wbot_debug_player_nav();
 
 	player_t* pPlayer = pBot->m_pPlayer;
-	AActor* pActor = pBot->pActor;
+	AActor* pActor = (AActor*)pBot->pActor;
+	FVector3 playerPos = get_actor_pos(pActor);
 	g_wb_nav.draw_nodes(pActor);
 
-	int thisSubId = g_wb_nav.get_nav_id(pActor->player);
+	int thisSubId = g_wb_nav.get_nav_id(pPlayer);
 
 	string routeStr = "Route: " + to_string(thisSubId);
 	if (pBot->m_routeController.pretendRouteSector >= 0) {
@@ -178,43 +181,34 @@ void wbot_debug(CWootBot* pBot) {
 	if (pBot->stateFlags & FL_WBOT_OVERHANG) { stateStr += " OVERHANG"; }
 	if (pBot->stateFlags & FL_WBOT_RUSHING) { stateStr += " RUSH"; }
 	if (pBot->stateFlags & FL_WBOT_SLOW_DOWN) { stateStr += " SLOW_DOWN"; }
-	if (pPlayer->cheats & (CF_FROZEN | CF_TOTALLYFROZEN)) { stateStr += " FROZEN"; }
+	if (is_player_frozen(pPlayer)) { stateStr += " FROZEN"; }
 
 	string btnStr = "Buttons: ";
-	if (pBot->m_lButtons & BT_ATTACK) btnStr += " ATTACK";
-	if (pBot->m_lButtons & BT_USE) btnStr += " USE";
-	if (pBot->m_lButtons & BT_JUMP) btnStr += " JUMP";
-	if (pBot->m_lButtons & BT_CROUCH) btnStr += " CROUCH";
-	if (pBot->m_lButtons & BT_TURN180) btnStr += " TURN180";
-	if (pBot->m_lButtons & BT_ALTATTACK) btnStr += " ALTATTACK";
-	if (pBot->m_lButtons & BT_RELOAD) btnStr += " RELOAD";
-	if (pBot->m_lButtons & BT_ZOOM) btnStr += " ZOOM";
-	if (pBot->m_lButtons & BT_SPEED) btnStr += " SPEED";
+	if (pBot->m_lButtons & IN_ATTACK) btnStr += " ATTACK";
+	if (pBot->m_lButtons & IN_USE) btnStr += " USE";
+	if (pBot->m_lButtons & IN_JUMP) btnStr += " JUMP";
+	if (pBot->m_lButtons & IN_DUCK) btnStr += " DUCK";
 
 	string stuckStr = "Stuck: " + to_string(pBot->stuckCounter) + ", goals " + to_string(pBot->goalFailCounter);
 
 	string enemyStr = "Enemy: <none>";
-	if (pActor->target) {
-		AActor* targ = pActor->target;
-		fixed_t dist = P_AproxDistance(pActor->x - targ->x, pActor->y - targ->y);
-		enemyStr = string("Enemy: ") + pActor->target->GetClass()->TypeName.GetChars()
+	if (pBot->target) {
+		AActor* targ = pBot->target;
+		fixed_t dist = ((FVector2)playerPos - get_actor_pos(targ)).Length();
+		enemyStr = string("Enemy: ") + get_actor_type_name(targ)
 			+ ", Dist: " + to_string(dist >> FRACBITS);
 	}
 
 	string weaponStr = "Weapons:";
-	for (AInventory* item = pActor->Inventory; item != NULL; item = item->Inventory) {
-		if (item->IsKindOf(RUNTIME_CLASS(AWeapon))) {
-			AWeapon* weapon = static_cast<AWeapon*>(item);
-
-			string wepname = weapon->GetClass()->TypeName.GetChars();
-			WeaponInfo& info = g_wbot_weapon_info[wepname];
-			weaponStr += "\n   " + wepname + " "
-				+ to_string(weapon->Ammo1 ? weapon->Ammo1->Amount : 0)
-				+ " p" + to_string(info.priority);
-			//+ ", [" + to_string(info.minRange) + "," + to_string(info.idealRange) + "," + to_string(info.maxRange) + "] range";
-			if (pPlayer->ReadyWeapon == weapon) {
-				weaponStr += " <--";
-			}
+	for (AActor* item : get_player_weapons((APlayerPawn*)pActor, false)) {
+		string wepname = get_actor_type_name(item);
+		WeaponInfo& info = g_wbot_weapon_info[wepname];
+		weaponStr += "\n   " + wepname + " "
+			+ to_string(get_weapon_ammo(item))
+			+ " p" + to_string(info.priority);
+		//+ ", [" + to_string(info.minRange) + "," + to_string(info.idealRange) + "," + to_string(info.maxRange) + "] range";
+		if (pBot->m_weaponName == wepname) {
+			weaponStr += " <--";
 		}
 	}
 
@@ -226,5 +220,5 @@ void wbot_debug(CWootBot* pBot) {
 	string botInfo = enemyStr + "\n" + weaponStr + "\n" + routeStr + "\n"
 		+ stateStr + "\n" + btnStr + "\n" + stuckStr + "\n" + goalStr;
 
-	SERVERCOMMANDS_PrintHUDMessage(botInfo.c_str(), 0, 0.5f, 0, 0, 0, CR_RED, 1.0f, 0, 0, "SmallFont", MAKE_ID('W', 'B', 'O', 'T'));
+	print_hud_test(botInfo.c_str(), 0, 0.5f, 1235);
 }

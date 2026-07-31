@@ -2,7 +2,6 @@
 #include "wb_nav.h"
 #include "wb_map.h"
 #include "wb_util.h"
-#include "actor.h"
 #include <string>
 
 using namespace std;
@@ -13,8 +12,8 @@ using namespace wbot;
 
 std::string BotGoal::desc() const {
 	std::string thingName;
-	if ((TObjPtr<AActor>)actor) {
-		thingName = ((TObjPtr<AActor>)actor)->GetClass()->TypeName.GetChars();
+	if (h_actor.get()) {
+		thingName = get_actor_type_name(h_actor.get());
 	}
 	else if (lineid) {
 		thingName = "Line " + to_string(lineid);
@@ -78,16 +77,16 @@ std::string BotGoal::descLong() const {
 }
 
 int BotGoal::getNavId() const {
-	if (const_cast<TObjPtr<AActor>&>(actor)) {
+	if (h_actor.get()) {
 		if (shootAlignment.subid >= 0)
 			return shootAlignment.subid;
-		return g_wb_nav.get_nav_id(const_cast<TObjPtr<AActor>&>(actor));
+		return g_wb_nav.get_nav_id(h_actor.get());
 	}
 	else if (lineid >= 0) {
 		int ret = g_map.line_subsectors[lineid];
 
 		if (ret == -1)
-			Printf("Failed to find subsector for line %d\n", lineid);
+			gprintf("Failed to find subsector for line %d\n", lineid);
 		else {
 			NavSector& node = g_wb_nav.mesh.nodes[ret];
 			if (node.links.empty() && (action == WBOT_GOAL_ACTION_USE || action == WBOT_GOAL_ACTION_SHOOT)) {
@@ -114,15 +113,16 @@ int BotGoal::getNavId() const {
 		return ret;
 	}
 	else {
-		Printf("Routing not implemented for this type of goal\n");
+		gprintf("Routing not implemented for this type of goal\n");
 	}
 
 	return -1;
 }
 
 FVector3 BotGoal::pos() {
-	if (actor) {
-		return FVector3(actor->x, actor->y, g_map.GetSector(actor)->getFloorZ());
+	if (h_actor.get()) {
+		FVector3 actorPos = get_actor_pos(h_actor.get());
+		return FVector3(actorPos.X, actorPos.Y, g_map.GetSector(h_actor.get())->getFloorZ());
 	}
 	else if (lineid >= 0) {
 		MapLine& line = g_map.lines[lineid];
@@ -130,26 +130,30 @@ FVector3 BotGoal::pos() {
 		return FVector3(line.center(), z);
 	}
 
-	Printf("Goal has no actor nor lineid\n");
+	gprintf("Goal has no actor nor lineid\n");
 	return FVector3(0, 0, 0);
 }
 
 int BotGoal::touchDistance(AActor* toucher) {
-	if (actor) {
-		return ((actor->radius + toucher->radius) >> FRACBITS) - 1; // subtracted 1 unit just in case
+	if (h_actor.get()) {
+		return ((get_actor_radius(h_actor.get()) + get_actor_radius(toucher)) >> FRACBITS) - 1; // subtracted 1 unit just in case
 	}
 	else if (lineid >= 0) {
-		return (toucher->radius >> FRACBITS) + 1; // added 1 in case wall is solid and you can't go inside it
+		return (get_actor_radius(toucher) >> FRACBITS) + 1; // added 1 in case wall is solid and you can't go inside it
 	}
 
 	return 0;
+}
+
+bool BotGoal::matches(const BotGoal& other) {
+	return action == other.action && lineid == other.lineid && h_actor.get() == other.h_actor.get();
 }
 
 bool BotGoal::valid() const {
 	if (lineid >= 0) {
 		return g_map.lines[lineid].special() != 0;
 	}
-	return const_cast<TObjPtr<AActor>&>(actor) != NULL;
+	return h_actor.get() != NULL;
 }
 
 void BotGoal::TestBossBrainShootRay(FVector3 brainPos, FVector3 rayStart, FVector3 rayDir,
@@ -159,12 +163,12 @@ void BotGoal::TestBossBrainShootRay(FVector3 brainPos, FVector3 rayStart, FVecto
 
 	if (!isCeilTrace) {
 		FVector3 impactPos = rayStart + rayDir * ((ROCKET_EXPLODE_RADIUS + 64) << FRACBITS);
-		if (!TraceLine(rayStart, impactPos, true)) {
+		if (!g_map.Trace(rayStart, impactPos, true, NULL, NULL)) {
 			return; // no impact
 		}
 	}
 
-	fixed_t maxDist = ((ROCKET_EXPLODE_RADIUS + ROCKET_RADIUS) << FRACBITS) + actor->radius;
+	fixed_t maxDist = ((ROCKET_EXPLODE_RADIUS + ROCKET_RADIUS) << FRACBITS) + get_actor_radius(h_actor.get());
 
 	if ((impactPos - brainPos).Length() > maxDist) {
 		return; // impact point not close enough to the target to do damage
@@ -173,14 +177,14 @@ void BotGoal::TestBossBrainShootRay(FVector3 brainPos, FVector3 rayStart, FVecto
 	// trace in the opposite direction to find a sector to shoot the impact point from
 	TraceResult tr;
 	FVector3 shootPos = impactPos - rayDir * (4000 << FRACBITS);
-	TraceLine(impactPos, shootPos, true, NULL, &tr);
+	g_map.Trace(impactPos, shootPos, true, NULL, &tr);
 	shootPos = tr.endPos;
 	FVector3 shootDelta = shootPos - impactPos;
 	fixed_t shootLen = shootDelta.Length();
 
 	// check vertical clearance for the rocket
 	FVector3 lowerPos = impactPos - FVector3(0, 0, (ROCKET_RADIUS / 2) << FRACBITS);
-	TraceLine(lowerPos, shootPos, true, NULL, &tr);
+	g_map.Trace(lowerPos, shootPos, true, NULL, &tr);
 	if (tr.frac < 0.9f) {
 		return; // not enough clearance
 	}
@@ -219,7 +223,10 @@ void BotGoal::TestBossBrainShootRay(FVector3 brainPos, FVector3 rayStart, FVecto
 		fixed_t maxZ = floorZ + ((VIEW_HEIGHT + 8) << FRACBITS);
 		fixed_t minZ = floorZ + ((VIEW_HEIGHT - 8) << FRACBITS);
 
-		float frac1 = FixedDiv((segsect[0] - impactPos).Length(), shootLen) / (float)FRACUNIT;
+		float isectLen1 = ((segsect[0] - impactPos).Length() / (float)FRACUNIT);
+		float fShootLen = shootLen / (float)FRACUNIT;
+
+		float frac1 = isectLen1 / fShootLen;
 		fixed_t z1 = (shootPos + shootDelta * frac1).Z;
 
 		IndirectShootPos shoot;
@@ -228,7 +235,8 @@ void BotGoal::TestBossBrainShootRay(FVector3 brainPos, FVector3 rayStart, FVecto
 
 		if (numisect == 2) {
 			// line passes thru this subsector
-			float frac2 = FixedDiv((segsect[1] - impactPos).Length(), shootLen) / (float)FRACUNIT;
+			float isectLen2 = ((segsect[1] - impactPos).Length() / (float)FRACUNIT);
+			float frac2 = isectLen2 / fShootLen;
 			fixed_t z2 = (shootPos + shootDelta * frac2).Z;
 			
 			FVector3 start = impactPos + frac1 * shootDelta;
@@ -261,7 +269,7 @@ void BotGoal::TestBossBrainShootRay(FVector3 brainPos, FVector3 rayStart, FVecto
 
 unordered_map<int, IndirectShootPos> BotGoal::FindBossBrainShootPositions() {
 	// boss brain is normally unreachable, but can be damaged by rockets
-	FVector3 actorPos(actor->x, actor->y, actor->z);
+	FVector3 actorPos = get_actor_pos(h_actor.get());
 	const int maxPitch = 20;
 
 	unordered_map<int, IndirectShootPos> shootFromNodes;
@@ -285,7 +293,7 @@ unordered_map<int, IndirectShootPos> BotGoal::FindBossBrainShootPositions() {
 
 	// test impacts against the ceiling
 	FVector3 ceilPos = actorPos;
-	ceilPos.Z = g_map.GetSector(actor)->getCeilZ();
+	ceilPos.Z = g_map.GetSector(h_actor.get())->getCeilZ();
 	ceilPos.Z -= FRACUNIT;
 	//ceilPos.Z -= (ROCKET_RADIUS / 2) << FRACBITS;
 

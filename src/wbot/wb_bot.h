@@ -2,7 +2,6 @@
 #include "wb_route.h"
 #include "wb_combat.h"
 #include "wb_goal.h"
-#include "tables.h"
 #include <unordered_set>
 
 struct FTraceResults;
@@ -20,18 +19,32 @@ struct wbot::MapLine;
 class CWootBot {
 public:
 	player_t* m_pPlayer = NULL;
+	APlayerPawn* pActor = NULL;
+	AActor* target = NULL;
 	int m_lButtons = 0;
 	int m_lForwardMove = 0;
 	int m_lSideMove = 0;
 
-	APlayerPawn* pActor = NULL;
+	// state copied from the engine
+	int m_health;
+	int m_viewHeight;
+	int m_useDistance;
+	int m_radius;
+	FVector3 m_origin;
+	FVector3 m_velocity;
+	bool m_isFrozen;
+	bool m_onGround;
+	int m_pitch;
+	int m_yaw;
+	const char* m_weaponName; // NULL if no weapon ready
+
 	std::vector<BotGoal> m_goals;	// stack of goals
 	int m_forwardMove = 0;		// range of +/-100
 	int m_sideMove = 0;			// range of +/-100
 	int stateFlags = 0;			// FL_WBOT_*
 	int m_lastUse;				// last tic the player used (for preventing sound spam)
 	int m_nextThink;			// for cooling down failures
-	angle_t m_fov = 0;			// field of view
+	int m_fov = 0;				// field of view
 	int m_lastAvoidPropDirChange; // last tic that the bot decided to change directions to get around a prop
 	int m_lastAvoidPropDir;		// persistent direction for getting around a prop. Prevents oscillating back and forth
 	int stuckCounter = 0;		// increases while trying to move with nothing happening
@@ -53,9 +66,6 @@ public:
 
 	CWootBot(const char* pszName, const char* pszTeamName, ULONG ulPlayerNum);
 	~CWootBot() {}
-
-	void PreDelete();
-	void Tick();
 
 	void Reset(); // clear all memory and restart the bot
 
@@ -93,7 +103,6 @@ public:
 
 	FVector3 GetViewPos();
 	fixed_t GetDistance(FVector2 p);
-	FVector3 GetVelocity();
 	int GetSpeed2D();
 
 	// something somewhere triggered a line

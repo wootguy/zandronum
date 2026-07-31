@@ -1,7 +1,5 @@
 #pragma once
-#include <unordered_set>
 #include <unordered_map>
-#include <vector>
 #include <string>
 
 class CWootBot;
@@ -30,7 +28,7 @@ public:
 
 	void Think();
 
-	AWeapon* GetWeaponByName(const char* name);
+	AActor* GetWeaponByName(const char* name);
 	bool SelectWeapon(const char* name); // false if not in inventory or no ammo
 
 private:
@@ -38,7 +36,6 @@ private:
 	APlayerPawn* pActor = NULL;
 	player_t* pPlayer = NULL;
 
-	void SelectWeapon(AWeapon* weapon);
 	void SelectBestWeapon();
 	AActor* BestEnemy();
 

@@ -1,7 +1,5 @@
 #pragma once
-#include "vectors.h"
-#include "basictypes.h"
-#include "dobject.h"
+#include "wb_eiface.h"
 #include <unordered_set>
 #include <unordered_map>
 #include <string>
@@ -28,7 +26,7 @@ struct BotGoal {
 	int action = -1; // WBOT_GOAL_ACTION_*
 	int lineid = -1; // lindef id to interact with
 	int dist = 0; // distance from the goal to the purpose sector
-	TObjPtr<AActor> actor = NULL; // actor to interact with
+	wbot::AHandle h_actor; // actor to interact with
 
 	// per-bot data
 	std::unordered_set<int> blockers; // paths that can't be used while reacching this goal
@@ -40,7 +38,7 @@ struct BotGoal {
 
 	BotGoal() {}
 	BotGoal(int action, int lineid) : action(action), lineid(lineid) {}
-	BotGoal(int action, AActor* actor) : action(action), actor(actor) {}
+	BotGoal(int action, AActor* actor) : action(action), h_actor(actor) {}
 
 	std::string desc() const;
 	std::string descLong() const;
@@ -48,9 +46,7 @@ struct BotGoal {
 	FVector3 pos();
 	int touchDistance(AActor* toucher); // how close the player needs to be to consider this goal as touched
 
-	bool matches(const BotGoal& other) {
-		return action == other.action && lineid == other.lineid && actor == const_cast<TObjPtr<AActor>&>(other.actor);
-	}
+	bool matches(const BotGoal& other);
 
 	// false if the actor or lineid are no longer interactable
 	bool valid() const;

@@ -3,8 +3,7 @@
 #include "wb_nav.h"
 #include "wb_map.h"
 #include "wb_util.h"
-#include "d_event.h"
-#include "d_player.h"
+#include "wb_eiface.h"
 #include <algorithm>
 
 using namespace std;
@@ -50,7 +49,7 @@ void CBotRouteController::Think() {
 		// allow slipping off the route into adjacent sectors while heading towards the target sector
 		bool onTrack = m_navid == route[0]
 			|| m_navCur->getLink(route[1]) || m_navCur->getLink(route[0])
-			|| m_navIdeal->touches(pActor) || m_navTarget->touches(pActor);
+			|| m_navIdeal->touches((AActor*)pActor) || m_navTarget->touches((AActor*)pActor);
 
 		if (!onTrack) {
 			RouteSlipThink(); // fell off the route
@@ -99,8 +98,7 @@ void CBotRouteController::UpdateRoute() {
 		}
 		else {
 			FVector2 center = g_wb_nav.mesh.nodes[route[1]].pos();
-			FVector2 apos(pActor->x, pActor->y);
-			fixed_t dist = (center - apos).Length();
+			fixed_t dist = (center - pBot->m_origin).Length();
 			if (pBot->stuckCounter >= 200 && dist < (16 << FRACBITS)) {
 				// already very close to the center, so this is probably a tiny polygon jammed
 				// up against a wall. The bot can't get close enough in this case, so advance
@@ -170,7 +168,7 @@ bool CBotRouteController::BeCareful() {
 		NavSector& targetNav = g_wb_nav.mesh.nodes[route[1]];
 		NavSectorLink* link = idealNav.getLink(route[1]);
 		headingTowardsCliff = targetNav.hasCliffs && link->linkWidth < 32
-			&& targetNav.getFloorZ() < (pActor->z + (STEP_HEIGHT << FRACBITS));
+			&& targetNav.getFloorZ() < (pBot->m_origin.Z + (STEP_HEIGHT << FRACBITS));
 	}
 
 	if (pBot->m_cliffDist < SAFE_CLIFF_DIST * 0.5f || headingTowardsCliff) {
@@ -203,7 +201,7 @@ bool CBotRouteController::BeCareful() {
 }
 
 void CBotRouteController::JumpThink() {
-	FVector3 pos(pActor->z, pActor->y, pActor->z);
+	FVector3 pos = pBot->m_origin;
 
 	switch (jumpState) {
 	case WBOT_JUMP_PREP: {
@@ -232,7 +230,7 @@ void CBotRouteController::JumpThink() {
 	}
 	case WBOT_JUMP_LAUNCH: {
 		if (pBot->stateFlags & FL_WBOT_OVERHANG) {
-			if (g_wb_nav.get_nav_id(pos.X, pos.X) == m_navTarget->id) {
+			if (g_wb_nav.get_nav_id(pos.X, pos.Y) == m_navTarget->id) {
 				// target is underneath us and close to a cliff. Keep moving forward until falling off
 				FVector2 moveDir = (jumpEndPos - jumpStartPos).Unit();
 				pBot->MoveTo(jumpEndPos + moveDir * (100 << FRACUNIT), 0, m_routeSpeed);
@@ -250,41 +248,45 @@ void CBotRouteController::JumpThink() {
 				bigJump = true;
 
 			if (bigJump)
-				pBot->m_lButtons |= BT_JUMP;
+				pBot->m_lButtons |= IN_JUMP;
 
 			jumpState = WBOT_JUMP_FLY;
 		}
 		break;
 	}
 	case WBOT_JUMP_FLY: {
-		NavSector& curNav = g_wb_nav.mesh.nodes[g_wb_nav.get_nav_id(pActor)];
+		NavSector& curNav = g_wb_nav.mesh.nodes[g_wb_nav.get_nav_id((AActor*)pActor)];
 		NavSectorLink* linkToTarg = curNav.getLink(m_navTarget->id);
-		bool flyingOverWalkableNeighbor = linkToTarg && !linkToTarg->isJump && !linkToTarg->blocked(pActor);
+		bool flyingOverWalkableNeighbor = linkToTarg && !linkToTarg->isJump && !linkToTarg->blocked((AActor*)pActor);
 
 		if (curNav.id == m_navTarget->id || flyingOverWalkableNeighbor) {
 			pBot->StopMoving(); // flying over the target sector, try not to fall off now
 
-			if (pPlayer->onground) {
+			if (pBot->m_onGround) {
 				jumpState = WBOT_JUMP_NONE;
 				pBot->MoveTo(jumpEndPos, 0, m_routeSpeed);
 				return; // completed the jump
 			}
 		} 
-		else if (pPlayer->onground) {
+		else if (pBot->m_onGround) {
 			// not a gap that required a jump, just keep moving towards the target
 			pBot->MoveTo(jumpEndPos, 0, m_routeSpeed);
 		}
 		else {
 			// try to land in the right spot
 			FVector3 landPos = FVector3(jumpEndPos, m_navTarget->getFloorZ());
-			FVector3 idealDir = (landPos - pos).Unit();
-			FVector3 velDir = FVector3(pActor->velx, pActor->vely, pActor->velz).Unit();
+
+			// TODO: this is totally wrong but for some reason passes the tests
+			FVector3 typoPos(pBot->m_origin.Z, pBot->m_origin.Y, pBot->m_origin.Z);
+
+			FVector3 idealDir = (landPos - typoPos).Unit();
+			FVector3 velDir = pBot->m_velocity.Unit();
 			fixed_t distLeft = pBot->GetDistance(landPos);
 
 			if (distLeft > (192 << FRACBITS) || idealDir.Z > velDir.Z) {
 				// falling short, keep building speed
 				pBot->MoveTo(jumpEndPos, 0, m_routeSpeed);
-				pBot->m_lButtons |= BT_CROUCH; // just in case
+				pBot->m_lButtons |= IN_DUCK; // just in case
 			}
 			else {
 				// overshooting the target, try to slow down
@@ -292,7 +294,7 @@ void CBotRouteController::JumpThink() {
 			}
 		}
 
-		if (m_navTarget->getFloorZ() > pActor->z + (JUMP_HEIGHT << FRACBITS)) {
+		if (m_navTarget->getFloorZ() > pBot->m_origin.Z + (JUMP_HEIGHT << FRACBITS)) {
 			JumpFail();
 			return;
 		}
@@ -339,7 +341,7 @@ bool CBotRouteController::HandleBlockedPaths() {
 	std::vector<int>& route = m_route.route;
 	int nextSecFlags = m_navLink->target->getMoveFlags();
 	bool nextOnElevator = nextSecFlags & (FL_SECTOR_MOVE_FLOOR_UP | FL_SECTOR_MOVE_FLOOR_DOWN);
-	int linkBlockReason = m_navLink->blocked(pActor);
+	int linkBlockReason = m_navLink->blocked((AActor*)pActor);
 
 	if (ElevatorThink(linkBlockReason != LINK_BLOCK_CLEAR)) {
 		return true;
@@ -350,14 +352,14 @@ bool CBotRouteController::HandleBlockedPaths() {
 		BlockedPathThink(m_navLink, linkBlockReason);
 		return true;
 	}
-	else if (!nextOnElevator && route.size() > 2 && m_navTarget->touches(pActor)) {
+	else if (!nextOnElevator && route.size() > 2 && m_navTarget->touches((AActor*)pActor)) {
 		// if we're touching the next sector and the next path is blocked, also do block
 		// handling. Helps in case of doors with tiny sectors in front of them which the
 		// bot can't fully get inside.
 		NavSectorLink* nextLink = m_navLink->target->getLink(route[2]);
 
 		if (nextLink && !nextLink->isJump) {
-			int blockReason = nextLink->blocked(pActor);
+			int blockReason = nextLink->blocked((AActor*)pActor);
 
 			if (blockReason != LINK_BLOCK_CLEAR) {
 				BlockedPathThink(nextLink, blockReason);
@@ -403,8 +405,7 @@ bool CBotRouteController::ElevatorThink(bool linkBlocked) {
 
 			// stay centered on the elevator to avoid blocking it or falling off
 			FVector2 navPos = m_navCur->pos();
-			FVector2 plrPos(pActor->x, pActor->y);
-			if ((navPos - plrPos).Length() > (16 << FRACBITS))
+			if ((navPos - pBot->m_origin).Length() > (16 << FRACBITS))
 				pBot->MoveTo(navPos, 0, RUN_SPEED / 4);
 
 			if (linkBlocked) {
@@ -435,7 +436,7 @@ void CBotRouteController::MoveThruLink() {
 	int targetHeight = m_navTarget->getHeight() >> FRACBITS;
 	int borderHeight = (m_navTarget->getCeilZ() - m_navIdeal->getFloorZ()) >> FRACBITS;
 	if (std::min(targetHeight, borderHeight) < STAND_HEIGHT) {
-		pBot->m_lButtons |= BT_CROUCH;
+		pBot->m_lButtons |= IN_DUCK;
 	}
 
 	if (m_navLink->isJump) {
@@ -448,7 +449,7 @@ void CBotRouteController::MoveThruLink() {
 		}
 		
 		FVector2 targetPos = m_navLink->target->pos();
-		jumpBackupPos = m_navLink->GetJumpBackupPos(targetPos, pActor);
+		jumpBackupPos = m_navLink->GetJumpBackupPos(targetPos, (AActor*)pActor);
 		jumpStartPos = m_navLink->GetJumpStartPos(targetPos);
 		jumpEndPos = m_navLink->GetJumpEndPos(targetPos);
 	}
@@ -509,7 +510,7 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link, int blockReason)
 	bool isBlockerMoving = link->target->isMoving();
 	if (!isBlockerMoving && blockReason == LINK_BLOCK_CLIPPED) {
 		fixed_t linkZ = link->parent->getFloorZ() + (JUMP_HEIGHT << FRACBITS);
-		for (MapSector* sec : link->getClippedSectors(pActor)) {
+		for (MapSector* sec : link->getClippedSectors((AActor*)pActor)) {
 			fixed_t blockerZ = sec->getFloorZ();
 			if (sec->isFloorMoving() && linkZ < blockerZ) {
 				isBlockerMoving = true;
@@ -535,7 +536,7 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link, int blockReason)
 	}
 
 	DebugPrint(VarArgs("Link %d blocked!\n", link->id));
-	link->blocked(pActor); // debug here
+	link->blocked((AActor*)pActor); // debug here
 
 	BotGoal* curGoal = pBot->CurrentGoal();
 	if (!curGoal)
@@ -565,7 +566,7 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link, int blockReason)
 		targetMovementNeeded = 0;
 
 		// try unblocking anything the box is clipping into
-		for (MapSector* sec : link->getClippedSectors(pActor)) {
+		for (MapSector* sec : link->getClippedSectors((AActor*)pActor)) {
 			if (sec->moveFlags && pBot->SelectGoal(sec->triggers, link, 0xffffffff)) {
 				return;
 			}
@@ -641,10 +642,7 @@ void CBotRouteController::HandleStuckPath() {
 
 void CBotRouteController::CancelRoute() {
 	if (m_route.route.size() && m_freezeOnRouteChange) {
-		pPlayer->cheats |= CF_FROZEN;
-		pActor->velx = 0;
-		pActor->vely = 0;
-		pActor->velz = 0;
+		freeze_player(pBot->m_pPlayer, true);
 	}
 
 	m_route = BotRoute();
@@ -690,9 +688,9 @@ bool CBotRouteController::RouteToGoal() {
 	int goalNavId = goal->getNavId();
 	m_route = RouteToSector(goalNavId);
 
-	if (m_route.route.empty() && goal->actor && goalNavId != -1) {
+	if (m_route.route.empty() && goal->h_actor.get() && goalNavId != -1) {
 		// actor origin is in an unreachable sector, but it's collision box may be touching a reachable one
-		vector<int> subs = g_map.GetTouchedSubsectors(goal->actor);
+		vector<int> subs = g_map.GetTouchedSubsectors(goal->h_actor.get());
 
 		for (const int& subid : subs) {
 			if (subid == goalNavId) {

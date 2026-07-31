@@ -1,8 +1,6 @@
 #pragma once
 #include "wb_goal.h"
 #include "wb_map.h"
-#include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 #define STEP_HEIGHT 24

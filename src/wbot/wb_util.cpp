@@ -24,7 +24,7 @@ char* VarArgs(const char* format, ...)
 	return string;
 }
 
-AActor* getAnyPlayer() {
+player_t* getAnyPlayer() {
 	AActor* player = NULL;
 	for (int i = 0; i < MAXPLAYERS; i++)
 	{
@@ -35,7 +35,7 @@ AActor* getAnyPlayer() {
 		if (!actor || actor->player->bIsBot)
 			continue;
 
-		return actor;
+		return actor->player;
 	}
 
 	return NULL;
@@ -203,7 +203,7 @@ FSegment2 LineSegmentOverlap(const FVector2& a1, const FVector2& a2, const FVect
 	return result;
 }
 
-void set_ori(AActor* actor, int x, int y, angle_t angle) {
+void set_ori(AActor* actor, int x, int y, uint32_t angle) {
 	fixed_t fx = x << FRACBITS;
 	fixed_t fy = y << FRACBITS;
 	fixed_t z = g_map.GetSector(fx, fy)->getFloorZ();
@@ -456,7 +456,7 @@ bool CircleIntersectsSegment(const FVector2& center, float radius, const FVector
 	return (center - closest).LengthSquared() <= r2;
 }
 
-void MakeVectors(angle_t angle, FVector3& forward, FVector3& right) {
+void MakeVectors(uint32_t angle, FVector3& forward, FVector3& right) {
 	fixed_t fsine = finesine[angle >> ANGLETOFINESHIFT];
 	fixed_t fcosine = finecosine[angle >> ANGLETOFINESHIFT];
 	forward = FVector3(fcosine, fsine, 0);
@@ -507,11 +507,6 @@ int draw_debug_line(FVector3 start, FVector3 end, AActor* actor) {
 	return i;
 }
 
-bool TraceLine(FVector3 start, FVector3 end, bool ignoreMonsters, AActor* ignoreEnt, TraceResult* tr) {
-	return g_map.Trace(start, end, ignoreMonsters ? 0 : 0xffffffff,
-		ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN, ignoreEnt, tr);
-}
-
 bool TraceRadius(FVector3 start, FVector3 end, fixed_t radius, bool ignoreMonsters, AActor* ignoreEnt, TraceResult* tr) {
 	FVector2 dir = (end - start).Unit() * FRACUNIT;
 	FVector3 rightDir(dir.Y, -dir.X, 0);
@@ -523,7 +518,7 @@ bool TraceRadius(FVector3 start, FVector3 end, fixed_t radius, bool ignoreMonste
 
 	for (int i = -2; i <= 2; i++) {
 		TraceResult temp;
-		TraceLine(start + rightDir * i * rightStep, end + rightDir * i * rightStep, ignoreMonsters, ignoreEnt, &temp);
+		g_map.Trace(start + rightDir * i * rightStep, end + rightDir * i * rightStep, ignoreMonsters, ignoreEnt, &temp);
 		
 		if (temp.frac < minFrac) {
 			minFrac = temp.frac;

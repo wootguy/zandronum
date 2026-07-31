@@ -79,6 +79,15 @@ bool MapLine::isTeleport() {
 	return special() == Teleport;
 }
 
+bool MapLine::isLockedDoor() {
+	return special() == Door_LockedRaise;
+}
+
+bool MapLine::isLevelExit() {
+	int spec = special();
+	return (spec == Exit_Normal || spec == Exit_Secret);
+}
+
 bool MapLine::canPlayerActivate() {
 	return activation() & SPAC_PlayerActivate;
 }
@@ -378,6 +387,9 @@ MapSector* BotMapInfo::GetSector(AActor* actor) {
 }
 
 std::vector<int> BotMapInfo::GetTouchedSubsectors(AActor* actor) {
+	if (!actor)
+		return vector<int>();
+	
 	unordered_set<int> subs;
 
 	fixed_t r = actor->radius;
@@ -937,7 +949,7 @@ void BotMapInfo::remove_invalid_goals(int secid) {
 	}
 }
 
-bool BotMapInfo::Trace(FVector3 start, FVector3 end, uint32_t actorMask, uint32_t wallMask, AActor* ignore, TraceResult* tr) {
+bool BotMapInfo::Trace(FVector3 start, FVector3 end, bool ignoreMonsters, AActor* ignore, TraceResult* tr) {
 	FVector3 delta = end - start;
 	fixed_t dist = delta.Length();
 	delta = delta.Unit() * FRACUNIT;
@@ -947,8 +959,8 @@ bool BotMapInfo::Trace(FVector3 start, FVector3 end, uint32_t actorMask, uint32_
 	FTraceResults trInternal;
 
 	bool hit = ::Trace((fixed_t)start.X, (fixed_t)start.Y, (fixed_t)start.Z, sector,
-		(fixed_t)delta.X, (fixed_t)delta.Y, (fixed_t)delta.Z, dist, actorMask,
-		wallMask, ignore, trInternal);
+		(fixed_t)delta.X, (fixed_t)delta.Y, (fixed_t)delta.Z, dist, ignoreMonsters ? 0 : MF_SOLID,
+		ML_BLOCKING | ML_BLOCKEVERYTHING | ML_BLOCK_PLAYERS, ignore, trInternal);
 	
 	if (tr) {
 		tr->endPos = FVector3(trInternal.X, trInternal.Y, trInternal.Z);

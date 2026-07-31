@@ -1,8 +1,6 @@
 #pragma once
 #include "wb_goal.h"
 #include "wb_nav.h"
-#include <unordered_set>
-#include <vector>
 
 #define RUN_SPEED 100 // max move speed allowed before the server kicks you
 

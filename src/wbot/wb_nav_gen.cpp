@@ -1,8 +1,6 @@
 #include "wb_nav_gen.h"
 #include "wb_map.h"
 #include "wb_util.h"
-#include "actor.h"
-#include "doomdata.h"
 #include <string>
 
 using namespace std;
@@ -18,7 +16,7 @@ bool SectorNavMeshGenerator::trace_jump(FVector3 start, FVector3 end, int fromMo
 	TraceResult tr;
 
 	for (int i = -2; i <= 2; i++) {
-		if (TraceLine(start + rightDir * i * rightStep, end + rightDir * i * rightStep, true, NULL, &tr)) {
+		if (g_map.Trace(start + rightDir * i * rightStep, end + rightDir * i * rightStep, true, NULL, &tr)) {
 			if (tr.hitType == TRACE_HitWall && tr.line && tr.line->backsector) {
 				if (tr.sector != tr.line->backsector && tr.line->backsector->moveFlags) {
 					continue; // wall may move out of the way in the future
@@ -368,7 +366,7 @@ void SectorNavMeshGenerator::add_walkable_links(BotMeshData& mesh, int nodeid, s
 
 			// redirect target sector if this is the front side of a teleport
 			MapLine* line = link.linedef;
-			bool isPlayerTele = line && line->isTeleport() && (line->activation() & SPAC_Cross);
+			bool isPlayerTele = line && line->isTeleport() && line->canPlayerActivate();
 			if (isPlayerTele && DistanceToLine(nav.pos(), line) < 0) {
 				FVector2 dest = line->getTeleportDest();
 				MapSubsector* destSub = g_map.GetSubsector(dest.X, dest.Y);
@@ -384,8 +382,8 @@ void SectorNavMeshGenerator::add_walkable_links(BotMeshData& mesh, int nodeid, s
 			FVector2 linkPos = link.movePos;
 			for (int i = 0; i < propBlockers.size(); i++) {
 				AActor* actor = propBlockers[i];
-				FVector2 propPos(actor->x, actor->y);
-				if ((propPos - linkPos).Length() < actor->radius + playerRadius) {
+				FVector2 propPos = get_actor_pos(actor);
+				if ((propPos - linkPos).Length() < get_actor_radius(actor) + playerRadius) {
 					propBlocked = true;
 					break;
 				}
@@ -428,7 +426,7 @@ BotMeshData SectorNavMeshGenerator::generate(std::vector<AActor*> propBlockers) 
 
 	add_jump_links(mesh);
 
-	Printf("Generated %d nodes, %d links in %d ms\n", (int)g_map.numsubsectors, mesh.numLinks, (int)(getEpochMillis() - genStart));
+	gprintf("Generated %d nodes, %d links in %d ms\n", (int)g_map.numsubsectors, mesh.numLinks, (int)(getEpochMillis() - genStart));
 
 	return mesh;
 }
