@@ -1,25 +1,10 @@
-name: Linux build
+name: CI
 
 on: [push, pull_request]
 
-env:
-  FMOD_VER: 44464
-  FMOD_SOVER: 4.44.64
-
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      fail-fast: false
-
-      matrix:
-        os: [ubuntu-24.04]
-        build_type: [Release]
-        # This is just so the job and artefact names look nicer...
-        serveronly: ["SERVERONLY"]
-        include:
-          - os: ubuntu-24.04
+  build-linux-server:
+    runs-on: ubuntu-24.04
 
     steps:
     - uses: actions/checkout@v4
@@ -30,31 +15,21 @@ jobs:
       run: |
         echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
 
-    - name: Install dependencies for Linux
+    - name: Install build dependencies
       shell: bash
-      if: runner.os == 'Linux'
       run: |
         sudo apt update
         sudo apt install g++ make cmake libsdl1.2-dev mercurial zlib1g-dev libbz2-dev libjpeg-dev libfluidsynth-dev libgtk2.0-dev timidity nasm libgl1-mesa-dev libssl-dev tar libglew-dev wget libopus-dev
-        
-        if [[ "${{ matrix.serveronly }}" == "" ]]; then
-          wget https://github.com/DrinkyBird/zan-ci-deps/releases/download/ci-dependencies/fmodapi${FMOD_VER}linux.tar.gz
-          tar xf fmodapi${FMOD_VER}linux.tar.gz
-          echo "FMOD_INCLUDE_DIR=${PWD}/fmodapi${FMOD_VER}linux/api/inc" >> $GITHUB_ENV
-          echo "FMOD_LIBRARY=${PWD}/fmodapi${FMOD_VER}linux/api/lib/libfmodex64-${FMOD_SOVER}.so" >> $GITHUB_ENV
-        fi
 
     - name: Configure CMake
       run: >
-        if [[ "${{ matrix.serveronly }}" == "SERVERONLY" ]]; then export SERVERONLY=ON; fi
-        
         cmake -B ${{ steps.strings.outputs.build-output-dir }} -S ${{ github.workspace }}
-        -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-        -DSERVERONLY=${SERVERONLY}
+        -DCMAKE_BUILD_TYPE=Release
+        -DSERVERONLY=ON
         -DRELEASE_WITH_DEBUG_FILE=ON
 
     - name: Build
-      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }} -j $(nproc)
+      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config Release -j $(nproc)
 
     - name: Create package
       shell: bash
@@ -67,8 +42,40 @@ jobs:
           cp ${FMOD_LIBRARY} package || true
         fi
 
-    - name: Upload artefacts
+    - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
         path: package
-        name: ${{ matrix.os }} ${{ matrix.build_type }} ${{ matrix.serveronly }}
+        name: linux-server
+
+  wbot-tests-linux:
+    runs-on: ubuntu-24.04
+    needs: [build-linux-server]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install runtime dependencies
+      shell: bash
+      run: |
+        sudo apt update
+        sudo apt install libsdl1.2debian
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: linux-server
+        path: tests
+
+    - name: Download test files
+      run: |
+          cd tests
+          wget -q https://github.com/redox-os/freedoom/raw/refs/heads/master/freedoom2.wad
+          wget -q https://w00tguy.ddns.net/files/doom/doom2_maps_v0.7z
+          7z x doom2_maps_v0.7z
+          chmod +x zandronum-server
+
+    - name: Beat Doom II
+      run: |
+          cd tests
+          ./zandronum-server -config test_doom2.ini -wbtest
