@@ -16,7 +16,7 @@ bool SectorNavMeshGenerator::trace_jump(FVector3 start, FVector3 end, int fromMo
 	TraceResult tr;
 
 	for (int i = -2; i <= 2; i++) {
-		if (g_map.Trace(start + rightDir * i * rightStep, end + rightDir * i * rightStep, true, NULL, &tr)) {
+		if (TraceLine(start + rightDir * i * rightStep, end + rightDir * i * rightStep, true, NULL, &tr)) {
 			if (tr.hitType == TRACE_HitWall && tr.line && tr.line->backsector) {
 				if (tr.sector != tr.line->backsector && tr.line->backsector->moveFlags) {
 					continue; // wall may move out of the way in the future

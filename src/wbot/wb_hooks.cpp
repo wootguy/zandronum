@@ -326,7 +326,7 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 		if (id >= 0 && id < numlines) {
 			MapLine* line = &g_map.lines[id];
 
-			BotGoal useGoal(g_map.get_linedef_goal_action(line), id);
+			BotGoal useGoal(get_linedef_goal_action(line), id);
 
 			for (int i = 0; i < MAXPLAYERS; i++) {
 				AActor* player = players[i].mo;
@@ -346,7 +346,7 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 		if (id >= 0 && id < numlines) {
 			MapLine* line = &g_map.lines[id];
 
-			BotGoal useGoal(g_map.get_linedef_goal_action(line), id);
+			BotGoal useGoal(get_linedef_goal_action(line), id);
 
 			for (int i = 0; i < MAXPLAYERS; i++) {
 				AActor* player = players[i].mo;

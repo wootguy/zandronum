@@ -1,13 +1,6 @@
 #include "wb_map.h"
 #include "wb_util.h"
 #include "wb_nav.h"
-#include "r_utility.h"
-#include "p_lnspec.h"
-#include "p_spec.h"
-#include "p_setup.h"
-#include "p_trace.h"
-#include "p_local.h"
-#include "a_keys.h"
 #include <algorithm>
 #include <float.h>
 
@@ -17,35 +10,31 @@ using namespace wbot;
 BotMapInfo wbot::g_map;
 
 fixed_t MapSector::getHeight() {
-	sector_t& sec = ::sectors[id];
-	return sec.ceilingplane.Zat0() - sec.floorplane.Zat0();
+	return get_sector_ceil_z(id) - get_sector_floor_z(id);
 }
 
 fixed_t MapSector::getFloorZ() {
-	sector_t& sec = ::sectors[id];
-	return sec.floorplane.Zat0();
+	return get_sector_floor_z(id);
 }
 
 fixed_t MapSector::getCeilZ() {
-	sector_t& sec = ::sectors[id];
-	return sec.ceilingplane.Zat0();
+	return get_sector_ceil_z(id);
 }
 
 bool MapSector::isMoving() {
-	sector_t& sec = ::sectors[id];
-	return sec.floordata || sec.ceilingdata;
+	return is_sector_ceil_moving(id) || is_sector_floor_moving(id);
 }
 
 bool MapSector::isFloorMoving() {
-	return ::sectors[id].floordata;
+	return is_sector_floor_moving(id);
 }
 
 bool MapSector::isCeilMoving() {
-	return ::sectors[id].ceilingdata;
+	return is_sector_ceil_moving(id);
 }
 
 int MapSector::special() {
-	return ::sectors[id].special;
+	return get_sector_special(id);
 }
 
 FVector2 MapLine::center() {
@@ -63,38 +52,35 @@ int MapLine::length() {
 }
 
 int MapLine::activation() {
-	return ::lines[id].activation;
+	return get_line_activation(id);
 }
 
 int MapLine::special() {
-	return ::lines[id].special;
+	return get_line_special(id);
 }
 
 int MapLine::getArg(int idx) {
-	line_t& line = ::lines[this - g_map.lines];
-	return line.args[idx];
+	return get_line_arg(this - g_map.lines, idx);
 }
 
 bool MapLine::isTeleport() {
-	return special() == Teleport;
+	return special_is_teleport(special());
 }
 
 bool MapLine::isLockedDoor() {
-	return special() == Door_LockedRaise;
+	return special_is_locked_door(special());
 }
 
 bool MapLine::isLevelExit() {
-	int spec = special();
-	return (spec == Exit_Normal || spec == Exit_Secret);
+	return special_is_level_exit(special());
 }
 
 bool MapLine::canPlayerActivate() {
-	return activation() & SPAC_PlayerActivate;
+	return can_player_activate_line(id);
 }
 
 FVector2 MapLine::getTeleportDest() {
-	AActor* actor = SelectTeleDest(getArg(0), getArg(1));
-	return actor ? FVector2(actor->x, actor->y) : FVector2(0,0);
+	return get_tele_dest(id);
 }
 
 
@@ -126,35 +112,6 @@ void BotMapInfo::init() {
 	add_sector_info();
 }
 
-void* BotMapInfo::load_wad_lump(MapData* map, int id, int& len, int structSize) {
-	int dataLen = map->Size(id);
-	uint8_t* data = new uint8_t[dataLen];
-	map->Read(id, data);
-	len = dataLen / structSize;
-	return data;
-}
-
-MapLumps BotMapInfo::load_wad_lump_data() {
-	MapLumps lumps;
-	MapData* map = P_OpenMapData(level.mapname, true);
-
-	if (!map) {
-		Printf("[wbot] Failed to open map data\n");
-		memset(&lumps, 0, sizeof(lumps));
-		return lumps;
-	}
-
-	lumps.verts = (LumpVert*)load_wad_lump(map, ML_VERTEXES, lumps.numverts, sizeof(LumpVert));
-	lumps.sides = (LumpSide*)load_wad_lump(map, ML_SIDEDEFS, lumps.numsides, sizeof(LumpSide));
-	lumps.segs = (LumpSeg*)load_wad_lump(map, ML_SEGS, lumps.numsegs, sizeof(LumpSeg));
-	lumps.subsectors = (LumpSubSector*)load_wad_lump(map, ML_SSECTORS, lumps.numsubsectors, sizeof(LumpSubSector));
-	lumps.lines = (LumpLine*)load_wad_lump(map, ML_LINEDEFS, lumps.numlines, sizeof(LumpLine));
-	lumps.sectors = (LumpSector*)load_wad_lump(map, ML_SECTORS, lumps.numsectors, sizeof(LumpSector));
-	lumps.nodes = (LumpNode*)load_wad_lump(map, ML_NODES, lumps.numnodes, sizeof(LumpNode));
-
-	return lumps;
-}
-
 void BotMapInfo::load_lumps() {
 	if (nodes) {
 		delete[] nodes;
@@ -172,13 +129,13 @@ void BotMapInfo::load_lumps() {
 	MapLumps lumps = load_wad_lump_data();
 
 	if (!lumps.numsubsectors) {
-		Printf("[wbot] failed to load map data\n");
+		gprintf("[wbot] failed to load map data\n");
 		return;
 	}
 
 	for (int i = 0; i < lumps.numsides; i++) {
 		if (lumps.sides[i].sector >= lumps.numsectors) {
-			Printf("[wbot] Bad lump side %d\n", i);
+			gprintf("[wbot] Bad lump side %d\n", i);
 			return;
 		}
 	}
@@ -205,7 +162,7 @@ void BotMapInfo::load_lumps() {
 
 			if (src.v1 >= lumps.numverts || src.v2 >= lumps.numverts)
 				continue;
-			if (frontside >= numsides || backside >= numsides)
+			if (frontside >= lumps.numsides || backside >= lumps.numsides)
 				continue;
 
 			dst.id = i;
@@ -383,7 +340,8 @@ MapSector* BotMapInfo::GetSector(fixed_t x, fixed_t y) {
 }
 
 MapSector* BotMapInfo::GetSector(AActor* actor) {
-	return GetSector(actor->x, actor->y);
+	FVector3 pos = get_actor_pos(actor);
+	return GetSector(pos.X, pos.Y);
 }
 
 std::vector<int> BotMapInfo::GetTouchedSubsectors(AActor* actor) {
@@ -392,22 +350,25 @@ std::vector<int> BotMapInfo::GetTouchedSubsectors(AActor* actor) {
 	
 	unordered_set<int> subs;
 
-	fixed_t r = actor->radius;
-	fixed_t d = FixedMul(r, 46341); // diagonal radius
+	fixed_t r = get_actor_radius(actor);
+	fixed_t d = (r * 46341) >> FRACBITS; // diagonal radius
+	FVector3 pos = get_actor_pos(actor);
+	fixed_t x = pos.X;
+	fixed_t y = pos.Y;
 
-	subs.insert(GetSubsector(actor->x, actor->y) - subsectors);
+	subs.insert(GetSubsector(x, y) - subsectors);
 
 	// axes
-	subs.insert(GetSubsector(actor->x + r, actor->y) - subsectors);
-	subs.insert(GetSubsector(actor->x - r, actor->y) - subsectors);
-	subs.insert(GetSubsector(actor->x, actor->y + r) - subsectors);
-	subs.insert(GetSubsector(actor->x, actor->y - r) - subsectors);
+	subs.insert(GetSubsector(x + r, y) - subsectors);
+	subs.insert(GetSubsector(x - r, y) - subsectors);
+	subs.insert(GetSubsector(x, y + r) - subsectors);
+	subs.insert(GetSubsector(x, y - r) - subsectors);
 
 	// diagonals
-	subs.insert(GetSubsector(actor->x + d, actor->y + d) - subsectors);
-	subs.insert(GetSubsector(actor->x + d, actor->y - d) - subsectors);
-	subs.insert(GetSubsector(actor->x - d, actor->y + d) - subsectors);
-	subs.insert(GetSubsector(actor->x - d, actor->y - d) - subsectors);
+	subs.insert(GetSubsector(x + d, y + d) - subsectors);
+	subs.insert(GetSubsector(x + d, y - d) - subsectors);
+	subs.insert(GetSubsector(x - d, y + d) - subsectors);
+	subs.insert(GetSubsector(x - d, y - d) - subsectors);
 
 	std::vector<int> ret;
 	for (auto item : subs) {
@@ -552,284 +513,8 @@ std::vector<LinkSeg> BotMapInfo::get_neighbor_subsectors(MapSubsector* rootSub, 
 	return links;
 }
 
-int BotMapInfo::get_linedef_move_flag(MapLine* line) {
-	int timingFlag = 0;
-
-	switch (line->special()) {
-	case Plat_UpWaitDownStay:
-	case Plat_UpNearestWaitDownStay:
-	case Plat_DownWaitUpStay:
-	case Plat_DownWaitUpStayLip:
-	case Ceiling_CrushRaiseAndStayA:
-	case Ceiling_CrushAndRaiseA:
-	case Ceiling_CrushAndRaiseSilentA:
-		timingFlag = FL_SECTOR_MOVE_TIMED;
-		break;
-	}
-
-	// only add specials here that could be potentially helpful for unblocking a path.
-	// For instance, raising a door or elevator. A ceiling or door coming down lower 
-	// will not help a bot pass the sector
-	switch (line->special()) {
-	case 0:
-		return 0;
-	case Door_Open:
-	case Door_Raise:
-	case Door_LockedRaise:
-	case Ceiling_RaiseByValue:
-	case Ceiling_RaiseToNearest:
-	case Ceiling_RaiseInstant:
-	case Ceiling_RaiseByValueTimes8:
-	case Generic_Ceiling: // TODO: check if really does move up
-	case Generic_Door:
-	case Ceiling_CrushAndRaiseDist:
-		return timingFlag | FL_SECTOR_MOVE_CEIL_UP;
-
-	case Plat_UpWaitDownStay:
-	case Plat_UpByValue:
-	case Plat_UpNearestWaitDownStay:
-	case Plat_RaiseAndStayTx0:
-	case Plat_UpByValueStayTx:
-	case Floor_RaiseToHighest:
-	case Floor_RaiseToNearest:
-	case Floor_RaiseByValueTxTy:
-	case Floor_RaiseToLowestCeiling:
-	case Elevator_RaiseToNearest:
-	case Stairs_BuildUp:
-	case Stairs_BuildUpSync:
-	case Stairs_BuildUpDoom:
-	case Floor_RaiseByTexture:
-	case Floor_RaiseByValueTimes8:
-	case Floor_RaiseAndCrushDoom:
-		return timingFlag | FL_SECTOR_MOVE_FLOOR_UP;
-
-	case Plat_PerpetualRaise:
-	case Plat_PerpetualRaiseLip:
-		return timingFlag | FL_SECTOR_MOVE_FLOOR_UP | FL_SECTOR_MOVE_FLOOR_DOWN;
-
-	case Plat_DownWaitUpStay:
-	case Plat_DownByValue:
-	case Plat_DownWaitUpStayLip:
-	case Floor_LowerToLowest:
-	case Floor_LowerToNearest:
-	case Floor_LowerToHighest:
-	case Floor_LowerToLowestTxTy:
-	case Elevator_LowerToNearest:
-	case Stairs_BuildDown:
-	case Stairs_BuildDownSync:
-	case Floor_LowerByValueTimes8:
-		return timingFlag | FL_SECTOR_MOVE_FLOOR_DOWN;
-
-	case Generic_Floor:
-	case Elevator_MoveToFloor:
-	case Generic_Lift:
-	case Generic_Stairs:
-		return timingFlag | FL_SECTOR_MOVE_FLOOR_UP | FL_SECTOR_MOVE_FLOOR_DOWN; // TODO: can do both dirs?	
-
-	case Ceiling_LowerToHighestFloor:
-	case Ceiling_LowerInstant:
-	case Ceiling_CrushRaiseAndStayA:
-	case Ceiling_CrushAndRaiseA:
-	case Ceiling_CrushAndRaiseSilentA:
-	case Ceiling_LowerByValueTimes8:
-	case Door_Close:
-	case Door_CloseWaitOpen:
-		return 0; // a ceiling getting lower is not helpful
-
-	case Scroll_Texture_Left:
-	case Scroll_Texture_Right:
-	case Scroll_Texture_Up:
-	case Scroll_Texture_Down:
-	case Light_ForceLightning:
-	case Light_RaiseByValue:
-	case Light_LowerByValue:
-	case Light_ChangeToValue:
-	case Light_Fade:
-	case Light_Glow:
-	case Light_Flicker:
-	case Light_Strobe:
-	case Light_Stop:
-		return 0; // visual-only specials
-
-	case Teleport:
-	case Plat_Stop:
-	case Ceiling_CrushStop:
-	case Exit_Normal:
-	case Exit_Secret:
-		return 0; // does not cause sectors to move
-
-	default:
-		Printf("Unknown special %d for line %d\n", line->special(), line - lines);
-		return 0;
-	}
-}
-
-int BotMapInfo::get_linedef_goal_action(MapLine* line) {
-	if (!line)
-		return -1;
-
-	line_t* eline = &::lines[line - lines];
-
-	if (eline->activation & SPAC_Impact) {
-		return WBOT_GOAL_ACTION_SHOOT;
-	}
-	if (eline->activation & (SPAC_Use | SPAC_UseThrough)) {
-		return WBOT_GOAL_ACTION_USE;
-	}
-	if (eline->activation & (SPAC_Cross | SPAC_AnyCross)) {
-		return WBOT_GOAL_ACTION_CROSS;
-	}
-	if (eline->activation & SPAC_Push) {
-		return WBOT_GOAL_ACTION_TOUCH;
-	}
-
-	if (eline->activation)
-		Printf("Don't know how to activate line %d\n", line - lines);
-	
-	return -1;
-}
-
 bool BotMapInfo::subsector_does_damage(MapSubsector* sub) {
-	switch (sub->sector->special()) {
-	case dDamage_Hellslime:
-	case dDamage_LavaHefty:
-	case dDamage_LavaWimpy:
-	case dDamage_Nukage:
-	case dDamage_SuperHellslime:
-		return true;
-	}
-
-	return false;
-}
-
-void BotMapInfo::add_stair_sector_info() {
-	for (int s = 0; s < numlines; s++) {
-		MapLine& line = lines[s];
-		line_t& eline = ::lines[s];
-
-		bool isStairBuilder = false;
-		int usespecials = 0;
-		bool igntxt = false;
-		int moveFlags = 0;
-
-		switch (line.special()) {
-		case Stairs_BuildDown:
-		case Stairs_BuildUp:
-			usespecials = 1;
-			isStairBuilder = true;
-			break;
-		case Stairs_BuildDownSync:
-		case Stairs_BuildUpSync:
-			usespecials = 2;
-			isStairBuilder = true;
-			break;
-		case Stairs_BuildUpDoom:
-			isStairBuilder = true;
-			break;
-		case Generic_Stairs:
-			isStairBuilder = true;
-			igntxt = eline.args[3] & 2;
-			break;
-		}
-
-		switch (line.special()) {
-		case Stairs_BuildDown:
-		case Stairs_BuildDownSync:
-			moveFlags |= FL_SECTOR_MOVE_FLOOR_DOWN;
-			break;
-		case Stairs_BuildUp:
-		case Stairs_BuildUpSync:
-		case Stairs_BuildUpDoom:
-		case Generic_Stairs:
-			moveFlags |= FL_SECTOR_MOVE_FLOOR_UP;
-			break;
-		}
-
-		if (!isStairBuilder)
-			continue;
-
-		int tag = line.tag;
-		if (tag == 0)
-			continue; // only back sector moves
-
-		int i_compatflags = 0;
-		int (*FindSector) (int tag, int start) =
-			(i_compatflags & COMPATF_STAIRINDEX) ? P_FindSectorFromTagLinear : P_FindSectorFromTag;
-
-		// The compatibility mode doesn't work with a hashing algorithm.
-		// It needs the original linear search method. This was broken in Boom.
-
-		BotGoal stairTrigger;
-		if (line.canPlayerActivate())
-			stairTrigger = BotGoal(get_linedef_goal_action(&line), s);
-
-		int secnum = -1;
-		int newsecnum = -1;
-		sector_t* prev = NULL;
-		while ((secnum = FindSector(tag, secnum)) >= 0) {
-			sector_t* sec = &::sectors[secnum];
-
-			// Find next sector to raise
-			// 1. Find 2-sided line with same sector side[0] (lowest numbered)
-			// 2. Other side is the next sector to raise
-			// 3. Unless already moving, or different texture, then stop building
-			bool ok;
-			do
-			{
-				ok = false;
-				sector_t* tsec = NULL;
-
-				if (usespecials)
-				{
-					// [RH] Find the next sector by scanning for Stairs_Special?
-					tsec = sec->NextSpecialSector(
-						(sec->special & 0xff) == Stairs_Special1 ?
-						Stairs_Special2 : Stairs_Special1, prev);
-
-					ok = (tsec != NULL);
-					newsecnum = (int)(tsec - ::sectors);
-				}
-				else
-				{
-					for (int i = 0; i < sec->linecount; i++)
-					{
-						if (!((sec->lines[i])->flags & ML_TWOSIDED))
-							continue;
-
-						tsec = (sec->lines[i])->frontsector;
-						newsecnum = (int)(tsec - ::sectors);
-
-						if (secnum != newsecnum)
-							continue;
-
-						tsec = (sec->lines[i])->backsector;
-						if (!tsec) continue;	//jff 5/7/98 if no backside, continue
-						newsecnum = (int)(tsec - ::sectors);
-
-						FTextureID texture = sec->GetTexture(sector_t::floor);
-
-						if (!igntxt && tsec->GetTexture(sector_t::floor) != texture)
-							continue;
-
-						ok = true;
-						break;
-					}
-				}
-
-				if (ok) {
-					prev = sec;
-					sec = tsec;
-					secnum = newsecnum;
-
-					MapSector& msec = g_map.sectors[tsec - ::sectors];
-					msec.moveFlags |= moveFlags;
-					
-					if (line.canPlayerActivate())
-						msec.triggers.push_back(stairTrigger);
-				}
-			} while (ok);
-		}
-	}
+	return sector_special_is_damage(sub->sector->special());
 }
 
 void BotMapInfo::find_linedef_sectors() {
@@ -844,7 +529,7 @@ void BotMapInfo::find_linedef_sectors() {
 			continue;
 
 		int lineAction = get_linedef_goal_action(&line);
-		bool doubleSidedCrossLine = lineAction == WBOT_GOAL_ACTION_CROSS && (line.flags & ML_TWOSIDED);
+		bool doubleSidedCrossLine = is_double_sided_cross_line(i);
 
 		FVector2 center = line.center();
 		FVector2 normal = line.normal();
@@ -864,7 +549,7 @@ void BotMapInfo::find_linedef_sectors() {
 		int routeToId = frontSubId;
 
 		if (line.backsector && frontSubId == backSubId)
-			Printf("Front/back subsectors of line %d are the same!\n", i);
+			gprintf("Front/back subsectors of line %d are the same!\n", i);
 
 		if (doubleSidedCrossLine) {
 			// pick the side that allows crossing so that bot doesn't try to cross lines from the bottom of a cliff
@@ -947,33 +632,4 @@ void BotMapInfo::remove_invalid_goals(int secid) {
 		// TODO: don't unlink perpetually moving sectors like crushers
 		g_wb_nav.relink_sector(&g_map.sectors[secid]);
 	}
-}
-
-bool BotMapInfo::Trace(FVector3 start, FVector3 end, bool ignoreMonsters, AActor* ignore, TraceResult* tr) {
-	FVector3 delta = end - start;
-	fixed_t dist = delta.Length();
-	delta = delta.Unit() * FRACUNIT;
-
-	sector_t* sector = P_PointInSector(start.X, start.Y);
-
-	FTraceResults trInternal;
-
-	bool hit = ::Trace((fixed_t)start.X, (fixed_t)start.Y, (fixed_t)start.Z, sector,
-		(fixed_t)delta.X, (fixed_t)delta.Y, (fixed_t)delta.Z, dist, ignoreMonsters ? 0 : MF_SOLID,
-		ML_BLOCKING | ML_BLOCKEVERYTHING | ML_BLOCK_PLAYERS, ignore, trInternal);
-	
-	if (tr) {
-		tr->endPos = FVector3(trInternal.X, trInternal.Y, trInternal.Z);
-		tr->actor = trInternal.Actor;
-		tr->frac = trInternal.Fraction / (float)FRACUNIT;
-		tr->hitType = (TraceHitType)trInternal.HitType;
-		tr->line = trInternal.Line ? &lines[trInternal.Line - ::lines] : NULL;
-		tr->sector = trInternal.Sector ? &sectors[trInternal.Sector - ::sectors] : NULL;
-	}
-
-	return hit;
-}
-
-bool BotMapInfo::CheckKeys(AActor* activator, MapLine* line) {
-	return P_CheckKeys(activator, line->getArg(3), false);
 }

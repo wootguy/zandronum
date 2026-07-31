@@ -38,8 +38,8 @@ int NavSectorLink::blocked(AActor* actor, bool recurse) {
 	if (walkability != LINK_BLOCK_CLEAR) {
 		MapLine* line = linedef;
 
-		if (line && line->getArg(0) == 0 && g_map.get_linedef_move_flag(line)) {
-			if (actor && line->isLockedDoor() && !g_map.CheckKeys(actor, line)) {
+		if (line && line->getArg(0) == 0 && get_linedef_move_flag(line)) {
+			if (actor && line->isLockedDoor() && !can_unlock_door(actor, line)) {
 				return walkability; // don't have the keys required to use this
 			}
 
@@ -95,7 +95,7 @@ bool NavSectorLink::jumpable() {
 		return false;
 	}
 
-	if (g_map.Trace(start, end, true, NULL, NULL)) {
+	if (TraceLine(start, end, true, NULL, NULL)) {
 		return false;
 	}
 
@@ -666,7 +666,7 @@ bool SectorNavMesh::get_key_goals_for_line(AActor* actor, MapLine* line, vector<
 	if (!line->isLockedDoor())
 		return true; // not a locked door
 
-	if (g_map.CheckKeys(actor, line))
+	if (can_unlock_door(actor, line))
 		return true; // already have all the keys
 
 	vector<vector<PClass*>> keyGroups = get_required_key_types(line);

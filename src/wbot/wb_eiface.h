@@ -25,11 +25,96 @@ class CWootBot;
 #define M_PI		3.14159265358979323846	// matches value in gcc v2 math.h
 #endif
 
+#define FL_SECTOR_MOVE_FLOOR_DOWN	1
+#define FL_SECTOR_MOVE_FLOOR_UP		2
+#define FL_SECTOR_MOVE_FLOOR_ANY	4
+#define FL_SECTOR_MOVE_CEIL_UP		8
+#define FL_SECTOR_MOVE_TIMED		16	// sector resets to its old position shortly after being activated
+
 struct PClass;
 
 namespace wbot {
 	struct MapLine;
 	struct MapSector;
+
+	// structs without padding for loading from file
+#pragma pack(1)
+	struct LumpVert {
+		int16_t x, y;
+	};
+
+	struct LumpNode {
+		int16_t x, y;
+		int16_t dx, dy;
+		int16_t bbox[2][4];
+		uint16_t children[2];
+	};
+
+	struct LumpSeg {
+		uint16_t v1;
+		uint16_t v2;
+		uint16_t angle;
+		uint16_t linedef;
+		uint16_t side;
+		int16_t offset;
+	};
+
+	struct LumpSubSector {
+		uint16_t numsegs;
+		uint16_t firstseg;
+	};
+
+	struct LumpSector {
+		int16_t floorheight;
+		int16_t ceilingheight;
+		char floorpic[8];
+		char ceilingpic[8];
+		int16_t lightlevel;
+		int16_t special;
+		int16_t tag;
+	};
+
+	struct LumpLine {
+		uint16_t v1;
+		uint16_t v2;
+		uint16_t flags;
+		uint16_t special;
+		uint16_t tag;
+		int16_t sidenum[2];
+	};
+
+	struct LumpSide {
+		int16_t textureoffset;
+		int16_t rowoffset;
+		char toptexture[8];
+		char bottomtexture[8];
+		char midtexture[8];
+		int16_t sector;
+	};
+#pragma pack()
+
+	struct MapLumps {
+		LumpVert* verts;
+		int numverts;
+
+		LumpNode* nodes;
+		int numnodes;
+
+		LumpSeg* segs;
+		int numsegs;
+
+		LumpSubSector* subsectors;
+		int numsubsectors;
+
+		LumpSector* sectors;
+		int numsectors;
+
+		LumpLine* lines;
+		int numlines;
+
+		LumpSide* sides;
+		int numsides;
+	};
 
 	// safe pointer to an actor
 	struct AHandle {
@@ -39,6 +124,23 @@ namespace wbot {
 		AHandle(AActor* actor);
 
 		AActor* get() const;
+	};
+
+	enum TraceHitType {
+		TRACE_HitNone,
+		TRACE_HitFloor,
+		TRACE_HitCeiling,
+		TRACE_HitWall,
+		TRACE_HitActor
+	};
+
+	struct TraceResult {
+		MapSector* sector;
+		FVector3 endPos;
+		float frac;
+		AActor* actor;		// valid if hit an actor
+		MapLine* line;		// valid if hit a line
+		TraceHitType hitType;
 	};
 
 	void init_eiface();
@@ -87,6 +189,8 @@ namespace wbot {
 
 	AActor* find_enemy(CWootBot* pBot);
 
+	bool can_unlock_door(AActor* activator, MapLine* line);
+
 	std::vector<AActor*> find_prop_blockers(); // find all immovable props with collision
 
 	std::vector<AActor*> find_map_keys();
@@ -114,4 +218,46 @@ namespace wbot {
 	void print_hud_test(const char* msg, float x, float y, uint32_t id);
 
 	int get_game_tics();
+
+	bool TraceLine(FVector3 start, FVector3 end, bool ignoreMonsters, AActor* ignore, TraceResult* tr);
+
+	MapLumps load_wad_lump_data();
+
+	bool sector_special_is_damage(int special);
+
+	// type of movement applied to the target sector. returns FL_SECTOR_MOVE_*
+	int get_linedef_move_flag(MapLine* line);
+
+	bool special_is_teleport(int special);
+
+	bool special_is_locked_door(int special);
+
+	bool special_is_level_exit(int special);
+
+	void add_stair_sector_info();
+
+	int get_sector_floor_z(int id);
+
+	int get_sector_ceil_z(int id);
+
+	bool is_sector_floor_moving(int id);
+
+	bool is_sector_ceil_moving(int id);
+
+	int get_line_special(int id);
+
+	int get_sector_special(int id);
+
+	int get_line_activation(int id);
+
+	int get_line_arg(int id, int arg);
+
+	bool can_player_activate_line(int id);
+
+	bool is_double_sided_cross_line(int id);
+
+	// how to trigger the given line
+	int get_linedef_goal_action(MapLine* line);
+
+	FVector2 get_tele_dest(int lineid);
 }

@@ -518,7 +518,7 @@ bool TraceRadius(FVector3 start, FVector3 end, fixed_t radius, bool ignoreMonste
 
 	for (int i = -2; i <= 2; i++) {
 		TraceResult temp;
-		g_map.Trace(start + rightDir * i * rightStep, end + rightDir * i * rightStep, ignoreMonsters, ignoreEnt, &temp);
+		TraceLine(start + rightDir * i * rightStep, end + rightDir * i * rightStep, ignoreMonsters, ignoreEnt, &temp);
 		
 		if (temp.frac < minFrac) {
 			minFrac = temp.frac;

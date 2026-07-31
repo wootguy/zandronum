@@ -93,7 +93,7 @@ void wbot_debug_player_nav() {
 	FVector3 start = playerPos + FVector3(0, 0, get_player_viewheight(player));
 	MapSector* sector = g_map.GetSector((fixed_t)start.X, (fixed_t)start.Y);
 	TraceResult tr;
-	if (g_map.Trace(start, start + forward*64, false, pActor, &tr))
+	if (TraceLine(start, start + forward*64, false, pActor, &tr))
 	{
 		MapLine* line = tr.line;
 

@@ -163,7 +163,7 @@ void BotGoal::TestBossBrainShootRay(FVector3 brainPos, FVector3 rayStart, FVecto
 
 	if (!isCeilTrace) {
 		FVector3 impactPos = rayStart + rayDir * ((ROCKET_EXPLODE_RADIUS + 64) << FRACBITS);
-		if (!g_map.Trace(rayStart, impactPos, true, NULL, NULL)) {
+		if (!TraceLine(rayStart, impactPos, true, NULL, NULL)) {
 			return; // no impact
 		}
 	}
@@ -177,14 +177,14 @@ void BotGoal::TestBossBrainShootRay(FVector3 brainPos, FVector3 rayStart, FVecto
 	// trace in the opposite direction to find a sector to shoot the impact point from
 	TraceResult tr;
 	FVector3 shootPos = impactPos - rayDir * (4000 << FRACBITS);
-	g_map.Trace(impactPos, shootPos, true, NULL, &tr);
+	TraceLine(impactPos, shootPos, true, NULL, &tr);
 	shootPos = tr.endPos;
 	FVector3 shootDelta = shootPos - impactPos;
 	fixed_t shootLen = shootDelta.Length();
 
 	// check vertical clearance for the rocket
 	FVector3 lowerPos = impactPos - FVector3(0, 0, (ROCKET_RADIUS / 2) << FRACBITS);
-	g_map.Trace(lowerPos, shootPos, true, NULL, &tr);
+	TraceLine(lowerPos, shootPos, true, NULL, &tr);
 	if (tr.frac < 0.9f) {
 		return; // not enough clearance
 	}

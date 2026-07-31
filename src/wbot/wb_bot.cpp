@@ -281,7 +281,7 @@ bool CWootBot::TraceAhead(int dist, FVector3 offset, bool ignoreMonsters, TraceR
 	FVector3 start = m_origin + offset;
 	FVector3 end = start + forward * dist;
 
-	return g_map.Trace(start, end, ignoreMonsters, (AActor*)pActor, tr);
+	return TraceLine(start, end, ignoreMonsters, (AActor*)pActor, tr);
 }
 
 bool CWootBot::MoveTo(FVector2 pos, int radius, int speed) {
@@ -313,7 +313,7 @@ bool CWootBot::MoveTo(FVector2 pos, int radius, int speed) {
 		if (!lineIsMoving) {
 			// activate any triggered line to fix face rubbing on walls when the bot is failing
 			// to get to a tiny sector in front of a door/button.
-			int action = g_map.get_linedef_goal_action(tr.line);
+			int action = get_linedef_goal_action(tr.line);
 
 			if (action == WBOT_GOAL_ACTION_USE)
 				Use();
@@ -384,8 +384,8 @@ FVector2 CWootBot::AvoidCornersVector(FVector2 wantDir) {
 	FVector3 leftPos = viewPos + rightDir * -rightOfs;
 	TraceResult trLeft, trRight;
 
-	g_map.Trace(rightPos, rightPos + testDir, false, (AActor*)pActor, &trRight);
-	g_map.Trace(leftPos, leftPos + testDir, false, (AActor*)pActor, &trLeft);
+	TraceLine(rightPos, rightPos + testDir, false, (AActor*)pActor, &trRight);
+	TraceLine(leftPos, leftPos + testDir, false, (AActor*)pActor, &trLeft);
 
 	bool hitProp = trRight.actor || trLeft.actor;
 	bool canChangeDir = !hitProp || get_game_tics() - m_lastAvoidPropDirChange > 70;
@@ -569,7 +569,7 @@ bool CWootBot::PushLevelEndGoal() {
 	for (int i = 0; i < g_map.numlines; i++) {
 		MapLine& line = g_map.lines[i];
 		if (line.isLevelExit()) {
-			if (PushGoal(BotGoal(g_map.get_linedef_goal_action(&line), i), NULL)) {
+			if (PushGoal(BotGoal(get_linedef_goal_action(&line), i), NULL)) {
 				return true;
 			}
 		}
@@ -623,7 +623,7 @@ bool CWootBot::PushGoal(const BotGoal& goal, NavSectorLink* purposeLink) {
 }
 
 bool CWootBot::PushKeyGoals(MapLine* line) {
-	if (line->isLockedDoor() && !g_map.CheckKeys((AActor*)pActor, line)) {
+	if (line->isLockedDoor() && !can_unlock_door((AActor*)pActor, line)) {
 		vector<BotGoal> keyGoals;
 
 		m_routeController.MarkBlockedPaths();
@@ -666,7 +666,7 @@ bool CWootBot::SelectGoal(vector<BotGoal>& goals, NavSectorLink* purposeLink, in
 			continue;
 
 		MapLine* line = goal.lineid >= 0 ? &g_map.lines[goal.lineid] : NULL;
-		if (line && !(g_map.get_linedef_move_flag(line) & movementNeeded)) {
+		if (line && !(get_linedef_move_flag(line) & movementNeeded)) {
 			continue; // line would not move the sector in a way thats needed
 		}
 
@@ -792,7 +792,7 @@ void CWootBot::Attack() {
 
 void CWootBot::HandleLineActivation(MapLine* line, AActor* activator) {
 	if (line->special() && line->isLockedDoor()) {
-		if (!g_map.CheckKeys(activator, line)) {
+		if (!can_unlock_door(activator, line)) {
 			// door wasn't actually opened
 			if (activator == (AActor*)pActor) {
 				// we tried to activate this. Add the key goals now. They may have been skipped if this
