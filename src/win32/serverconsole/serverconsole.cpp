@@ -2104,7 +2104,7 @@ void SERVERCONSOLE_SetupColumns( void )
 
 		SendDlgItemMessage( g_hDlg, IDC_PLAYERLIST, LVM_SETCOLUMN, SERVERCONSOLE_COLUMN_FRAGS, (LPARAM)&ColumnData );
 	}
-	else
+	else if (!g_windows_console_mode)
 		Printf( "SERVERCONSOLE_SetupColumns: Couldn't get column!\n" );
 }
 

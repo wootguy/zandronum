@@ -147,6 +147,7 @@ namespace wbot {
 		int special();
 		int getArg(int idx);
 		bool isTeleport();
+		bool canPlayerActivate();
 		FVector2 getTeleportDest();
 	};
 

@@ -58,7 +58,7 @@ public:
 	bool PushLevelEndGoal(); // try to beat the map
 	bool PushGoal(const BotGoal& goal, NavSectorLink* purposeLink); // returns false if this is already the current goal
 	bool PushKeyGoals(wbot::MapLine* line);
-	bool SelectGoal(std::vector<BotGoal>& goals, NavSectorLink* purposeLink);
+	bool SelectGoal(std::vector<BotGoal>& goals, NavSectorLink* purposeLink, int movementNeeded);
 	void CompleteGoal();
 	void FailGoal(); // aborts the current goal and moves its blocked paths to the parent goal
 	inline bool HasGoal() { return m_goals.size(); };

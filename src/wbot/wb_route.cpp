@@ -312,7 +312,8 @@ void CBotRouteController::JumpFail() {
 	if (backupBlocker) {
 		// The running-start position was blocked by something that can be moved.
 		// Try moving it before considering this jump to be impossible
-		if (pBot->SelectGoal(backupBlocker->getTriggers(), m_navLink)) {
+		int movementNeeded = FL_SECTOR_MOVE_FLOOR_DOWN | FL_SECTOR_MOVE_CEIL_UP;
+		if (pBot->SelectGoal(backupBlocker->getTriggers(), m_navLink, movementNeeded)) {
 			return;
 		}
 		else {
@@ -547,53 +548,53 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link, int blockReason)
 	bool tryTargetTrigger = targetMovement != 0;
 	bool tryParentTrigger = parentMovement != 0;
 
+	int parentMovementNeeded = 0xffffffff;
+	int targetMovementNeeded = 0xffffffff;
+
 	// don't trigger things if it won't help unblock the path
 	switch (blockReason) {
 	case LINK_BLOCK_TOO_HIGH:
-		if (!(targetMovement & FL_SECTOR_MOVE_FLOOR_DOWN)) {
-			tryTargetTrigger = false;
-		}
-		if (!(parentMovement & FL_SECTOR_MOVE_FLOOR_UP)) {
-			tryParentTrigger = false;
-		}
+		parentMovementNeeded = FL_SECTOR_MOVE_FLOOR_UP;
+		targetMovementNeeded = FL_SECTOR_MOVE_FLOOR_DOWN;
 		break;
 	case LINK_BLOCK_TOO_LOW:
-		if (!(parentMovement & FL_SECTOR_MOVE_FLOOR_DOWN)) {
-			tryParentTrigger = false;
-		}
+		parentMovementNeeded = FL_SECTOR_MOVE_FLOOR_DOWN;
 		break;
 	case LINK_BLOCK_CLIPPED:
-		tryParentTrigger = false;
-		tryTargetTrigger = false;
+		parentMovementNeeded = 0;
+		targetMovementNeeded = 0;
 
 		// try unblocking anything the box is clipping into
 		for (MapSector* sec : link->getClippedSectors(pActor)) {
-			if (sec->moveFlags && pBot->SelectGoal(sec->triggers, link)) {
+			if (sec->moveFlags && pBot->SelectGoal(sec->triggers, link, 0xffffffff)) {
 				return;
 			}
 		}
 		break;
 	case LINK_BLOCK_CANT_JUMP:
-		if (!(targetMovement & (FL_SECTOR_MOVE_FLOOR_DOWN | FL_SECTOR_MOVE_CEIL_UP))) {
-			tryTargetTrigger = false;
-		}
-		if (!(parentMovement & FL_SECTOR_MOVE_FLOOR_UP)) {
-			tryParentTrigger = false;
-		}
+		parentMovementNeeded = FL_SECTOR_MOVE_FLOOR_UP;
+		targetMovementNeeded = FL_SECTOR_MOVE_FLOOR_DOWN | FL_SECTOR_MOVE_CEIL_UP;
 		break;
 	default:
-		tryParentTrigger = false;
-		tryTargetTrigger = false;
+		parentMovementNeeded = 0;
+		targetMovementNeeded = 0;
 		break;
 	}
 
+	if (!(parentMovement & parentMovementNeeded)) {
+		tryParentTrigger = false;
+	}
+	if (!(targetMovement & targetMovementNeeded)) {
+		tryTargetTrigger = false;
+	}
+
 	// nothing is moving, try unblocking it ourselves.
-	if (tryTargetTrigger && pBot->SelectGoal(link->target->getTriggers(), link)) {
+	if (tryTargetTrigger && pBot->SelectGoal(link->target->getTriggers(), link, targetMovementNeeded)) {
 		return;
 	}
 
 	// if we're on an elevator, try triggering it.
-	if (tryParentTrigger && pBot->SelectGoal(link->parent->getTriggers(), link)) {
+	if (tryParentTrigger && pBot->SelectGoal(link->parent->getTriggers(), link, parentMovementNeeded)) {
 		return;
 	}
 
@@ -604,6 +605,20 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link, int blockReason)
 		if (m_route.route.size()) {
 			DebugPrint("Routing around the blocked path.\n");
 			return;
+		}
+		else if (curGoal->action == WBOT_GOAL_ACTION_BOSS_BRAIN) {
+			// try a different shooting location
+			unordered_map<int, IndirectShootPos> shootFroms = curGoal->FindBossBrainShootPositions();
+			for (auto item : shootFroms) {
+				int subid = item.first;
+				BotRoute route = RouteToSector(subid);
+				if (route.route.size()) {
+					// can route to this position
+					m_route = route;
+					curGoal->shootAlignment = item.second;
+					return;
+				}
+			}
 		}
 	}
 
@@ -710,7 +725,7 @@ bool CBotRouteController::RouteToGoal() {
 		if (goal->action == WBOT_GOAL_ACTION_BOSS_BRAIN && !pBot->m_combatController.GetWeaponByName("RocketLauncher")) {
 			// must have rocket launcher first
 			vector<BotGoal> rpgs = g_wb_nav.get_weapon_goals("RocketLauncher");
-			if (!pBot->SelectGoal(rpgs, NULL)) {
+			if (!pBot->SelectGoal(rpgs, NULL, 0)) {
 				// can't route to any rpg
 				DebugPrint("Failed to find an RPG to kill the boss brain\n");
 				pBot->FailGoal();

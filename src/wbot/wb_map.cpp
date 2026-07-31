@@ -79,6 +79,10 @@ bool MapLine::isTeleport() {
 	return special() == Teleport;
 }
 
+bool MapLine::canPlayerActivate() {
+	return activation() & SPAC_PlayerActivate;
+}
+
 FVector2 MapLine::getTeleportDest() {
 	AActor* actor = SelectTeleDest(getArg(0), getArg(1));
 	return actor ? FVector2(actor->x, actor->y) : FVector2(0,0);
@@ -566,6 +570,7 @@ int BotMapInfo::get_linedef_move_flag(MapLine* line) {
 	case Ceiling_RaiseByValueTimes8:
 	case Generic_Ceiling: // TODO: check if really does move up
 	case Generic_Door:
+	case Ceiling_CrushAndRaiseDist:
 		return timingFlag | FL_SECTOR_MOVE_CEIL_UP;
 
 	case Plat_UpWaitDownStay:
@@ -581,6 +586,9 @@ int BotMapInfo::get_linedef_move_flag(MapLine* line) {
 	case Stairs_BuildUp:
 	case Stairs_BuildUpSync:
 	case Stairs_BuildUpDoom:
+	case Floor_RaiseByTexture:
+	case Floor_RaiseByValueTimes8:
+	case Floor_RaiseAndCrushDoom:
 		return timingFlag | FL_SECTOR_MOVE_FLOOR_UP;
 
 	case Plat_PerpetualRaise:
@@ -597,6 +605,7 @@ int BotMapInfo::get_linedef_move_flag(MapLine* line) {
 	case Elevator_LowerToNearest:
 	case Stairs_BuildDown:
 	case Stairs_BuildDownSync:
+	case Floor_LowerByValueTimes8:
 		return timingFlag | FL_SECTOR_MOVE_FLOOR_DOWN;
 
 	case Generic_Floor:
@@ -611,6 +620,8 @@ int BotMapInfo::get_linedef_move_flag(MapLine* line) {
 	case Ceiling_CrushAndRaiseA:
 	case Ceiling_CrushAndRaiseSilentA:
 	case Ceiling_LowerByValueTimes8:
+	case Door_Close:
+	case Door_CloseWaitOpen:
 		return 0; // a ceiling getting lower is not helpful
 
 	case Scroll_Texture_Left:
@@ -630,6 +641,9 @@ int BotMapInfo::get_linedef_move_flag(MapLine* line) {
 
 	case Teleport:
 	case Plat_Stop:
+	case Ceiling_CrushStop:
+	case Exit_Normal:
+	case Exit_Secret:
 		return 0; // does not cause sectors to move
 
 	default:
@@ -733,7 +747,9 @@ void BotMapInfo::add_stair_sector_info() {
 		// The compatibility mode doesn't work with a hashing algorithm.
 		// It needs the original linear search method. This was broken in Boom.
 
-		BotGoal stairTrigger = BotGoal(get_linedef_goal_action(&line), s);
+		BotGoal stairTrigger;
+		if (line.canPlayerActivate())
+			stairTrigger = BotGoal(get_linedef_goal_action(&line), s);
 
 		int secnum = -1;
 		int newsecnum = -1;
@@ -795,7 +811,9 @@ void BotMapInfo::add_stair_sector_info() {
 
 					MapSector& msec = g_map.sectors[tsec - ::sectors];
 					msec.moveFlags |= moveFlags;
-					msec.triggers.push_back(stairTrigger);
+					
+					if (line.canPlayerActivate())
+						msec.triggers.push_back(stairTrigger);
 				}
 			} while (ok);
 		}
@@ -809,6 +827,9 @@ void BotMapInfo::find_linedef_sectors() {
 		if (!line.special()) {
 			continue;
 		}
+
+		if (!line.canPlayerActivate())
+			continue;
 
 		int lineAction = get_linedef_goal_action(&line);
 		bool doubleSidedCrossLine = lineAction == WBOT_GOAL_ACTION_CROSS && (line.flags & ML_TWOSIDED);
@@ -830,7 +851,7 @@ void BotMapInfo::find_linedef_sectors() {
 		int backSubId = GetSubsector(backPoint.X, backPoint.Y)->id;
 		int routeToId = frontSubId;
 
-		if (frontSubId == backSubId)
+		if (line.backsector && frontSubId == backSubId)
 			Printf("Front/back subsectors of line %d are the same!\n", i);
 
 		if (doubleSidedCrossLine) {
@@ -856,7 +877,7 @@ void BotMapInfo::add_sector_info() {
 			for (int k = 0; k < numlines; k++) {
 				MapLine& line = lines[k];
 
-				if (!line.tag || line.tag != sec.tag)
+				if (!line.tag || line.tag != sec.tag || !line.canPlayerActivate())
 					continue;
 
 				int flags = get_linedef_move_flag(&line);
@@ -879,7 +900,7 @@ void BotMapInfo::add_sector_info() {
 		for (int k = 0; k < numlines; k++) {
 			MapLine& line = lines[k];
 
-			if (line.tag || line.backsector != &sec)
+			if (line.tag || line.backsector != &sec || !line.canPlayerActivate())
 				continue;
 
 			int flags = get_linedef_move_flag(&line);

@@ -216,7 +216,7 @@ void CWootBot::GoalActionThink() {
 	case WBOT_GOAL_ACTION_BOSS_BRAIN: {
 		if (!m_combatController.GetWeaponByName("RocketLauncher")) {
 			vector<BotGoal> rpgs = g_wb_nav.get_weapon_goals("RocketLauncher");
-			if (!SelectGoal(rpgs, NULL)) {
+			if (!SelectGoal(rpgs, NULL, 0)) {
 				DebugPrint("Failed to find an RPG to kill the boss brain\n");
 				FailGoal();
 			}
@@ -225,7 +225,7 @@ void CWootBot::GoalActionThink() {
 
 		if (!m_combatController.SelectWeapon("RocketLauncher")) {
 			vector<BotGoal> rockets = g_wb_nav.get_ammo_goals("RocketBox", "Rocket");
-			if (!SelectGoal(rockets, NULL)) {
+			if (!SelectGoal(rockets, NULL, 0)) {
 				DebugPrint("Failed to find RPG ammo to kill the boss brain\n");
 				FailGoal();
 			}
@@ -674,7 +674,7 @@ bool CWootBot::PushKeyGoals(MapLine* line) {
 	return true;
 }
 
-bool CWootBot::SelectGoal(vector<BotGoal>& goals, NavSectorLink* purposeLink) {
+bool CWootBot::SelectGoal(vector<BotGoal>& goals, NavSectorLink* purposeLink, int movementNeeded) {
 	int unblockSector = purposeLink ? purposeLink->target->id : -1;
 	BotGoal* curGoal = CurrentGoal();
 	BotGoal* bestGoal = NULL;
@@ -696,6 +696,12 @@ bool CWootBot::SelectGoal(vector<BotGoal>& goals, NavSectorLink* purposeLink) {
 		BotGoal& goal = goals[i];
 		if (!goal.valid())
 			continue;
+
+		MapLine* line = goal.lineid >= 0 ? &g_map.lines[goal.lineid] : NULL;
+		if (line && !(g_map.get_linedef_move_flag(line) & movementNeeded)) {
+			continue; // line would not move the sector in a way thats needed
+		}
+
 		int subid = goal.getNavId();
 
 		if (curGoal && purposeLink) {
