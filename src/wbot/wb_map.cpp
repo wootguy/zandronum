@@ -75,6 +75,10 @@ bool MapLine::isLevelExit() {
 	return special_is_level_exit(special());
 }
 
+bool MapLine::isImpassable() {
+	return is_impassable_line(id);
+}
+
 bool MapLine::canPlayerActivate() {
 	return can_player_activate_line(id);
 }

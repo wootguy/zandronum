@@ -2,6 +2,7 @@
 #include "wb_nav.h"
 #include "wb_bot.h"
 #include "wb_util.h"
+#include "wb_hooks.h"
 
 #include "actor.h"
 #include "bots.h"
@@ -16,8 +17,14 @@
 #include "a_keys.h"
 #include "p_trace.h"
 #include "p_lnspec.h"
+#include "m_bbox.h"
+#include "deathmatch.h"
+#include "sbar.h"
+#include "m_cheat.h"
+#include "c_dispatch.h"
 
 using namespace std;
+using namespace wbot;
 
 void	SERVERCONSOLE_ReListPlayers(void);
 
@@ -42,7 +49,28 @@ namespace wbot {
 		g_actor_handles.clear();
 	}
 
-	player_t* add_bot(CWootBot* pBot, int ulPlayerNum, const char* color, const char* colorSet,
+	void add_bot() {
+		if (gamestate != GS_LEVEL)
+			return;
+
+		// Don't allow bots in network mode, unless we're the host.
+		if (NETWORK_InClientMode())
+		{
+			Printf("Only the host can add bots!\n");
+			return;
+		}
+
+		ULONG ulPlayerIdx = BOTS_FindFreePlayerSlot();
+		if (ulPlayerIdx == MAXPLAYERS)
+		{
+			Printf("The maximum number of players/bots has been reached.\n");
+			return;
+		}
+
+		new CWootBot(NULL, NULL, ulPlayerIdx);
+	}
+
+	player_t* init_bot(CWootBot* pBot, int ulPlayerNum, const char* color, const char* colorSet,
 		const char* skin, const char* pszTeamName) {
 		ULONG	ulIdx;
 		char	szColorizedBuffer[256];
@@ -222,6 +250,102 @@ namespace wbot {
 		return m_pPlayer;
 	}
 
+	void pre_remove_bot(CWootBot* pBot) {
+		// If this player is the displayplayer, revert the camera back to the console player's eyes.
+		if (pBot->m_pPlayer->mo && (pBot->m_pPlayer->mo->CheckLocalView(consoleplayer)) && (NETWORK_GetState() != NETSTATE_SERVER))
+		{
+			players[consoleplayer].camera = players[consoleplayer].mo;
+			S_UpdateSounds(players[consoleplayer].camera);
+			StatusBar->AttachToPlayer(&players[consoleplayer]);
+		}
+
+		// Remove the bot from the game.
+		playeringame[(pBot->m_pPlayer - players)] = false;
+
+		// Delete the actor attached to the player.
+		if (pBot->m_pPlayer->mo)
+			pBot->m_pPlayer->mo->Destroy();
+
+		// [RK] Remove the corpse's thinkers to prevent a crash later
+		if ((NETWORK_GetState() == NETSTATE_SINGLE || NETWORK_GetState() == NETSTATE_SINGLE_MULTIPLAYER) && pBot->m_pPlayer->mo) {
+			TThinkerIterator<APlayerPawn> it;
+			APlayerPawn* pawn, * next;
+
+			next = it.Next();
+			while ((pawn = next) != NULL)
+			{
+				next = it.Next();
+
+				if ((pawn->player == NULL) && (pBot->m_pPlayer->mo->id == pawn->id))
+					pawn->Destroy();
+			}
+		}
+
+		// Finally, fix some pointers.
+		// [BB] We have to delete the CSkullBot pointer before setting it to NULL.
+		//m_pPlayer->pWootBot = NULL;
+		pBot->m_pPlayer->mo = NULL;
+		pBot->m_pPlayer = NULL;
+	}
+
+	void simulate_bot(CWootBot* pBot) {
+		ticcmd_t* cmd = &pBot->m_pPlayer->cmd;
+
+		// Don't execute bot logic during demos, or if the console player is a client.
+		//if (NETWORK_InClientMode() || (demoplayback)) {
+		//	return;
+		//}
+
+		// Reset the bots keypresses.
+		memset(cmd, 0, sizeof(ticcmd_t));
+
+		// Don't run their script if the game is frozen.
+		if (level.flags2 & LEVEL2_FROZEN)
+			return;
+
+		// [BB] Don't run their script if they are frozen either.
+		if (pBot->m_pPlayer->cheats & CF_TOTALLYFROZEN)
+		{
+			// [BB] Don't freeze dead bots. Otherwise they can't respawn.
+			if (pBot->m_pPlayer->mo && pBot->m_pPlayer->mo->health > 0)
+				return;
+		}
+
+		player_t* plr = pBot->m_pPlayer;
+		APlayerPawn* actor = pBot->m_pPlayer->mo;
+		pBot->m_health = actor->health;
+		pBot->m_origin = FVector3(actor->x, actor->y, actor->z);
+		pBot->m_velocity = FVector3(actor->velx, actor->vely, actor->velz);
+		pBot->m_viewHeight = plr->viewheight;
+		pBot->m_useDistance = actor->UseRange >> FRACBITS;
+		pBot->m_radius = actor->radius;
+		pBot->m_isFrozen = plr->cheats & CF_FROZEN;
+		pBot->m_onGround = plr->onground;
+		pBot->m_pitch = actor->pitch;
+		pBot->m_weaponName = NULL;
+		pBot->pActor = actor;
+		if (plr->ReadyWeapon)
+			pBot->m_weaponName = plr->ReadyWeapon->GetClass()->TypeName.GetChars();
+
+		pBot->Think();
+
+		actor->pitch = pBot->m_pitch;
+		actor->angle = pBot->m_yaw;
+
+		// [AK] Don't allow the bot to move while frozen.
+		if ((pBot->m_pPlayer->cheats & CF_FROZEN) == false)
+		{
+			pBot->m_pPlayer->cmd.ucmd.forwardmove = static_cast<short>(pBot->m_lForwardMove << 8);
+			pBot->m_pPlayer->cmd.ucmd.sidemove = static_cast<short>(pBot->m_lSideMove << 8);
+		}
+		else
+		{
+			pBot->m_pPlayer->cmd.ucmd.forwardmove = pBot->m_pPlayer->cmd.ucmd.sidemove = 0;
+		}
+
+		pBot->m_pPlayer->cmd.ucmd.buttons |= pBot->m_lButtons;
+	}
+
 	APlayerPawn* get_player(player_t* plr) {
 		return plr->mo;
 	}
@@ -282,6 +406,10 @@ namespace wbot {
 		return plr->cheats & (CF_FROZEN | CF_TOTALLYFROZEN);
 	}
 	
+	CWootBot* get_player_bot(player_t* plr) {
+		return plr->bIsBot && plr->pWootBot ? plr->pWootBot : NULL;
+	}
+
 	void freeze_player(player_t* plr, bool frozen) {
 		if (frozen) {
 			plr->cheats |= CF_FROZEN;
@@ -292,6 +420,14 @@ namespace wbot {
 		else {
 			plr->cheats &= ~CF_FROZEN;
 		}
+	}
+
+	void give_all_weapons(player_t* plr) {
+		cht_Give(plr, "backpack");
+		cht_Give(plr, "weapons");
+		cht_Give(plr, "ammo");
+		cht_Give(plr, "keys");
+		cht_Give(plr, "armor");
 	}
 
 	void kill_actor(AActor* actor) {
@@ -414,7 +550,7 @@ namespace wbot {
 		TThinkerIterator<AActor> it;
 		AActor* actor;
 		while ((actor = it.Next())) {
-			if (IsPropBlocker(actor))
+			if (is_actor_immovable_solid_prop(actor))
 				propBlockers.push_back(actor);
 			//Printf("Prop '%s' %d\n", actor->GetClass()->TypeName.GetChars(), actor->health);
 		}
@@ -550,6 +686,10 @@ namespace wbot {
 		return level.time;
 	}
 
+	const char* get_map_name() {
+		return level.mapname;
+	}
+
 	bool TraceLine(FVector3 start, FVector3 end, bool ignoreMonsters, AActor* ignore, TraceResult* tr) {
 		FVector3 delta = end - start;
 		fixed_t dist = delta.Length();
@@ -573,6 +713,109 @@ namespace wbot {
 		}
 
 		return hit;
+	}
+
+	vector<TraceIsect> TraceIntersections(FVector2 start, FVector2 end) {
+		FVector2 delta = end - start;
+		fixed_t maxDist = delta.Length();
+		delta = delta.Unit() * FRACUNIT;
+
+		fixed_t StartX = start.X;
+		fixed_t StartY = start.Y;
+		fixed_t Vx = delta.X;
+		fixed_t Vy = delta.Y;
+
+		FPathTraverse path(start.X, start.Y, end.X, end.Y, PT_ADDLINES);
+		intercept_t* in;
+
+		vector<TraceIsect> intersections;
+
+		while ((in = path.Next())) {
+			line_t* wall = in->d.line;
+			fixed_t dist = FixedMul(maxDist, in->frac);
+
+			TraceIsect isect;
+			isect.line = &g_map.lines[wall - lines];
+			isect.pos = FVector2(StartX + FixedMul(Vx, dist), StartY + FixedMul(Vy, dist));
+			isect.fraction = in->frac;
+
+			if (wall->backsector == NULL) {
+				isect.sector = &g_map.sectors[in->d.line->frontsector - sectors];
+			}
+			else {
+				int lineside = P_PointOnLineSide(StartX, StartY, in->d.line);
+				sector_t* sec = lineside ? wall->backsector : wall->frontsector;
+				isect.sector = &g_map.sectors[sec - sectors];
+			}
+
+			intersections.push_back(isect);
+		}
+
+		return intersections;
+	}
+
+	bool TraceImpassable(FVector2 start, FVector2 end) {
+		FPathTraverse path(start.X, start.Y, end.X, end.Y, PT_ADDLINES);
+		intercept_t* in;
+
+		FVector2 delta = end - start;
+		fixed_t maxDist = delta.Length();
+		delta = delta.Unit() * FRACUNIT;
+
+		fixed_t StartX = start.X;
+		fixed_t StartY = start.Y;
+		fixed_t Vx = delta.X;
+		fixed_t Vy = delta.Y;
+
+		while ((in = path.Next())) {
+			line_t* line = in->d.line;
+
+			if (!line->backsector || (line->flags & ML_BLOCKING)) {
+				fixed_t dist = FixedMul(maxDist, in->frac);
+				FVector2 pos = FVector2(StartX + FixedMul(Vx, dist), StartY + FixedMul(Vy, dist));
+				sector_t* hitSector = R_PointInSubsector(pos.X, pos.Y)->sector;
+
+				if (hitSector != line->frontsector && hitSector != line->backsector) {
+					FVector2 lineStart(line->v1->x, line->v1->y);
+					FVector2 lineEnd(line->v2->x, line->v2->y);
+					if (!PointAlignedSegment(pos, lineStart, lineEnd))
+						continue; // bug in trace where lines in other sectors nowhere near the impact point are hit
+				}
+
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	bool TraceSectorEdge(FVector2 start, FVector2 end, FVector2& edge, MapLine** line) {
+		FPathTraverse path(start.X, start.Y, end.X, end.Y, PT_ADDLINES);
+		intercept_t* in = path.Next();
+
+		if (in) {
+			FVector2 delta = end - start;
+			fixed_t dist = FixedMul((fixed_t)delta.Length(), in->frac);
+			FVector2 dir = delta.Unit() * FRACUNIT;
+
+			fixed_t StartX = start.X;
+			fixed_t StartY = start.Y;
+			fixed_t Vx = dir.X;
+			fixed_t Vy = dir.Y;
+
+			if (line) {
+				*line = &g_map.lines[in->d.line - ::lines];
+			}
+
+			edge = FVector2(StartX + FixedMul(Vx, dist), StartY + FixedMul(Vy, dist));
+			return true;
+		}
+		else if (line) {
+			*line = NULL;
+		}
+
+		edge = end;
+		return false;
 	}
 
 	void* load_wad_lump(MapData* map, int id, int& len, int structSize) {
@@ -915,6 +1158,15 @@ namespace wbot {
 		return lineAction == WBOT_GOAL_ACTION_CROSS && (line->flags & ML_TWOSIDED);
 	}
 
+	bool is_impassable_line(int id) {
+		line_t& line = lines[id];
+		return !line.backsector || (line.flags & ML_BLOCKING);
+	}
+
+	MapLine* get_map_line_from_engine_line(line_t* line) {
+		return &g_map.lines[line - ::lines];
+	}
+
 	int get_linedef_goal_action(MapLine* line) {
 		if (!line)
 			return -1;
@@ -944,4 +1196,118 @@ namespace wbot {
 		AActor* actor = SelectTeleDest(get_line_arg(lineid, 0), get_line_arg(lineid, 1));
 		return actor ? FVector2(actor->x, actor->y) : FVector2(0, 0);
 	}
+
+	vector<MapLine*> get_crossed_lines(const FVector2& pos, int radius) {
+		FBoundingBox box(pos.X, pos.Y, radius);
+		FBlockLinesIterator it(box);
+		line_t* ld;
+
+		vector<MapLine*> lines;
+
+		while ((ld = it.Next())) {
+			if (box.Right() <= ld->bbox[BOXLEFT]
+				|| box.Left() >= ld->bbox[BOXRIGHT]
+				|| box.Top() <= ld->bbox[BOXBOTTOM]
+				|| box.Bottom() >= ld->bbox[BOXTOP]) {
+				continue;
+			}
+
+			if (box.BoxOnLineSide(ld) != -1)
+				continue; // doesn't cross the line
+
+			lines.push_back(&g_map.lines[ld - ::lines]);
+		}
+
+		return lines;
+	}
+
+	player_t* get_player_for_index(int i) {
+		if (!playeringame[i])
+			return NULL;
+
+		AActor* actor = players[i].mo;
+
+		return actor ? actor->player : NULL;
+	}
+
+	CWootBot* get_bot_for_index(int i) {
+		player_t* player = get_player_for_index(i);
+		return player && player->pWootBot ? player->pWootBot : NULL;
+	}
+
+	void set_actor_origin(AActor* actor, int x, int y, uint32_t angle, bool teleportFx) {
+		angle *= ANGLE_1;
+		fixed_t fx = x << FRACBITS;
+		fixed_t fy = y << FRACBITS;
+		fixed_t z = g_map.GetSector(fx, fy)->getFloorZ();
+		P_Teleport(actor, fx, fy, ONFLOORZ, angle, teleportFx, teleportFx, false, true, false);
+	}
+
+	void MakeVectors(uint32_t angle, FVector3& forward, FVector3& right) {
+		fixed_t fsine = finesine[angle >> ANGLETOFINESHIFT];
+		fixed_t fcosine = finecosine[angle >> ANGLETOFINESHIFT];
+		forward = FVector3(fcosine, fsine, 0);
+		right = FVector3(fsine, -fcosine, 0);
+	}
+
+	void SpawnBlood(FVector3 pos, int damage, AActor* owner) {
+		SERVERCOMMANDS_SpawnBlood(pos.X, pos.Y, pos.Z, 0, damage, owner);
+	}
+
+	void PrintNotification(const char* msg) {
+		SERVERCOMMANDS_Print(msg, PRINT_CHAT);
+	}
+
+	bool is_actor_immovable_solid_prop(AActor* actor) {
+		if (!(actor->flags & (MF_SOLID)))
+			return false;
+
+		if (actor->player || (actor->flags3 & (MF3_ISMONSTER | MF_SHOOTABLE)))
+			return false;
+
+		return true;
+	}
+
+	bool are_cheats_enabled() {
+		return sv_cheats;
+	}
+
+	void kill_all_shootables() {
+		TThinkerIterator<AActor> it;
+		AActor* actor;
+		while ((actor = it.Next())) {
+			if (!strcmp(actor->GetClass()->TypeName.GetChars(), "BossEye")) {
+				P_RemoveThing(actor);
+				continue;
+			}
+
+			if ((actor->flags & MF_SHOOTABLE) && !actor->player) {
+				if (!strcmp(actor->GetClass()->TypeName.GetChars(), "BossBrain")) {
+					continue;
+				}
+				P_DamageMobj(actor, actor, actor, actor->health * 2, FName());
+			}
+		}
+	}
+
+	const char* get_program_arg(const char* name) {
+		if (Args->CheckParm("-wbtest")) {
+			const char* value = Args->CheckValue("-wbtest");
+			return value ? value : "";
+		}
+
+		return NULL;
+	}
+
+	void exit_level() {
+		G_ExitLevel(0, false);
+	}
+
+	void change_level(const char* mapname, bool noIntermission) {
+		G_ChangeLevel(level.mapname, 0, noIntermission ? CHANGELEVEL_NOINTERMISSION : 0);
+	}
 };
+
+CCMD(addbotw) {
+	add_bot();
+}

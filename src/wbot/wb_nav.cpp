@@ -228,7 +228,7 @@ FVector2 NavSectorLink::GetJumpBackupPos(FVector2 targetPos, AActor* jumper) {
 		fixed_t sectorZ = isect.sector->getFloorZ();
 		int heightDiff = (sectorZ - startZ) >> FRACBITS;
 
-		if (IsImpassable(isect.line) || heightDiff > STEP_HEIGHT) {
+		if (isect.line->isImpassable() || heightDiff > STEP_HEIGHT) {
 			if (isects++ == 0) {
 				backupPos = isect.pos;
 			}

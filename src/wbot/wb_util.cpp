@@ -2,18 +2,18 @@
 #include "wb_bot.h"
 #include "wb_map.h"
 #include "wb_nav.h"
-#include "sv_commands.h"
-#include "m_bbox.h"
 
 #include <chrono>
 #include <float.h>
+#include <stdarg.h>
+#include <algorithm>
+#include <limits.h>
 
 using namespace std;
 using namespace std::chrono;
 using namespace wbot;
 
-char* VarArgs(const char* format, ...)
-{
+char* VarArgs(const char* format, ...) {
 	va_list		argptr;
 	static char		string[1024];
 
@@ -25,17 +25,11 @@ char* VarArgs(const char* format, ...)
 }
 
 player_t* getAnyPlayer() {
-	AActor* player = NULL;
-	for (int i = 0; i < MAXPLAYERS; i++)
-	{
-		if (!playeringame[i])
-			continue;
+	for (int i = 0; i < MAXPLAYERS; i++) {
+		player_t* plr = get_player_for_index(i);
 
-		AActor* actor = players[i].mo;
-		if (!actor || actor->player->bIsBot)
-			continue;
-
-		return actor->player;
+		if (plr)
+			return plr;
 	}
 
 	return NULL;
@@ -203,13 +197,6 @@ FSegment2 LineSegmentOverlap(const FVector2& a1, const FVector2& a2, const FVect
 	return result;
 }
 
-void set_ori(AActor* actor, int x, int y, uint32_t angle) {
-	fixed_t fx = x << FRACBITS;
-	fixed_t fy = y << FRACBITS;
-	fixed_t z = g_map.GetSector(fx, fy)->getFloorZ();
-	P_Teleport(actor, fx, fy, ONFLOORZ, angle, false, false, false, true, false);
-}
-
 float DistanceToLine(const FVector2& p, const FVector2& a, const FVector2& b) {
 	FVector2 ab = b - a;
     FVector2 ap = p - a;
@@ -228,19 +215,8 @@ fixed_t BoxRadiusForDir(const FVector2& dir, fixed_t radius)
 }
 
 bool IsBoxWallClipped(const FVector2& pos, fixed_t radius) {
-	FBoundingBox box(pos.X, pos.Y, radius);
-	FBlockLinesIterator it(box);
-	line_t* ld;
-
-	while ((ld = it.Next())) {
-		if (box.Right() <= ld->bbox[BOXLEFT]
-			|| box.Left() >= ld->bbox[BOXRIGHT]
-			|| box.Top() <= ld->bbox[BOXBOTTOM]
-			|| box.Bottom() >= ld->bbox[BOXTOP]) {
-			continue;
-		}
-
-		if (box.BoxOnLineSide(ld) == -1 && (!ld->backsector || (ld->flags & ML_BLOCKING)))
+	for (MapLine* ld : get_crossed_lines(pos, radius)) {
+		if (ld->isImpassable())
 			return true;  // crosses an impassable line
 	}
 
@@ -248,42 +224,25 @@ bool IsBoxWallClipped(const FVector2& pos, fixed_t radius) {
 }
 
 FVector2 GetFloorPosition(const FVector3& pos, fixed_t radius) {
-	FBoundingBox box(pos.X, pos.Y, radius);
-	FBlockLinesIterator it(box);
-	line_t* ld;
-
 	fixed_t bestDist = INT_MAX;
 
 	FVector2 bestFloorPoint = pos;
 
-	while ((ld = it.Next())) {
-
-		if (box.Right() <= ld->bbox[BOXLEFT]
-			|| box.Left() >= ld->bbox[BOXRIGHT]
-			|| box.Top() <= ld->bbox[BOXBOTTOM]
-			|| box.Bottom() >= ld->bbox[BOXTOP]) {
-			continue;
-		}
-
-		if (box.BoxOnLineSide(ld) != -1)
-			continue; // doesn't cross the line
-
-		if (!ld->backsector || (ld->flags & ML_BLOCKING))
+	for (MapLine* ld : get_crossed_lines(pos, radius)) {
+		if (ld->isImpassable())
 			return pos; // crosses an impassable line. stuck.
 
-		fixed_t frontFloor = ld->frontsector->floorplane.Zat0();
-		fixed_t backFloor = ld->backsector->floorplane.Zat0();
+		fixed_t frontFloor = ld->frontsector->getFloorZ();
+		fixed_t backFloor = ld->backsector->getFloorZ();
 
-		if (pos.Z == backFloor || pos.Z == frontFloor) {
-			MapLine& line = g_map.lines[ld - lines];
-			
+		if (pos.Z == backFloor || pos.Z == frontFloor) {			
 			// find a position just beyond this line
-			FVector2 moveDir = pos.Z == backFloor ? line.normal() * -1 : line.normal();
-			FVector2 floorPoint = line.start() + moveDir * FRACUNIT;
-			fixed_t dist = fabs(DistanceToLine(pos, floorPoint, floorPoint + line.dir() * FRACUNIT));
+			FVector2 moveDir = pos.Z == backFloor ? ld->normal() * -1 : ld->normal();
+			FVector2 floorPoint = ld->start() + moveDir * FRACUNIT;
+			fixed_t dist = fabs(DistanceToLine(pos, floorPoint, floorPoint + ld->dir() * FRACUNIT));
 
 			if (dist < bestDist) {
-				fixed_t asd = fabs(DistanceToLine(pos, floorPoint, floorPoint + line.dir() * FRACUNIT));
+				fixed_t asd = fabs(DistanceToLine(pos, floorPoint, floorPoint + ld->dir() * FRACUNIT));
 				bestDist = dist;
 				bestFloorPoint = pos + moveDir * dist;
 			}
@@ -294,33 +253,19 @@ FVector2 GetFloorPosition(const FVector3& pos, fixed_t radius) {
 }
 
 bool IsBoxClipped(const FVector3& pos, fixed_t radius, fixed_t height) {
-	FBoundingBox box(pos.X, pos.Y, radius);
-	FBlockLinesIterator it(box);
-	line_t* ld;
-
 	fixed_t x = pos.X;
 	fixed_t y = pos.Y;
 	fixed_t z = pos.Z;
 	fixed_t topZ = z + height;
 
-	while ((ld = it.Next())) {
-		if (box.Right() <= ld->bbox[BOXLEFT]
-			|| box.Left() >= ld->bbox[BOXRIGHT]
-			|| box.Top() <= ld->bbox[BOXBOTTOM]
-			|| box.Bottom() >= ld->bbox[BOXTOP]) {
-			continue;
-		}
-
-		if (box.BoxOnLineSide(ld) != -1)
-			continue; // doesn't cross the line
-
-		if (!ld->backsector || (ld->flags & ML_BLOCKING))
+	for (MapLine* ld : get_crossed_lines(pos, radius)) {
+		if (ld->isImpassable())
 			return true; // crosses an impassable line
 		
-		fixed_t frontCeil = ld->frontsector->ceilingplane.ZatPoint(x, y);
-		fixed_t frontFloor = ld->frontsector->floorplane.ZatPoint(x, y);
-		fixed_t backCeil = ld->backsector->ceilingplane.ZatPoint(x, y);
-		fixed_t backFloor = ld->backsector->floorplane.ZatPoint(x, y);
+		fixed_t frontCeil = ld->frontsector->getCeilZ();
+		fixed_t frontFloor = ld->frontsector->getFloorZ();
+		fixed_t backCeil = ld->backsector->getCeilZ();
+		fixed_t backFloor = ld->backsector->getFloorZ();
 
 		if (z < backFloor || z < frontFloor)
 			return true; // clipped into the floor
@@ -334,41 +279,26 @@ bool IsBoxClipped(const FVector3& pos, fixed_t radius, fixed_t height) {
 
 std::vector<MapSector*> GetBoxClipSectors(const FVector3& pos, fixed_t radius, fixed_t height) {
 	std::vector<MapSector*> clipSectors;
-	
-	FBoundingBox box(pos.X, pos.Y, radius);
-	FBlockLinesIterator it(box);
-	line_t* ld;
 
 	fixed_t x = pos.X;
 	fixed_t y = pos.Y;
 	fixed_t z = pos.Z;
 	fixed_t topZ = z + height;
 
-	while ((ld = it.Next())) {
-
-		if (box.Right() <= ld->bbox[BOXLEFT]
-			|| box.Left() >= ld->bbox[BOXRIGHT]
-			|| box.Top() <= ld->bbox[BOXBOTTOM]
-			|| box.Bottom() >= ld->bbox[BOXTOP]) {
-			continue;
-		}
-
-		if (box.BoxOnLineSide(ld) != -1)
-			continue; // doesn't cross the line
-
-		if (!ld->backsector || (ld->flags & ML_BLOCKING))
+	for (MapLine* ld : get_crossed_lines(pos, radius)) {
+		if (ld->isImpassable())
 			continue; // crosses an impassable line, no sector to trigger
 
-		fixed_t frontCeil = ld->frontsector->ceilingplane.ZatPoint(x, y);
-		fixed_t frontFloor = ld->frontsector->floorplane.ZatPoint(x, y);
-		fixed_t backCeil = ld->backsector->ceilingplane.ZatPoint(x, y);
-		fixed_t backFloor = ld->backsector->floorplane.ZatPoint(x, y);
+		fixed_t frontCeil = ld->frontsector->getCeilZ();
+		fixed_t frontFloor = ld->frontsector->getFloorZ();
+		fixed_t backCeil = ld->backsector->getCeilZ();
+		fixed_t backFloor = ld->backsector->getFloorZ();
 
 		if (z < backFloor || topZ > backCeil)
-			clipSectors.push_back(&g_map.sectors[ld->backsector - sectors]);
+			clipSectors.push_back(ld->backsector);
 
 		if (z < frontFloor || topZ > frontCeil)
-			clipSectors.push_back(&g_map.sectors[ld->frontsector - sectors]);
+			clipSectors.push_back(ld->frontsector);
 	}
 
 	return clipSectors;
@@ -450,17 +380,11 @@ bool CircleIntersectsSegment(const FVector2& center, float radius, const FVector
 		return (center - a).LengthSquared() <= r2;
 
 	float t = DotProduct(center - a, ab) / len2;
-	t = clamp(t, 0.0f, 1.0f);
+	if (t < 0) t = 0;
+	if (t > 1) t = 1;
 
 	FVector2 closest = a + ab * t;
 	return (center - closest).LengthSquared() <= r2;
-}
-
-void MakeVectors(uint32_t angle, FVector3& forward, FVector3& right) {
-	fixed_t fsine = finesine[angle >> ANGLETOFINESHIFT];
-	fixed_t fcosine = finecosine[angle >> ANGLETOFINESHIFT];
-	forward = FVector3(fcosine, fsine, 0);
-	right = FVector3(fsine, -fcosine, 0);
 }
 
 float DotProduct(const FVector2& a, const FVector2& b)
@@ -501,7 +425,7 @@ int draw_debug_line(FVector3 start, FVector3 end, AActor* actor) {
 		if (i == spawns - 1) {
 			pos = end;
 		}
-		SERVERCOMMANDS_SpawnBlood((fixed_t)pos.X, (fixed_t)pos.Y, (fixed_t)pos.Z, 0, 1, actor);
+		SpawnBlood(pos, 1, actor);
 	}
 
 	return i;
@@ -527,131 +451,6 @@ bool TraceRadius(FVector3 start, FVector3 end, fixed_t radius, bool ignoreMonste
 	}
 
 	return minFrac < 1.0f;
-}
-
-vector<TraceIsect> TraceIntersections(FVector2 start, FVector2 end) {
-	FVector2 delta = end - start;
-	fixed_t maxDist = delta.Length();
-	delta = delta.Unit() * FRACUNIT;
-
-	fixed_t StartX = start.X;
-	fixed_t StartY = start.Y;
-	fixed_t Vx = delta.X;
-	fixed_t Vy = delta.Y;
-
-	FPathTraverse path(start.X, start.Y, end.X, end.Y, PT_ADDLINES);
-	intercept_t* in;
-
-	vector<TraceIsect> intersections;
-
-	while ((in = path.Next())) {
-		line_t* wall = in->d.line;
-		fixed_t dist = FixedMul(maxDist, in->frac);
-
-		TraceIsect isect;
-		isect.line = &g_map.lines[wall - lines];
-		isect.pos = FVector2(StartX + FixedMul(Vx, dist), StartY + FixedMul(Vy, dist));
-		isect.fraction = in->frac;
-
-		if (wall->backsector == NULL) {
-			isect.sector = &g_map.sectors[in->d.line->frontsector - sectors];
-		}
-		else {
-			int lineside = P_PointOnLineSide(StartX, StartY, in->d.line);
-			sector_t* sec = lineside ? wall->backsector : wall->frontsector;
-			isect.sector = &g_map.sectors[sec - sectors];
-		}
-
-		intersections.push_back(isect);
-	}
-
-	return intersections;
-}
-
-bool TraceImpassable(FVector2 start, FVector2 end) {
-	FPathTraverse path(start.X, start.Y, end.X, end.Y, PT_ADDLINES);
-	intercept_t* in;
-
-	FVector2 delta = end - start;
-	fixed_t maxDist = delta.Length();
-	delta = delta.Unit() * FRACUNIT;
-
-	fixed_t StartX = start.X;
-	fixed_t StartY = start.Y;
-	fixed_t Vx = delta.X;
-	fixed_t Vy = delta.Y;
-
-	while ((in = path.Next())) {
-		line_t* line = in->d.line;
-
-		if (!line->backsector || (line->flags & ML_BLOCKING)) {
-			fixed_t dist = FixedMul(maxDist, in->frac);
-			FVector2 pos = FVector2(StartX + FixedMul(Vx, dist), StartY + FixedMul(Vy, dist));
-			sector_t* hitSector = R_PointInSubsector(pos.X, pos.Y)->sector;
-
-			if (hitSector != line->frontsector && hitSector != line->backsector) {
-				FVector2 lineStart(line->v1->x, line->v1->y);
-				FVector2 lineEnd(line->v2->x, line->v2->y);
-				if (!PointAlignedSegment(pos, lineStart, lineEnd))
-					continue; // bug in trace where lines in other sectors nowhere near the impact point are hit
-			}
-
-			return true;
-		}
-	}
-
-	return false;
-}
-
-bool TraceSectorEdge(FVector2 start, FVector2 end, FVector2& edge, MapLine** line) {
-	FPathTraverse path(start.X, start.Y, end.X, end.Y, PT_ADDLINES);
-	intercept_t* in = path.Next();
-
-	if (in) {
-		FVector2 delta = end - start;
-		fixed_t dist = FixedMul((fixed_t)delta.Length(), in->frac);
-		FVector2 dir = delta.Unit() * FRACUNIT;
-
-		fixed_t StartX = start.X;
-		fixed_t StartY = start.Y;
-		fixed_t Vx = dir.X;
-		fixed_t Vy = dir.Y;
-
-		if (line) {
-			*line = &g_map.lines[in->d.line - ::lines];
-		}
-
-		edge = FVector2(StartX + FixedMul(Vx, dist), StartY + FixedMul(Vy, dist));
-		return true;
-	}
-	else if (line) {
-		*line = NULL;
-	}
-
-	edge = end;
-	return false;
-}
-
-bool IsImpassable(MapLine* line) {
-	return !line->backsector || (line->flags & ML_BLOCKING);
-}
-
-bool IsPropBlocker(AActor* actor) {
-	if (!(actor->flags & (MF_SOLID)))
-		return false;
-
-	if (actor->player || (actor->flags3 & (MF3_ISMONSTER | MF_SHOOTABLE)))
-		return false;
-
-	return true;
-}
-
-void SpawnBlood(FVector3 pos, int damage, AActor* owner) {
-	SERVERCOMMANDS_SpawnBlood(pos.X, pos.Y, pos.Z, 0, damage, owner);
-}
-
-void PrintNotification(const char* msg) {
-	SERVERCOMMANDS_Print(msg, PRINT_CHAT);
 }
 
 std::vector<int> debugv2(const FVector2& v) {

@@ -1,5 +1,5 @@
 #pragma once
-// Engine interface for accessing engine data without including any port-specific headers
+// Engine interface - for accessing engine data without including any port-specific headers
 
 #include <vector>
 #include <stdint.h>
@@ -9,6 +9,7 @@ class AActor;
 class APlayerPawn;
 class player_t;
 class CWootBot;
+struct line_t;
 
 #define ZANDRONUM_BUILD
 
@@ -18,6 +19,8 @@ class CWootBot;
 #define IN_USE (1 << 1)
 #define IN_JUMP (1 << 2)
 #define IN_DUCK (1 << 3)
+
+#define MAXPLAYERS 64
 
 #endif
 
@@ -143,10 +146,24 @@ namespace wbot {
 		TraceHitType hitType;
 	};
 
+	struct TraceIsect {
+		wbot::MapLine* line;
+		wbot::MapSector* sector;
+		FVector2 pos;
+		int fraction;
+	};
+
+
 	void init_eiface();
 
-	player_t* add_bot(CWootBot* pBot, int ulPlayerNum, const char* color, const char* colorSet,
+	void add_bot();
+
+	player_t* init_bot(CWootBot* pBot, int ulPlayerNum, const char* color, const char* colorSet,
 		const char* skin, const char* pszTeamName);
+
+	void pre_remove_bot(CWootBot* pBot);
+
+	void simulate_bot(CWootBot* pBot);
 
 	APlayerPawn* get_player(player_t* plr);
 
@@ -174,7 +191,11 @@ namespace wbot {
 
 	bool is_player_frozen(player_t* plr);
 
+	CWootBot* get_player_bot(player_t* plr);
+
 	void freeze_player(player_t* plr, bool frozen);
+
+	void give_all_weapons(player_t* plr);
 
 	void kill_actor(AActor* actor);
 
@@ -219,7 +240,18 @@ namespace wbot {
 
 	int get_game_tics();
 
+	const char* get_map_name();
+
 	bool TraceLine(FVector3 start, FVector3 end, bool ignoreMonsters, AActor* ignore, TraceResult* tr);
+
+	// returns all walls/sectors intersected by the given line
+	std::vector<TraceIsect> TraceIntersections(FVector2 start, FVector2 end);
+
+	// returns true if the trace intersects any impassable walls
+	bool TraceImpassable(FVector2 start, FVector2 end);
+
+	// trace until the first intersected sector edge
+	bool TraceSectorEdge(FVector2 start, FVector2 end, FVector2& edge, wbot::MapLine** line);
 
 	MapLumps load_wad_lump_data();
 
@@ -256,8 +288,41 @@ namespace wbot {
 
 	bool is_double_sided_cross_line(int id);
 
+	bool is_impassable_line(int id);
+
+	MapLine* get_map_line_from_engine_line(line_t* line);
+
 	// how to trigger the given line
 	int get_linedef_goal_action(MapLine* line);
 
 	FVector2 get_tele_dest(int lineid);
+
+	// get lines that the given box intersects
+	std::vector<MapLine*> get_crossed_lines(const FVector2& pos, int radius);
+
+	player_t* get_player_for_index(int i); // may be a real player or a bot
+
+	CWootBot* get_bot_for_index(int i);
+
+	// angle is given in degrees
+	void set_actor_origin(AActor* actor, int x, int y, uint32_t angle, bool teleportFx);
+
+	void MakeVectors(uint32_t angle, FVector3& forward, FVector3& right);
+
+	void SpawnBlood(FVector3 pos, int damage, AActor* owner);
+
+	void PrintNotification(const char* msg);
+
+	bool is_actor_immovable_solid_prop(AActor* actor);
+
+	bool are_cheats_enabled();
+
+	void kill_all_shootables();
+
+	// returns NUL for a missing arg, empty string for no value, or the argument value
+	const char* get_program_arg(const char* name);
+
+	void exit_level();
+
+	void change_level(const char* mapname, bool noIntermission);
 }

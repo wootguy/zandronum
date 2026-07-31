@@ -64,6 +64,7 @@ namespace wbot {
 		bool isTeleport();
 		bool isLockedDoor();
 		bool isLevelExit();
+		bool isImpassable();
 		bool canPlayerActivate();
 		FVector2 getTeleportDest();
 	};

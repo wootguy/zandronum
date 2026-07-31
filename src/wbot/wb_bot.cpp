@@ -14,7 +14,7 @@ using namespace std;
 using namespace wbot;
 
 CWootBot::CWootBot(const char* pszName, const char* pszTeamName, ULONG ulPlayerNum)
-	: m_pPlayer(add_bot(this, ulPlayerNum, "", "", "", pszTeamName)), m_routeController(this), m_combatController(this) {
+	: m_pPlayer(init_bot(this, ulPlayerNum, "", "", "", pszTeamName)), m_routeController(this), m_combatController(this) {
 
 	m_fov = 180;
 	m_debug = true;

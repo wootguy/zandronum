@@ -2,15 +2,6 @@
 #include "wb_map.h"
 #include <vector>
 
-struct FTraceResults;
-
-struct TraceIsect {
-	wbot::MapLine* line;
-	wbot::MapSector* sector;
-	FVector2 pos;
-	fixed_t fraction;
-};
-
 char* VarArgs(const char* format, ...);
 
 player_t* getAnyPlayer();
@@ -25,8 +16,6 @@ FVector2 ClosestPointOnSegment(const FVector2& p, const FVector2& a, const FVect
 
 // returns an empty segment if no overlap
 wbot::FSegment2 LineSegmentOverlap(const FVector2& a1, const FVector2& a2, const FVector2& b1, const FVector2& b2);
-
-void set_ori(AActor* actor, int x, int y, uint32_t angle);
 
 float DistanceToLine(const FVector2& p, const FVector2& a, const FVector2& b);
 
@@ -60,8 +49,6 @@ bool CircleIntersectsSegment(const FVector2& center, float radius, const FVector
 
 void ExtendSegment(FVector2& a, FVector2& b, float amount);
 
-void MakeVectors(uint32_t angle, FVector3& forward, FVector3& right);
-
 float DotProduct(const FVector2& a, const FVector2& b);
 
 float CrossProduct(const FVector2& a, const FVector2& b);
@@ -71,23 +58,6 @@ uint64_t getEpochMillis();
 int draw_debug_line(FVector3 start, FVector3 end, AActor* actor);
 
 bool TraceRadius(FVector3 start, FVector3 end, fixed_t radius, bool ignoreMonsters=true, AActor* ignoreEnt=NULL, wbot::TraceResult* tr=NULL);
-
-// returns all walls/sectors intersected by the given line
-std::vector<TraceIsect> TraceIntersections(FVector2 start, FVector2 end);
-
-// returns true if the trace intersects any impassable walls
-bool TraceImpassable(FVector2 start, FVector2 end);
-
-// trace until the first intersected sector edge
-bool TraceSectorEdge(FVector2 start, FVector2 end, FVector2& edge, wbot::MapLine** line);
-
-bool IsImpassable(wbot::MapLine* line);
-
-bool IsPropBlocker(AActor* actor);
-
-void SpawnBlood(FVector3 pos, int damage, AActor* owner);
-
-void PrintNotification(const char* msg);
 
 std::vector<int> debugv2(const FVector2& v);
 

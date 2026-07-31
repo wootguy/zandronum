@@ -3,11 +3,7 @@
 #include "wb_map.h"
 #include "wb_nav.h"
 #include "wb_eiface.h"
-#include "c_dispatch.h"
-#include "m_cheat.h"
-#include "sbar.h"
-#include "sv_commands.h"
-#include "deathmatch.h"
+#include "wb_hooks.h"
 #include <string>
 
 using namespace std;
@@ -43,63 +39,51 @@ TestState g_wb_test_state;
 // max tics a level can last before its considered stuck
 #define MAX_TEST_TICS 21000 // 10 minutes
 
-void wbot_handle_line_activation(line_t* line, AActor* activator) {
-	MapLine& mapline = g_map.lines[line - lines];
+void wbot_handle_line_activation(line_t* eline, AActor* activator) {
+	MapLine* line = get_map_line_from_engine_line(eline);
 
-	if (!line->special) {
+	if (!line->special()) {
 		// line can no longer be activated. Remove trigger from possibly affected sectors
-		int tag = line->args[0];
-		for (int i = 0; i < numsectors; i++) {
-			if (sectors[i].tag == tag)
+		int tag = line->getArg(0);
+		for (int i = 0; i < g_map.numsectors; i++) {
+			if (g_map.sectors[i].tag == tag)
 				g_map.remove_invalid_goals(i);
 		}
 
 		if (line->backsector)
-			g_map.remove_invalid_goals(line->backsector - sectors);
+			g_map.remove_invalid_goals(line->backsector->id);
 		if (line->frontsector)
-			g_map.remove_invalid_goals(line->frontsector - sectors);
+			g_map.remove_invalid_goals(line->frontsector->id);
 	}
 
 	for (int i = 0; i < MAXPLAYERS; i++) {
-		AActor* player = players[i].mo;
-		if (!playeringame[i] || !player || !player->player->bIsBot)
+		player_t* player = get_player_for_index(i);
+
+		if (!player)
 			continue;
 
-		CWootBot* bot = player->player->pWootBot;
-		bot->HandleLineActivation(&mapline, activator);
+		CWootBot* bot = get_player_bot(player);
+		if (bot)
+			bot->HandleLineActivation(line, activator);
 	}
 }
 
-void kill_all_shootables() {
-	TThinkerIterator<AActor> it;
-	AActor* actor;
-	while ((actor = it.Next())) {
-		if (!strcmp(actor->GetClass()->TypeName.GetChars(), "BossEye")) {
-			P_RemoveThing(actor);
-			continue;
-		}
-
-		if ((actor->flags & MF_SHOOTABLE) && !actor->player) {
-			if (!strcmp(actor->GetClass()->TypeName.GetChars(), "BossBrain")) {
-				continue;
-			}
-			P_DamageMobj(actor, actor, actor, actor->health * 2, FName());
-		}
-	}
+void kill_everything() {
+	kill_all_shootables();
 
 	// do it again a second later to kill lost souls that spawn from pain elementals
-	g_kill_all_shootables_again_tick = level.time + 35;
+	g_kill_all_shootables_again_tick = get_game_tics() + 35;
 }
 
 void wbot_run_tests() {
 	kill_all_shootables();
 
 	for (int i = 0; i < MAXPLAYERS; i++) {
-		AActor* player = players[i].mo;
-		if (!playeringame[i] || !player || !player->player->bIsBot)
+		CWootBot* bot = get_bot_for_index(i);
+
+		if (!bot)
 			continue;
 
-		CWootBot* bot = (CWootBot*)player->player->pWootBot;
 		bot->Reset();
 		bot->m_autoWinMap = true;
 		bot->m_debug = false;
@@ -108,23 +92,20 @@ void wbot_run_tests() {
 	g_wb_test_state = TestState();
 	g_wbot_test_mode = true;
 	g_GameSpeed = 1000.0f;
-	g_wb_test_state.startMap = level.mapname;
+	g_wb_test_state.startMap = get_map_name();
 	g_wb_test_state.startTime = getEpochMillis();
 }
 
 void wbot_init() {
 	static bool wbot_init_done = false;
 	if (!wbot_init_done) {
-		srand((unsigned int)time(NULL));
+		const char* testMap = get_program_arg("-wbtest");
+		if (testMap) {
+			add_bot();
 
-		int anum = Args->CheckParm("-wbtest");
-		if (anum) {
-			const char* testMap = Args->CheckValue("-wbtest");
-			new CWootBot(NULL, NULL, BOTS_FindFreePlayerSlot());
-
-			if (!testMap) {
+			if (!testMap[0]) {
 				wbot_run_tests(); // run all tests
-				g_wb_test_state.debugFailed = Args->CheckParm("-wbd");
+				g_wb_test_state.debugFailed = get_program_arg("-wbd");
 			}
 		}
 
@@ -133,7 +114,7 @@ void wbot_init() {
 }
 
 void wbot_next_test() {
-	if (g_wbot_test_mode && g_wb_test_state.startMap == string(level.mapname)) {
+	if (g_wbot_test_mode && g_wb_test_state.startMap == string(get_map_name())) {
 		g_wbot_test_mode = false;
 		g_GameSpeed = 1.0f;
 		uint32_t totalTime = getEpochMillis() - g_wb_test_state.startTime;
@@ -141,9 +122,9 @@ void wbot_next_test() {
 		uint32_t total_gen_time = 0;
 		uint32_t total_solve_time = 0;
 		int numPass = 0;
-		Printf("\n---------------------\nTESTS FINISHED\n---------------------\n");
+		gprintf("\n---------------------\nTESTS FINISHED\n---------------------\n");
 		for (TestResult& result : g_wb_test_state.results) {
-			Printf("  %-8s = %4dms gen,   %4dms solve,   %4.1f ktics  %s\n", result.mapname.c_str(),
+			gprintf("  %-8s = %4dms gen,   %4dms solve,   %4.1f ktics  %s\n", result.mapname.c_str(),
 				result.gen_nav_millis, result.solve_millis, result.tics / 1000.0f,
 				result.success ? "PASS" : "FAIL <--");
 			numPass += result.success;
@@ -151,16 +132,16 @@ void wbot_next_test() {
 			total_solve_time += result.solve_millis;
 		}
 
-		Printf("\n%d / %d tests passed\n\n", numPass, g_wb_test_state.results.size());
+		gprintf("\n%d / %d tests passed\n\n", numPass, g_wb_test_state.results.size());
 
-		Printf("Total time:  %d ms\n", totalTime);
-		Printf("navmesh:     %d ms\n", total_gen_time);
-		Printf("solver:      %d ms\n", total_solve_time);
-		Printf("tics:        %d ktics\n", g_wb_test_state.totalTics / 1000);
-		Printf("---------------------\n");
+		gprintf("Total time:  %d ms\n", totalTime);
+		gprintf("navmesh:     %d ms\n", total_gen_time);
+		gprintf("solver:      %d ms\n", total_solve_time);
+		gprintf("tics:        %d ktics\n", g_wb_test_state.totalTics / 1000);
+		gprintf("---------------------\n");
 
 		if (g_windows_console_mode) {
-			printf("\nPress Enter to exit...");
+			gprintf("\nPress Enter to exit...");
 			getchar(); // keep console open to see test results
 		}
 
@@ -181,11 +162,11 @@ void wbot_map_init() {
 	g_wb_test_state.levelGenMillis = getEpochMillis() - nav_gen_start;
 
 	for (int i = 0; i < MAXPLAYERS; i++) {
-		AActor* player = players[i].mo;
-		if (!playeringame[i] || !player || !player->player->bIsBot)
+		CWootBot* bot = get_bot_for_index(i);
+
+		if (!bot)
 			continue;
 
-		CWootBot* bot = player->player->pWootBot;
 		bot->Reset();
 	}
 
@@ -199,18 +180,18 @@ void wbot_map_init() {
 void wbot_map_exit() {
 	if (g_wbot_test_mode) {
 		int sz = g_wb_test_state.results.size();
-		if (sz > 0 && level.mapname == g_wb_test_state.results[sz - 1].mapname)
+		if (sz > 0 && get_map_name() == g_wb_test_state.results[sz - 1].mapname)
 			return; // level exits are sometimes triggered multiple times
 
-		int testTime = level.time;
+		int testTime = get_game_tics();
 		uint32_t millis = getEpochMillis() - g_wb_test_state.levelStartTime;
-		g_wb_test_state.totalTics += level.time;
-		Printf("Finished level in %d tics (%d ms)\n", testTime, millis);
+		g_wb_test_state.totalTics += get_game_tics();
+		gprintf("Finished level in %d tics (%d ms)\n", testTime, millis);
 
 		TestResult result;
-		result.mapname = level.mapname;
+		result.mapname = get_map_name();
 		result.success = !g_wb_test_state.currentFailed;
-		result.tics = level.time;
+		result.tics = get_game_tics();
 		result.solve_millis = millis;
 		result.gen_nav_millis = g_wb_test_state.levelGenMillis;
 		g_wb_test_state.results.push_back(result);
@@ -219,29 +200,8 @@ void wbot_map_exit() {
 	}
 }
 
-void wbot_add_bot() {
-	if (gamestate != GS_LEVEL)
-		return;
-
-	// Don't allow bots in network mode, unless we're the host.
-	if (NETWORK_InClientMode())
-	{
-		Printf("Only the host can add bots!\n");
-		return;
-	}
-
-	ULONG ulPlayerIdx = BOTS_FindFreePlayerSlot();
-	if (ulPlayerIdx == MAXPLAYERS)
-	{
-		Printf("The maximum number of players/bots has been reached.\n");
-		return;
-	}
-
-	new CWootBot(NULL, NULL, ulPlayerIdx);
-}
-
 void wbot_abort_test() {
-	Printf("---------------------\nTEST FAILED\n---------------------\n");
+	gprintf("---------------------\nTEST FAILED\n---------------------\n");
 
 	g_wb_test_state.currentFailed = true;
 
@@ -250,43 +210,46 @@ void wbot_abort_test() {
 		g_wbot_test_mode = false;
 
 		for (int i = 0; i < MAXPLAYERS; i++) {
-			AActor* player = players[i].mo;
-			if (!playeringame[i] || !player || !player->player->bIsBot)
+			CWootBot* bot = get_bot_for_index(i);
+
+			if (!bot)
 				continue;
 
-			CWootBot* bot = player->player->pWootBot;
 			bot->m_debug = true;
 		}
 
-		Printf("\nFailed after %d tics\n", level.time);
-		Printf("\nJoin the server to see what the bot is stuck on.\n");
+		gprintf("\nFailed after %d tics\n", get_game_tics());
+		gprintf("\nJoin the server to see what the bot is stuck on.\n");
 	}
 	else {
-		G_ExitLevel(0, false);
+		exit_level();
 	}
 }
 
 void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
-	if (!sv_cheats)
+	if (!are_cheats_enabled())
 		return;
 
 	// route test case
 	if (!strcmp(msg, "r")) {
-		kill_all_shootables();
+		kill_everything();
 
 		for (int i = 0; i < MAXPLAYERS; i++) {
-			AActor* player = players[i].mo;
-			if (!playeringame[i] || !player)
+			player_t* player = get_player_for_index(i);
+			CWootBot* bot = get_bot_for_index(i);
+
+			if (!player)
 				continue;
 
-			if (player->player->bIsBot)	set_ori(player, -1771, -1531, ANGLE_1 * 0);
-			else						set_ori(player, -1630, -1498, ANGLE_1 * 110);
+			AActor* actor = (AActor*)get_player(player);
 
-			if (player->player->bIsBot) {
-				CWootBot* bot = player->player->pWootBot;
+			if (bot)	set_actor_origin(actor, -1771, -1531, 0, false);
+			else		set_actor_origin(actor, -1630, -1498, 110, false);
+
+			if (bot) {
 				bot->Reset();
 				bot->m_followPlayer = true;
-				player->player->cheats &= ~CF_FROZEN;
+				freeze_player(player, false);
 				//bot->m_routeController.m_freezeOnGoalFail = true;
 				//bot->m_speedMult = 0.6f;
 			}
@@ -295,19 +258,21 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 
 	// change game speed
 	if (strstr(msg, "s") == msg) {
-		g_GameSpeed = clamp((float)atof(msg + 2), 1.0f, 16.0f);
+		g_GameSpeed = atof(msg + 2);
+		if (g_GameSpeed < 1.0f) g_GameSpeed = 1.0f;
+		if (g_GameSpeed > 16.0f) g_GameSpeed = 16.0f;
 	}
 
 	// win the level
 	if (!strcmp(msg, "w")) {
-		kill_all_shootables();
+		kill_everything();
 
 		for (int i = 0; i < MAXPLAYERS; i++) {
-			AActor* player = players[i].mo;
-			if (!playeringame[i] || !player || !player->player->bIsBot)
-				continue;
+			CWootBot* bot = get_bot_for_index(i);
 
-			CWootBot* bot = player->player->pWootBot;
+			if (!bot)
+				continue;
+			
 			//set_ori(player, 3211, -131, ANGLE_1 * 40);
 			bot->PushLevelEndGoal();
 			bot->m_autoWinMap = true;
@@ -323,17 +288,17 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 	if (strstr(msg, "use ") == msg) {
 		int id = atoi(msg + 4);
 
-		if (id >= 0 && id < numlines) {
+		if (id >= 0 && id < g_map.numlines) {
 			MapLine* line = &g_map.lines[id];
 
 			BotGoal useGoal(get_linedef_goal_action(line), id);
 
 			for (int i = 0; i < MAXPLAYERS; i++) {
-				AActor* player = players[i].mo;
-				if (!playeringame[i] || !player || !player->player->bIsBot)
+				CWootBot* bot = get_bot_for_index(i);
+
+				if (!bot)
 					continue;
 
-				CWootBot* bot = player->player->pWootBot;
 				bot->PushGoal(useGoal, NULL);
 			}
 		}
@@ -343,19 +308,19 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 	if (strstr(msg, "u") == msg) {
 		int id = 685;
 
-		if (id >= 0 && id < numlines) {
+		if (id >= 0 && id < g_map.numlines) {
 			MapLine* line = &g_map.lines[id];
 
 			BotGoal useGoal(get_linedef_goal_action(line), id);
 
 			for (int i = 0; i < MAXPLAYERS; i++) {
-				AActor* player = players[i].mo;
-				if (!playeringame[i] || !player || !player->player->bIsBot)
+				CWootBot* bot = get_bot_for_index(i);
+
+				if (!bot)
 					continue;
 
-				CWootBot* bot = player->player->pWootBot;
 				bot->Reset();
-				set_ori(player, 653, -1008, ANGLE_1 * 0);
+				set_actor_origin((AActor*)bot->pActor, 653, -1008, 0, false);
 				bot->PushGoal(useGoal, NULL);
 			}
 		}
@@ -364,32 +329,32 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 	// follow player when done with goals
 	if (!strcmp(msg, "follow")) {
 		for (int i = 0; i < MAXPLAYERS; i++) {
-			AActor* player = players[i].mo;
-			if (!playeringame[i] || !player || !player->player->bIsBot)
+			CWootBot* bot = get_bot_for_index(i);
+
+			if (!bot)
 				continue;
 
-			CWootBot* bot = player->player->pWootBot;
 			bot->m_followPlayer = true;
 		}
 	}
 
 	if (!strcmp(msg, "add")) {
-		wbot_add_bot();
+		add_bot();
 	}
 
 	// clear all enemies for general pathfinding tests
 	if (!strcmp(msg, "y")) {
-		kill_all_shootables();
+		kill_everything();
 	}
 
 	// restart the bot
 	if (!strcmp(msg, "stop")) {
 		for (int i = 0; i < MAXPLAYERS; i++) {
-			AActor* player = players[i].mo;
-			if (!playeringame[i] || !player || !player->player->bIsBot)
+			CWootBot* bot = get_bot_for_index(i);
+
+			if (!bot)
 				continue;
 
-			CWootBot* bot = player->player->pWootBot;
 			bot->Reset();
 			bot->m_followPlayer = false;
 			bot->m_autoWinMap = false;
@@ -397,16 +362,17 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 	}
 
 	if (!strcmp(msg, "restart")) {
-		G_ChangeLevel(level.mapname, 0, CHANGELEVEL_NOINTERMISSION);
+		change_level(get_map_name(), true);
 	}
 
 	if (!strcmp(msg, "kill")) {
 		for (int i = 0; i < MAXPLAYERS; i++) {
-			AActor* player = players[i].mo;
-			if (!playeringame[i] || !player || !player->player->bIsBot)
+			CWootBot* bot = get_bot_for_index(i);
+
+			if (!bot)
 				continue;
 
-			P_DamageMobj(player, player, player, player->health * 2, FName());
+			kill_actor((AActor*)bot->pActor);
 		}
 	}
 
@@ -420,11 +386,12 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 			pos.X += ((PLAYER_WIDTH + 1) << FRACBITS);
 
 			for (int i = 0; i < MAXPLAYERS; i++) {
-				AActor* player = players[i].mo;
-				if (!playeringame[i] || !player || !player->player->bIsBot)
+				CWootBot* bot = get_bot_for_index(i);
+
+				if (!bot)
 					continue;
 
-				P_Teleport(player, pos.X, pos.Y, pos.Z, 0, true, true, true);
+				set_actor_origin((AActor*)bot->pActor, pos.X, pos.Y, 0, true);
 			}
 		}
 	}
@@ -432,10 +399,11 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 	// go to a subsector
 	if (strstr(msg, "gotos ") == msg) {
 		int id = atoi(msg + 5);
-		if (id >= 0 && id < numsubsectors) {
+		if (id >= 0 && id < g_map.numsubsectors) {
 			NavSector& nav = g_wb_nav.mesh.nodes[id];
 			FVector3 pos = nav.pos3D();
-			P_Teleport(players[ulPlayer].mo, pos.X, pos.Y, pos.Z, 0, true, true, true);
+			AActor* player = (AActor*)get_player(get_player_for_index(ulPlayer));
+			set_actor_origin(player, pos.X, pos.Y, 0, true);
 		}
 	}
 
@@ -444,12 +412,13 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 		int id = atoi(msg + 5);
 
 		bool found = false;
-		for (int i = 0; i < numsubsectors && !found; i++) {
+		for (int i = 0; i < g_map.numsubsectors && !found; i++) {
 			NavSector& nav = g_wb_nav.mesh.nodes[i];
 			for (int k = 0; k < nav.links.size(); k++) {
 				if (nav.links[k]->id == id) {
 					FVector3 pos = nav.links[k]->pos3D();
-					P_Teleport(players[ulPlayer].mo, pos.X, pos.Y, pos.Z, 0, true, true, true);
+					AActor* player = (AActor*)get_player(get_player_for_index(ulPlayer));
+					set_actor_origin(player, pos.X, pos.Y, 0, true);
 					found = true;
 					break;
 				}
@@ -466,22 +435,18 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 			int y = atoi(args.substr(splitter + 1).c_str());
 
 			FVector3 pos(x << FRACBITS, y << FRACBITS, 0);
-			P_Teleport(players[ulPlayer].mo, pos.X, pos.Y, pos.Z, 0, true, true, true);
+			AActor* player = (AActor*)get_player(get_player_for_index(ulPlayer));
+			set_actor_origin(player, pos.X, pos.Y, 0, true);
 		}
 	}
 
 	// give weapons/ammo for combat testing
 	if (!strcmp(msg, "x")) {
 		for (int i = 0; i < MAXPLAYERS; i++) {
-			AActor* player = players[i].mo;
-			if (!playeringame[i] || !player)
-				continue;
+			player_t* player = get_player_for_index(i);
 
-			cht_Give(player->player, "backpack");
-			cht_Give(player->player, "weapons");
-			cht_Give(player->player, "ammo");
-			cht_Give(player->player, "keys");
-			cht_Give(player->player, "armor");
+			if (player)
+				give_all_weapons(player);
 		}
 	}
 
@@ -489,11 +454,11 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 	if (!strcmp(msg, "f") || !strcmp(msg, "s")) {
 		bool slowMotion = !strcmp(msg, "s");
 		for (int i = 0; i < MAXPLAYERS; i++) {
-			AActor* player = players[i].mo;
-			if (!playeringame[i] || !player || !player->player->bIsBot)
+			CWootBot* bot = get_bot_for_index(i);
+
+			if (!bot)
 				continue;
 
-			CWootBot* bot = player->player->pWootBot;
 			bot->m_speedMult = slowMotion ? 0.1f : 1.0f;
 		}
 	}
@@ -502,113 +467,21 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 void wbot_tick() {
 	g_wb_nav.relink_pending_sector();
 
-	if (g_kill_all_shootables_again_tick && level.time > g_kill_all_shootables_again_tick) {
-		kill_all_shootables();
+	if (g_kill_all_shootables_again_tick && get_game_tics() > g_kill_all_shootables_again_tick) {
+		kill_everything();
 		g_kill_all_shootables_again_tick = 0;
 	}
 
-	if (g_wbot_test_mode && level.time >= MAX_TEST_TICS) {
+	if (g_wbot_test_mode && get_game_tics() >= MAX_TEST_TICS) {
 		wbot_abort_test();
 	}
 }
 
 void wbot_tick(CWootBot* pBot) {
-	ticcmd_t* cmd = &pBot->m_pPlayer->cmd;
-
-	// Don't execute bot logic during demos, or if the console player is a client.
-	//if (NETWORK_InClientMode() || (demoplayback)) {
-	//	return;
-	//}
-
-	// Reset the bots keypresses.
-	memset(cmd, 0, sizeof(ticcmd_t));
-
-	// Don't run their script if the game is frozen.
-	if (level.flags2 & LEVEL2_FROZEN)
-		return;
-
-	// [BB] Don't run their script if they are frozen either.
-	if (pBot->m_pPlayer->cheats & CF_TOTALLYFROZEN)
-	{
-		// [BB] Don't freeze dead bots. Otherwise they can't respawn.
-		if (pBot->m_pPlayer->mo && pBot->m_pPlayer->mo->health > 0)
-			return;
-	}
-
-	player_t* plr = pBot->m_pPlayer;
-	APlayerPawn* actor = pBot->m_pPlayer->mo;
-	pBot->m_health = actor->health;
-	pBot->m_origin = FVector3(actor->x, actor->y, actor->z);
-	pBot->m_velocity = FVector3(actor->velx, actor->vely, actor->velz);
-	pBot->m_viewHeight = plr->viewheight;
-	pBot->m_useDistance = actor->UseRange >> FRACBITS;
-	pBot->m_radius = actor->radius;
-	pBot->m_isFrozen = plr->cheats & CF_FROZEN;
-	pBot->m_onGround = plr->onground;
-	pBot->m_pitch = actor->pitch;
-	pBot->m_weaponName = NULL;
-	pBot->pActor = actor;
-	if (plr->ReadyWeapon)
-		pBot->m_weaponName = plr->ReadyWeapon->GetClass()->TypeName.GetChars();
-
-	pBot->Think();
-
-	actor->pitch = pBot->m_pitch;
-	actor->angle = pBot->m_yaw;
-
-	// [AK] Don't allow the bot to move while frozen.
-	if ((pBot->m_pPlayer->cheats & CF_FROZEN) == false)
-	{
-		pBot->m_pPlayer->cmd.ucmd.forwardmove = static_cast<short>(pBot->m_lForwardMove << 8);
-		pBot->m_pPlayer->cmd.ucmd.sidemove = static_cast<short>(pBot->m_lSideMove << 8);
-	}
-	else
-	{
-		pBot->m_pPlayer->cmd.ucmd.forwardmove = pBot->m_pPlayer->cmd.ucmd.sidemove = 0;
-	}
-
-	pBot->m_pPlayer->cmd.ucmd.buttons |= pBot->m_lButtons;
+	simulate_bot(pBot);
 }
 
 void wbot_pre_delete(CWootBot* pBot) {
-	// If this player is the displayplayer, revert the camera back to the console player's eyes.
-	if (pBot->m_pPlayer->mo && (pBot->m_pPlayer->mo->CheckLocalView(consoleplayer)) && (NETWORK_GetState() != NETSTATE_SERVER))
-	{
-		players[consoleplayer].camera = players[consoleplayer].mo;
-		S_UpdateSounds(players[consoleplayer].camera);
-		StatusBar->AttachToPlayer(&players[consoleplayer]);
-	}
-
-	// Remove the bot from the game.
-	playeringame[(pBot->m_pPlayer - players)] = false;
-
-	// Delete the actor attached to the player.
-	if (pBot->m_pPlayer->mo)
-		pBot->m_pPlayer->mo->Destroy();
-
-	// [RK] Remove the corpse's thinkers to prevent a crash later
-	if ((NETWORK_GetState() == NETSTATE_SINGLE || NETWORK_GetState() == NETSTATE_SINGLE_MULTIPLAYER) && pBot->m_pPlayer->mo) {
-		TThinkerIterator<APlayerPawn> it;
-		APlayerPawn* pawn, * next;
-
-		next = it.Next();
-		while ((pawn = next) != NULL)
-		{
-			next = it.Next();
-
-			if ((pawn->player == NULL) && (pBot->m_pPlayer->mo->id == pawn->id))
-				pawn->Destroy();
-		}
-	}
-
-	// Finally, fix some pointers.
-	// [BB] We have to delete the CSkullBot pointer before setting it to NULL.
-	//m_pPlayer->pWootBot = NULL;
-	pBot->m_pPlayer->mo = NULL;
-	pBot->m_pPlayer = NULL;
+	pre_remove_bot(pBot);
 }
 
-
-CCMD(addbotw) {
-	wbot_add_bot();
-}
