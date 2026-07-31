@@ -27,6 +27,8 @@ public:
 	int m_lastUse;				// last tic the player used (for preventing sound spam)
 	int m_nextThink;			// for cooling down failures
 	angle_t m_fov = 0;			// field of view
+	int m_lastAvoidPropDirChange; // last tic that the bot decided to change directions to get around a prop
+	int m_lastAvoidPropDir;		// persistent direction for getting around a prop. Prevents oscillating back and forth
 	int stuckCounter = 0;		// increases while trying to move with nothing happening
 	int goalFailCounter = 0;	// for suiciding in areas that can't reach any goals
 	int m_cliffDist = 9999;

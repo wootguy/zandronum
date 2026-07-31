@@ -93,6 +93,8 @@ void CWootBot::Reset() {
 	m_sideMove = 0;
 	m_nextThink = 0;
 	goalFailCounter = 0;
+	m_lastAvoidPropDirChange = 0;
+	m_lastAvoidPropDir = 0;
 	rushNav = -1;
 	rushTrigger = BotGoal();
 	UpdatePositionFlags();
@@ -385,27 +387,38 @@ FVector2 CWootBot::AvoidCornersVector(FVector2 wantDir) {
 	FVector3 leftPos = viewPos + rightDir * -rightOfs;
 	TraceResult trLeft, trRight;
 
-	g_map.Trace(rightPos, rightPos + testDir, 0xffffffff, ML_BLOCKEVERYTHING, pActor, &trRight);
-	g_map.Trace(leftPos, leftPos + testDir, 0xffffffff, ML_BLOCKEVERYTHING, pActor, &trLeft);
+	g_map.Trace(rightPos, rightPos + testDir, MF_SOLID, ML_BLOCKEVERYTHING, pActor, &trRight);
+	g_map.Trace(leftPos, leftPos + testDir, MF_SOLID, ML_BLOCKEVERYTHING, pActor, &trLeft);
 
-	if (trLeft.frac != trRight.frac) {
-		/*
-		if (trRight.frac < trLeft.frac) {
-			if (trRight.actor)
-				DebugPrint(VarArgs("Avoid %s\n", trRight.actor->GetClass()->TypeName.GetChars()));
-			else
-				DebugPrint(VarArgs("Avoid line %d\n", trRight.line->id));
-			draw_debug_line(rightPos, rightPos + testDir * 32, pActor);
+	bool hitProp = trRight.actor || trLeft.actor;
+	bool canChangeDir = !hitProp || level.time - m_lastAvoidPropDirChange > 70;
+	if (!canChangeDir) {
+		if (trLeft.frac < 1.0f || trRight.frac < 1.0f) {
+			return rightDir * m_lastAvoidPropDir;
 		}
-		else {
-			if (trLeft.actor)
-				DebugPrint(VarArgs("Avoid %s\n", trLeft.actor->GetClass()->TypeName.GetChars()));
-			else
-				DebugPrint(VarArgs("Avoid line %d\n", trLeft.line->id));
-			draw_debug_line(leftPos, leftPos + testDir * 32, pActor);
+	}
+	else {
+		if (trLeft.frac != trRight.frac) {
+			/*
+			if (trRight.frac < trLeft.frac) {
+				if (trRight.actor)
+					DebugPrint(VarArgs("Avoid %s\n", trRight.actor->GetClass()->TypeName.GetChars()));
+				else
+					DebugPrint(VarArgs("Avoid line %d\n", trRight.line->id));
+				draw_debug_line(rightPos, rightPos + testDir * 32, pActor);
+			}
+			else {
+				if (trLeft.actor)
+					DebugPrint(VarArgs("Avoid %s\n", trLeft.actor->GetClass()->TypeName.GetChars()));
+				else
+					DebugPrint(VarArgs("Avoid line %d\n", trLeft.line->id));
+				draw_debug_line(leftPos, leftPos + testDir * 32, pActor);
+			}
+			*/
+			m_lastAvoidPropDirChange = level.time;
+			m_lastAvoidPropDir = trRight.frac < trLeft.frac ? -1 : 1;
+			return rightDir * m_lastAvoidPropDir;
 		}
-		*/
-		return trRight.frac < trLeft.frac ? -rightDir : rightDir;
 	}
 
 	return FVector2(0, 0);
