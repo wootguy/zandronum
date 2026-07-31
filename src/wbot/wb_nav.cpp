@@ -159,7 +159,7 @@ FVector2 NavSectorLink::GetJumpEndPos(FVector2 targetPos) {
 		FVector2 a = line->start();
 		FVector2 b = line->end();
 		FVector2 dir = (b - a).Unit();
-		fixed_t nudgeDist = std::min(line->length() / 2, 32 << FRACBITS);
+		fixed_t nudgeDist = std::min((fixed_t)(b - a).Length() / 2, 32 << FRACBITS);
 		a += dir * nudgeDist;
 		b -= dir * nudgeDist;
 

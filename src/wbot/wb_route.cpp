@@ -230,7 +230,17 @@ void CBotRouteController::JumpThink() {
 		break;
 	}
 	case WBOT_JUMP_LAUNCH: {
-		pBot->MoveTo(jumpEndPos, 0, m_routeSpeed);
+		if (pBot->stateFlags & FL_WBOT_OVERHANG) {
+			if (g_wb_nav.get_nav_id(pos.X, pos.X) == m_navTarget->id) {
+				// target is underneath us and close to a cliff. Keep moving forward until falling off
+				FVector2 moveDir = (jumpEndPos - jumpStartPos).Unit();
+				pBot->MoveTo(jumpEndPos + moveDir * (100 << FRACUNIT), 0, m_routeSpeed);
+			}
+		}
+		else {
+			// should move off a cliff soon
+			pBot->MoveTo(jumpEndPos, 0, m_routeSpeed);
+		}
 
 		if (pBot->stateFlags & (FL_WBOT_OVERHANG | FL_WBOT_FLYING)) {
 			// bot is over a ledge now, start the jump
@@ -683,10 +693,12 @@ bool CBotRouteController::RouteToGoal() {
 			unordered_map<int, IndirectShootPos> shootFroms = goal->FindBossBrainShootPositions();
 			for (auto item : shootFroms) {
 				int subid = item.first;
-				m_route = RouteToSector(subid);
-				if (m_route.route.size()) {
-					 // can route to this position
+				BotRoute route = RouteToSector(subid);
+				if (route.route.size()) {
+					// can route to this position
+					m_route = route;
 					goal->shootAlignment = item.second;
+					break;
 				}
 			}
 		}
