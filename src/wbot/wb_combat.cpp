@@ -37,24 +37,27 @@ void CBotCombatController::Think() {
 
 	AActor* targ = pBot->target;
 
-	if (!targ || get_actor_health(targ) <= 0) {
+	if (!targ || get_actor_state(targ).health <= 0) {
 		pBot->target = NULL;
 		return;
 	}
 
+	ActorState bstate = get_actor_state((AActor*)pActor);
+	ActorState tstate = get_actor_state(targ);
+
 	SelectBestWeapon();
 
-	vec2 targPos = get_actor_pos(targ);
+	vec2 targPos = tstate.origin;
 
-	float dist = (targPos - pBot->m_origin).length();
+	float dist = (targPos - pBot->m_astate.origin).length();
 	float minChaseDist = 200;
 	float maxChaseDist = 500;
 	float maxRange = 2000;
 	float minRange = 0;
 	bool isMeleeWeapon = false;
 
-	if (pBot->m_weaponName) {
-		WeaponInfo& info = g_wbot_weapon_info[pBot->m_weaponName];
+	if (pBot->m_pstate.weaponName) {
+		WeaponInfo& info = g_wbot_weapon_info[pBot->m_pstate.weaponName];
 		minChaseDist = info.minRange + 64;
 		maxChaseDist = std::max(minChaseDist, (float)info.idealRange);
 		minRange = info.minRange;
@@ -62,9 +65,7 @@ void CBotCombatController::Think() {
 		isMeleeWeapon = info.maxRange < 200;
 	}
 
-	MapSector* botSector = get_actor_sector((AActor*)pActor);
-	MapSector* targSector = get_actor_sector(targ);
-	if (isMeleeWeapon && dist > maxRange && targSector != botSector) {
+	if (isMeleeWeapon && dist > maxRange && bstate.sector != tstate.sector) {
 		pBot->target = NULL;
 		return; // ignore enemies not close enough to punch
 	}
@@ -82,7 +83,7 @@ void CBotCombatController::Think() {
 	m_targetLastSeenTic = get_game_tics();
 
 	// aim at enemy
-	pBot->AimAtPos(get_actor_pos(targ) + vec3(0, 0, get_actor_height(targ) / 2));
+	pBot->AimAtPos(tstate.origin + vec3(0, 0, tstate.height / 2));
 
 	pBot->m_forwardMove = 0;
 	pBot->m_sideMove = 0;
@@ -113,7 +114,7 @@ void CBotCombatController::SelectBestWeapon() {
 	AActor* bestWeapon = NULL;
 	int bestPriority = -1;
 	for (AActor* weapon : get_player_weapons(pBot->pActor, true)) {
-		WeaponInfo& info = g_wbot_weapon_info[get_actor_type_name(weapon)];
+		WeaponInfo& info = g_wbot_weapon_info[get_actor_state(weapon).name];
 		int prio = info.priority;
 		if (prio > bestPriority) {
 			bestPriority = prio;
@@ -127,7 +128,7 @@ void CBotCombatController::SelectBestWeapon() {
 AActor* CBotCombatController::GetWeaponByName(const char* selname) {
 
 	for (AActor* weapon : get_player_weapons(pBot->pActor, true)) {
-		if (!strcmp(get_actor_type_name(weapon), selname))
+		if (!strcmp(get_actor_state(weapon).name, selname))
 			return weapon;
 	}
 

@@ -26,7 +26,7 @@ void CWootBot::Think() {
 		return;
 	}
 
-	if (m_wasDead && m_health > 0) {
+	if (m_wasDead && m_astate.health > 0) {
 		Reset();
 		m_wasDead = false;
 	}
@@ -37,11 +37,11 @@ void CWootBot::Think() {
 		wbot_debug(this);
 	}
 
-	if (get_game_tics() < m_nextThink || m_isFrozen) {
+	if (get_game_tics() < m_nextThink || m_pstate.isFrozen) {
 		return;
 	}
 
-	if (m_health <= 0) {
+	if (m_astate.health <= 0) {
 		DeadThink();
 		return;
 	}
@@ -117,13 +117,13 @@ void CWootBot::DeadThink() {
 void CWootBot::IdleThink() {
 	m_forwardMove = 0;
 	m_sideMove = 0;
-	m_pitch = 0;
+	m_astate.pitch = 0;
 
 	if (StopMoving()) {
 		m_lButtons |= IN_DUCK;
 
 		if (rand() % 20 == 0) {
-			m_yaw = rand();
+			m_astate.yaw = rand();
 		}
 	}
 }
@@ -163,7 +163,7 @@ void CWootBot::GoalActionThink() {
 		CompleteGoal(); // nothing to do
 		break;
 	case WBOT_GOAL_ACTION_USE: {
-		int useDist = m_useDistance - 1;
+		int useDist = PLAYER_USE_DIST - 1;
 		if (MoveTo(goal.pos(), useDist)) {
 			Use();
 		}
@@ -196,15 +196,15 @@ void CWootBot::GoalActionThink() {
 	case WBOT_GOAL_ACTION_SHOOT: {
 		int shootRange = 200;
 
-		if (m_weaponName) {
-			WeaponInfo& info = g_wbot_weapon_info[m_weaponName];
+		if (m_pstate.weaponName) {
+			WeaponInfo& info = g_wbot_weapon_info[m_pstate.weaponName];
 			shootRange = info.maxRange;
 		}
 
 		MoveTo(goal.pos(), 100);
 
 		TraceResult tr;
-		TraceAhead(shootRange, vec3(0, 0, m_viewHeight), false, &tr);
+		TraceAhead(shootRange, vec3(0, 0, m_pstate.viewHeight), false, &tr);
 		if (tr.line && (tr.line - g_map.lines) == goal.lineid) {
 			Attack();
 		}
@@ -247,8 +247,8 @@ void CWootBot::GoalActionThink() {
 }
 
 bool CWootBot::StuckThink(int maxStuck) {
-	float movedDist = (m_origin - lastPos).length();
-	lastPos = m_origin;
+	float movedDist = (m_astate.origin - lastPos).length();
+	lastPos = m_astate.origin;
 
 	if ((m_forwardMove || m_sideMove) && movedDist <= 1.0f * m_speedMult) {
 		stuckCounter += 10;
@@ -267,37 +267,37 @@ bool CWootBot::StuckThink(int maxStuck) {
 }
 
 void CWootBot::AimAtPos(vec3 pos) {
-	float viewZ = m_origin.z + m_viewHeight;
-	float dist = (vec2(pos.x, pos.y) - m_origin).length();
-	m_pitch = -(int32_t)PointToAngle2(0, viewZ, dist, pos.z);
-	m_yaw = PointToAngle2(m_origin.x, m_origin.y, pos.x, pos.y);
+	float viewZ = m_astate.origin.z + m_pstate.viewHeight;
+	float dist = (vec2(pos.x, pos.y) - m_astate.origin).length();
+	m_astate.pitch = -(int32_t)PointToAngle2(0, viewZ, dist, pos.z);
+	m_astate.yaw = PointToAngle2(m_astate.origin.x, m_astate.origin.y, pos.x, pos.y);
 }
 
 bool CWootBot::TraceAhead(int dist, vec3 offset, bool ignoreMonsters, TraceResult* tr) {
 	vec3 forward, right;
-	MakeVectors(m_yaw, forward, right);
-	vec3 start = m_origin + offset;
+	MakeVectors(m_astate.yaw, forward, right);
+	vec3 start = m_astate.origin + offset;
 	vec3 end = start + forward * dist;
 
 	return TraceLine(start, end, ignoreMonsters, (AActor*)pActor, tr);
 }
 
 bool CWootBot::MoveTo(vec2 pos, int radius, int speed) {
-	float z = m_origin.z + m_viewHeight;
+	float z = m_astate.origin.z + m_pstate.viewHeight;
 	AimAtPos(vec3(pos.x, pos.y, z));
 
-	vec2 wantDir = (pos - m_origin).normalize();
+	vec2 wantDir = (pos - m_astate.origin).normalize();
 
 	// jump over walls and activate things in front of us
 	TraceResult tr;
-	int useDist = m_useDistance - 1;
+	int useDist = PLAYER_USE_DIST - 1;
 	if (TraceAhead(useDist, vec3(0, 0, STEP_HEIGHT), true, &tr)) {
 		int d = tr.frac * useDist;
 
 		// jump if not too far and this isn't an impassable wall
-		if (tr.line->backsector && d < 32 && m_onGround) {
+		if (tr.line->backsector && d < 32 && m_pstate.onGround) {
 			float backZ = tr.line->backsector->getFloorZ();
-			int jumpHeight = backZ - m_origin.z;
+			int jumpHeight = backZ - m_astate.origin.z;
 
 			// ...and it's possible and necessary to jump up
 			if (jumpHeight > STEP_HEIGHT && jumpHeight <= JUMP_HEIGHT)
@@ -310,7 +310,7 @@ bool CWootBot::MoveTo(vec2 pos, int radius, int speed) {
 		if (!lineIsMoving) {
 			// activate any triggered line to fix face rubbing on walls when the bot is failing
 			// to get to a tiny sector in front of a door/button.
-			int action = get_linedef_goal_action(tr.line);
+			int action = get_line_state(tr.line->id).goalAction;
 
 			if (action == WBOT_GOAL_ACTION_USE)
 				Use();
@@ -344,17 +344,17 @@ bool CWootBot::MoveTo(vec2 pos, int radius, int speed) {
 
 	// convert directinal vectors to forward/strafe movents relative to the look direction
 	vec3 forward, right;
-	MakeVectors(m_yaw, forward, right);
+	MakeVectors(m_astate.yaw, forward, right);
 	m_forwardMove = dotProduct(moveDir, forward);
 	m_sideMove = dotProduct(moveDir, right);
 
-	float dist = (pos - m_origin).length();
+	float dist = (pos - m_astate.origin).length();
 	return dist < radius;
 }
 
 bool CWootBot::StopMoving() {
-	vec2 vel = m_velocity;
-	vec2 opposingPos = m_origin - (vel.normalize() * 100);
+	vec2 vel = m_astate.velocity;
+	vec2 opposingPos = m_astate.origin - (vel.normalize() * 100);
 
 	int speed = GetSpeed2D();
 
@@ -370,7 +370,7 @@ vec2 CWootBot::AvoidCornersVector(vec2 wantDir) {
 	// strafe around objects/walls partially blocking the way
 	float zTest = STEP_HEIGHT + 1;
 	vec3 testDir = vec3(wantDir.x, wantDir.y, 0) * 32;
-	vec3 viewPos = m_origin + vec3(0, 0, zTest);
+	vec3 viewPos = m_astate.origin + vec3(0, 0, zTest);
 	float rightOfs = 16;
 	vec3 rightDir(wantDir.y, -wantDir.x, 0);
 	vec3 rightPos = viewPos + rightDir * rightOfs;
@@ -415,9 +415,9 @@ vec2 CWootBot::AvoidCornersVector(vec2 wantDir) {
 }
 
 vec2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
-	int subid = g_map.GetSubsector(m_origin.x, m_origin.y) - g_map.subsectors;
+	int subid = g_map.GetSubsector(m_astate.origin.x, m_astate.origin.y) - g_map.subsectors;
 	NavSector* nav = &g_wb_nav.mesh.nodes[subid];
-	vec2 plrPos = m_origin;
+	vec2 plrPos = m_astate.origin;
 
 	int targetNav = -1;
 	int idealNav = -1;
@@ -439,7 +439,7 @@ vec2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
 		}
 	}
 
-	float ignoreZ = m_origin.z + STEP_HEIGHT; // can't fall off a cliff above us
+	float ignoreZ = m_astate.origin.z + STEP_HEIGHT; // can't fall off a cliff above us
 
 	// get nearby sectors in case nearest ledge is at the corner of the current
 	std::vector<NavSector*> sectors;
@@ -484,7 +484,7 @@ vec2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
 			if (dist < 0 && testSec != nav)
 				continue; // can't have fallen off a cliff in a neighbor sector
 
-			ExtendSegment(v1, v2, m_radius);
+			ExtendSegment(v1, v2, m_astate.radius);
 
 			if (!PointAlignedSegment(plrPos, v1, v2))
 				continue; // off to the side of this segment
@@ -522,24 +522,24 @@ void CWootBot::UpdatePositionFlags() {
 	stateFlags &= ~(FL_WBOT_FLYING | FL_WBOT_ON_ELEV | FL_WBOT_OVERHANG);
 	if (m_routeController.m_navCur) {
 		NavSector& nav = g_wb_nav.mesh.nodes[m_routeController.m_navid];
-		if (m_origin.z > nav.getFloorZ())
-			stateFlags |= m_onGround ? FL_WBOT_OVERHANG : FL_WBOT_FLYING;
+		if (m_astate.origin.z > nav.getFloorZ())
+			stateFlags |= m_pstate.onGround ? FL_WBOT_OVERHANG : FL_WBOT_FLYING;
 		if (nav.sector->isFloorMoving())
 			stateFlags |= FL_WBOT_ON_ELEV;
 	}
 }
 
 vec3 CWootBot::GetViewPos() {
-	return m_origin + vec3(0, 0, m_viewHeight);
+	return m_astate.origin + vec3(0, 0, m_pstate.viewHeight);
 }
 
 float CWootBot::GetDistance(vec2 p) {
-	return (p - m_origin).length();
+	return (p - m_astate.origin).length();
 }
 
 int CWootBot::GetSpeed2D() {
 	// TODO: why is this conversion to cmd speeds weird?
-	return vec2(m_velocity.x, m_velocity.y).length() * 8.0f;
+	return vec2(m_astate.velocity.x, m_astate.velocity.y).length() * 8.0f;
 }
 
 bool CWootBot::FindGoal() {
@@ -561,7 +561,7 @@ bool CWootBot::PushLevelEndGoal() {
 	for (int i = 0; i < g_map.numlines; i++) {
 		MapLine& line = g_map.lines[i];
 		if (line.isLevelExit()) {
-			if (PushGoal(BotGoal(get_linedef_goal_action(&line), i), NULL)) {
+			if (PushGoal(BotGoal(get_line_state(i).goalAction, i), NULL)) {
 				return true;
 			}
 		}
@@ -658,7 +658,7 @@ bool CWootBot::SelectGoal(vector<BotGoal>& goals, NavSectorLink* purposeLink, in
 			continue;
 
 		MapLine* line = goal.lineid >= 0 ? &g_map.lines[goal.lineid] : NULL;
-		if (line && !(get_linedef_move_flag(line) & movementNeeded)) {
+		if (line && !(get_line_state(line->id).moveFlags & movementNeeded)) {
 			continue; // line would not move the sector in a way thats needed
 		}
 

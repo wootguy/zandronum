@@ -381,8 +381,9 @@ void SectorNavMeshGenerator::add_walkable_links(BotMeshData& mesh, int nodeid, s
 			vec2 linkPos = link.movePos;
 			for (int i = 0; i < propBlockers.size(); i++) {
 				AActor* actor = propBlockers[i];
-				vec2 propPos = get_actor_pos(actor);
-				if ((propPos - linkPos).length() < get_actor_radius(actor) + playerRadius) {
+				ActorState astate = get_actor_state(actor);
+				vec2 propPos = astate.origin;
+				if ((propPos - linkPos).length() < astate.radius + playerRadius) {
 					propBlocked = true;
 					break;
 				}

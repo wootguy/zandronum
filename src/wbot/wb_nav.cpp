@@ -40,9 +40,10 @@ int NavSectorLink::blocked(AActor* actor, bool recurse) {
 	int walkability = g_map.sector_border_walkability(parent->sector, sector);
 	if (walkability != LINK_BLOCK_CLEAR) {
 		MapLine* line = linedef;
+		LineState lstate = get_line_state(line->id);
 
-		if (line && line->getArg(0) == 0 && get_linedef_move_flag(line)) {
-			if (actor && line->isLockedDoor() && !can_unlock_door(actor, line)) {
+		if (line && lstate.args[0] == 0 && lstate.moveFlags) {
+			if (actor && (lstate.flags & FL_LINE_IS_LOCKED_DOOR) && !can_unlock_door(actor, line)) {
 				return walkability; // don't have the keys required to use this
 			}
 
@@ -280,7 +281,8 @@ bool NavSector::touches(AActor* actor) {
 	if (!actor)
 		return false;
 
-	vec2 actorPos = get_actor_pos(actor);
+	ActorState astate = get_actor_state(actor);
+	vec2 actorPos = astate.origin;
 
 	int subid = g_map.GetSubsector(actorPos.x, actorPos.y)->id;
 	if (subid == id)
@@ -290,7 +292,7 @@ bool NavSector::touches(AActor* actor) {
 	for (int i = 0; i < sub.numsegs; i++) {
 		MapSeg& seg = g_map.segs[sub.firstseg + i];
 
-		if (CircleIntersectsSegment(actorPos, get_actor_radius(actor), seg.v1, seg.v2)) {
+		if (CircleIntersectsSegment(actorPos, astate.radius, seg.v1, seg.v2)) {
 			return true;
 		}
 	}
@@ -354,7 +356,7 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 
 	AActor* playerActor = (AActor*)get_player(player);
 
-	vec3 playerPos = get_actor_pos(playerActor);
+	vec3 playerPos = get_actor_state(playerActor).origin;
 	MapSubsector* sub = g_map.GetSubsector(playerPos.x, playerPos.y);
 
 	if (sub && sub->id < g_map.numsubsectors) {
@@ -447,18 +449,18 @@ int SectorNavMesh::get_nav_id(vec2 pos) {
 }
 
 int SectorNavMesh::get_nav_id(AActor* actor) {
-	return get_nav_id(get_actor_pos(actor));
+	return get_nav_id(get_actor_state(actor).origin);
 }
 
 int SectorNavMesh::get_nav_id(player_t* plr) {
 	AActor* pActor = (AActor*)get_player(plr);
-	vec3 pos = get_actor_pos(pActor);
+	vec3 pos = get_actor_state(pActor).origin;
 
 	MapSubsector* centeredSub = g_map.GetSubsector(pos.x, pos.y);
 	
-	if (centeredSub->sector->getFloorZ() + STEP_HEIGHT < pos.z && player_on_ground(plr)) {
+	if (centeredSub->sector->getFloorZ() + STEP_HEIGHT < pos.z && get_player_state(plr).onGround) {
 		// above the centered subsector because of hanging over a ledge
-		vec2 floorPoint = GetFloorPosition(pos, get_actor_radius(pActor));
+		vec2 floorPoint = GetFloorPosition(pos, get_actor_state(pActor).radius);
 		return g_map.GetSubsector(floorPoint.x, floorPoint.y)->id;
 	}
 
@@ -699,7 +701,7 @@ bool SectorNavMesh::get_key_goals_for_line(AActor* actor, MapLine* line, vector<
 		keyRoute.key = mapKey;
 		keyRoute.routeSize = get_astar_route(opts).dist;
 
-		mapKeys[get_actor_class(mapKey)] = keyRoute;
+		mapKeys[get_actor_state(mapKey).pClass] = keyRoute;
 	}
 
 	for (int i = 0; i < keyGroups.size(); i++) {
@@ -740,7 +742,7 @@ bool SectorNavMesh::get_key_goals_for_line(AActor* actor, MapLine* line, vector<
 			}
 			gprintf("Map keys:\n");
 			for (auto item : mapKeys) {
-				gprintf("   %s", get_actor_type_name(item.second.key));
+				gprintf("   %s", get_actor_state(item.second.key).name);
 			}
 			gprintf("\n");
 

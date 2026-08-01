@@ -15,7 +15,7 @@ using namespace wbot;
 std::string BotGoal::desc() const {
 	std::string thingName;
 	if (h_actor.get()) {
-		thingName = get_actor_type_name(h_actor.get());
+		thingName = get_actor_state(h_actor.get()).name;
 	}
 	else if (lineid) {
 		thingName = "Line " + to_string(lineid);
@@ -123,7 +123,7 @@ int BotGoal::getNavId() const {
 
 vec3 BotGoal::pos() {
 	if (h_actor.get()) {
-		vec3 actorPos = get_actor_pos(h_actor.get());
+		vec3 actorPos = get_actor_state(h_actor.get()).origin;
 		return vec3(actorPos.x, actorPos.y, g_map.GetSector(h_actor.get())->getFloorZ());
 	}
 	else if (lineid >= 0) {
@@ -138,10 +138,10 @@ vec3 BotGoal::pos() {
 
 int BotGoal::touchDistance(AActor* toucher) {
 	if (h_actor.get()) {
-		return (get_actor_radius(h_actor.get()) + get_actor_radius(toucher)) - 1; // subtracted 1 unit just in case
+		return (get_actor_state(h_actor.get()).radius + get_actor_state(toucher).radius) - 1; // subtracted 1 unit just in case
 	}
 	else if (lineid >= 0) {
-		return get_actor_radius(toucher) + 1; // added 1 in case wall is solid and you can't go inside it
+		return get_actor_state(toucher).radius + 1; // added 1 in case wall is solid and you can't go inside it
 	}
 
 	return 0;
@@ -170,7 +170,7 @@ void BotGoal::TestBossBrainShootRay(vec3 brainPos, vec3 rayStart, vec3 rayDir,
 		}
 	}
 
-	float maxDist = (ROCKET_EXPLODE_RADIUS + ROCKET_RADIUS) + get_actor_radius(h_actor.get());
+	float maxDist = (ROCKET_EXPLODE_RADIUS + ROCKET_RADIUS) + get_actor_state(h_actor.get()).radius;
 
 	if ((impactPos - brainPos).length() > maxDist) {
 		return; // impact point not close enough to the target to do damage
@@ -267,7 +267,7 @@ void BotGoal::TestBossBrainShootRay(vec3 brainPos, vec3 rayStart, vec3 rayDir,
 
 unordered_map<int, IndirectShootPos> BotGoal::FindBossBrainShootPositions() {
 	// boss brain is normally unreachable, but can be damaged by rockets
-	vec3 actorPos = get_actor_pos(h_actor.get());
+	vec3 actorPos = get_actor_state(h_actor.get()).origin;
 	const int maxPitch = 20;
 
 	unordered_map<int, IndirectShootPos> shootFromNodes;

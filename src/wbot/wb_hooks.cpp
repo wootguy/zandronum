@@ -293,7 +293,7 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 		if (id >= 0 && id < g_map.numlines) {
 			MapLine* line = &g_map.lines[id];
 
-			BotGoal useGoal(get_linedef_goal_action(line), id);
+			BotGoal useGoal(get_line_state(id).goalAction, id);
 
 			for (int i = 0; i < MAXPLAYERS; i++) {
 				CWootBot* bot = get_bot_for_index(i);
@@ -313,7 +313,7 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 		if (id >= 0 && id < g_map.numlines) {
 			MapLine* line = &g_map.lines[id];
 
-			BotGoal useGoal(get_linedef_goal_action(line), id);
+			BotGoal useGoal(get_line_state(id).goalAction, id);
 
 			for (int i = 0; i < MAXPLAYERS; i++) {
 				CWootBot* bot = get_bot_for_index(i);
@@ -384,7 +384,7 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 
 		if (target) {
 			AActor* actor = (AActor*)get_player(target);
-			vec3 pos = get_actor_pos(actor);
+			vec3 pos = get_actor_state(actor).origin;
 			pos.x += (PLAYER_WIDTH + 1);
 
 			for (int i = 0; i < MAXPLAYERS; i++) {

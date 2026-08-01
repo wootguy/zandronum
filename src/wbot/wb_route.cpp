@@ -99,7 +99,7 @@ void CBotRouteController::UpdateRoute() {
 		}
 		else {
 			vec2 center = g_wb_nav.mesh.nodes[route[1]].pos();
-			float dist = (center - pBot->m_origin).length();
+			float dist = (center - pBot->m_astate.origin).length();
 			if (pBot->stuckCounter >= 200 && dist < 16) {
 				// already very close to the center, so this is probably a tiny polygon jammed
 				// up against a wall. The bot can't get close enough in this case, so advance
@@ -169,7 +169,7 @@ bool CBotRouteController::BeCareful() {
 		NavSector& targetNav = g_wb_nav.mesh.nodes[route[1]];
 		NavSectorLink* link = idealNav.getLink(route[1]);
 		headingTowardsCliff = targetNav.hasCliffs && link->linkWidth < 32
-			&& targetNav.getFloorZ() < (pBot->m_origin.z + STEP_HEIGHT);
+			&& targetNav.getFloorZ() < (pBot->m_astate.origin.z + STEP_HEIGHT);
 	}
 
 	if (pBot->m_cliffDist < SAFE_CLIFF_DIST * 0.5f || headingTowardsCliff) {
@@ -202,7 +202,7 @@ bool CBotRouteController::BeCareful() {
 }
 
 void CBotRouteController::JumpThink() {
-	vec3 pos = pBot->m_origin;
+	vec3 pos = pBot->m_astate.origin;
 
 	switch (jumpState) {
 	case WBOT_JUMP_PREP: {
@@ -263,13 +263,13 @@ void CBotRouteController::JumpThink() {
 		if (curNav.id == m_navTarget->id || flyingOverWalkableNeighbor) {
 			pBot->StopMoving(); // flying over the target sector, try not to fall off now
 
-			if (pBot->m_onGround) {
+			if (pBot->m_pstate.onGround) {
 				jumpState = WBOT_JUMP_NONE;
 				pBot->MoveTo(jumpEndPos, 0, m_routeSpeed);
 				return; // completed the jump
 			}
 		} 
-		else if (pBot->m_onGround) {
+		else if (pBot->m_pstate.onGround) {
 			// not a gap that required a jump, just keep moving towards the target
 			pBot->MoveTo(jumpEndPos, 0, m_routeSpeed);
 		}
@@ -278,10 +278,10 @@ void CBotRouteController::JumpThink() {
 			vec3 landPos = vec3(jumpEndPos, m_navTarget->getFloorZ());
 
 			// TODO: this is totally wrong but for some reason passes the tests
-			vec3 typoPos(pBot->m_origin.z, pBot->m_origin.y, pBot->m_origin.z);
+			vec3 typoPos(pBot->m_astate.origin.z, pBot->m_astate.origin.y, pBot->m_astate.origin.z);
 
 			vec3 idealDir = (landPos - typoPos).normalize();
-			vec3 velDir = pBot->m_velocity.normalize();
+			vec3 velDir = pBot->m_astate.velocity.normalize();
 			float distLeft = pBot->GetDistance(landPos);
 
 			if (distLeft > 192 || idealDir.z > velDir.z) {
@@ -295,7 +295,7 @@ void CBotRouteController::JumpThink() {
 			}
 		}
 
-		if (m_navTarget->getFloorZ() > pBot->m_origin.z + JUMP_HEIGHT) {
+		if (m_navTarget->getFloorZ() > pBot->m_astate.origin.z + JUMP_HEIGHT) {
 			JumpFail();
 			return;
 		}
@@ -406,7 +406,7 @@ bool CBotRouteController::ElevatorThink(bool linkBlocked) {
 
 			// stay centered on the elevator to avoid blocking it or falling off
 			vec2 navPos = m_navCur->pos();
-			if ((navPos - pBot->m_origin).length() > 16)
+			if ((navPos - pBot->m_astate.origin).length() > 16)
 				pBot->MoveTo(navPos, 0, RUN_SPEED / 4);
 
 			if (linkBlocked) {

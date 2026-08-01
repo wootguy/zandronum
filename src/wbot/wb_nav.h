@@ -10,6 +10,7 @@
 #define DUCK_HEIGHT 28
 #define PLAYER_WIDTH 32
 #define PLAYER_RADIUS 16
+#define PLAYER_USE_DIST 64
 #define SAFE_CLIFF_DIST 80 // don't reduce movement speed when this far away from any cliff
 #define JUMP_DIST 200 // max jump distance on flat ground
 

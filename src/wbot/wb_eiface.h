@@ -34,6 +34,13 @@ struct line_t;
 #define FL_SECTOR_MOVE_CEIL_UP		8
 #define FL_SECTOR_MOVE_TIMED		16	// sector resets to its old position shortly after being activated
 
+#define FL_LINE_IS_TELEPORT 1
+#define FL_LINE_IS_LOCKED_DOOR 2
+#define FL_LINE_IS_LEVEL_EXIT 4
+#define FL_LINE_PLAYER_ACTIVATE 8
+#define FL_LINE_DOUBLE_SIDE_CROSS 16
+#define FL_LINE_IMPASSABLE 32
+
 struct PClass;
 
 namespace wbot {
@@ -153,6 +160,44 @@ namespace wbot {
 		int fraction;
 	};
 
+	// all actor state relevent to bot ai
+	struct ActorState {
+		vec3 origin;
+		vec3 velocity;
+		int height;
+		int health;
+		int radius;
+		uint32_t yaw;
+		uint32_t pitch;
+		MapSector* sector;
+		PClass* pClass;
+		const char* name;
+	};
+
+	// all player state relevent to bot ai
+	struct PlayerState {
+		int viewHeight;
+		bool onGround;
+		bool isFrozen;
+		const char* weaponName; // NULL if no weapon ready
+	};
+
+	struct SectorState {
+		float floorZ;
+		float ceilZ;
+		int special;
+		bool floorMoving;
+		bool ceilMoving;
+		bool floorDamage;
+	};
+
+	struct LineState {
+		int16_t special;
+		uint16_t flags;
+		uint16_t moveFlags;
+		uint16_t goalAction;
+		int args[5];
+	};
 
 	void init_eiface();
 
@@ -167,29 +212,11 @@ namespace wbot {
 
 	APlayerPawn* get_player(player_t* plr);
 
-	vec3 get_actor_pos(AActor* actor);
+	ActorState get_actor_state(AActor* actor);
 
-	int get_actor_height(AActor* actor);
-
-	int get_actor_health(AActor* actor);
-
-	MapSector* get_actor_sector(AActor* actor);
-
-	PClass* get_actor_class(AActor* actor);
-
-	int get_actor_radius(AActor* actor);
-
-	uint32_t get_actor_angle(AActor* actor);
-
-	uint32_t get_actor_pitch(AActor* actor);
-
-	int get_player_viewheight(player_t* actor);
-
-	bool player_on_ground(player_t* plr);
+	PlayerState get_player_state(player_t* plr);
 
 	void player_select_weapon(player_t* plr, AActor* weapon);
-
-	bool is_player_frozen(player_t* plr);
 
 	CWootBot* get_player_bot(player_t* plr);
 
@@ -228,8 +255,6 @@ namespace wbot {
 
 	const char* get_class_type_name(PClass* pclass);
 
-	const char* get_actor_type_name(AActor* pclass);
-
 	bool intermission_active();
 
 	// print a message to the default output stream
@@ -255,45 +280,13 @@ namespace wbot {
 
 	MapLumps load_wad_lump_data();
 
-	bool sector_special_is_damage(int special);
+	SectorState get_sector_state(int id);
 
-	// type of movement applied to the target sector. returns FL_SECTOR_MOVE_*
-	int get_linedef_move_flag(MapLine* line);
-
-	bool special_is_teleport(int special);
-
-	bool special_is_locked_door(int special);
-
-	bool special_is_level_exit(int special);
+	LineState get_line_state(int id);
 
 	void add_stair_sector_info();
 
-	float get_sector_floor_z(int id);
-
-	float get_sector_ceil_z(int id);
-
-	bool is_sector_floor_moving(int id);
-
-	bool is_sector_ceil_moving(int id);
-
-	int get_line_special(int id);
-
-	int get_sector_special(int id);
-
-	int get_line_activation(int id);
-
-	int get_line_arg(int id, int arg);
-
-	bool can_player_activate_line(int id);
-
-	bool is_double_sided_cross_line(int id);
-
-	bool is_impassable_line(int id);
-
 	MapLine* get_map_line_from_engine_line(line_t* line);
-
-	// how to trigger the given line
-	int get_linedef_goal_action(MapLine* line);
 
 	vec2 get_tele_dest(int lineid);
 

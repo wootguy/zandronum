@@ -54,7 +54,6 @@ namespace wbot {
 		vec2 center();
 		vec2 normal();
 		int length();
-		int activation();
 		int special();
 		int getArg(int idx);
 		bool isTeleport();

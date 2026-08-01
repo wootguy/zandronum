@@ -12,31 +12,33 @@ using namespace wbot;
 BotMapInfo wbot::g_map;
 
 float MapSector::getHeight() {
-	return get_sector_ceil_z(id) - get_sector_floor_z(id);
+	SectorState state = get_sector_state(id);
+	return state.ceilZ - state.floorZ;
 }
 
 float MapSector::getFloorZ() {
-	return get_sector_floor_z(id);
+	return get_sector_state(id).floorZ;
 }
 
 float MapSector::getCeilZ() {
-	return get_sector_ceil_z(id);
+	return get_sector_state(id).ceilZ;
 }
 
 bool MapSector::isMoving() {
-	return is_sector_ceil_moving(id) || is_sector_floor_moving(id);
+	SectorState state = get_sector_state(id);
+	return state.floorMoving || state.ceilMoving;
 }
 
 bool MapSector::isFloorMoving() {
-	return is_sector_floor_moving(id);
+	return get_sector_state(id).floorMoving;
 }
 
 bool MapSector::isCeilMoving() {
-	return is_sector_ceil_moving(id);
+	return get_sector_state(id).ceilMoving;
 }
 
 int MapSector::special() {
-	return get_sector_special(id);
+	return get_sector_state(id).special;
 }
 
 vec2 MapLine::center() {
@@ -53,36 +55,32 @@ int MapLine::length() {
 	return (v2 - v1).length();
 }
 
-int MapLine::activation() {
-	return get_line_activation(id);
-}
-
 int MapLine::special() {
-	return get_line_special(id);
+	return get_line_state(id).special;
 }
 
 int MapLine::getArg(int idx) {
-	return get_line_arg(this - g_map.lines, idx);
+	return get_line_state(id).args[idx];
 }
 
 bool MapLine::isTeleport() {
-	return special_is_teleport(special());
+	return get_line_state(id).flags & FL_LINE_IS_TELEPORT;
 }
 
 bool MapLine::isLockedDoor() {
-	return special_is_locked_door(special());
+	return get_line_state(id).flags & FL_LINE_IS_LOCKED_DOOR;
 }
 
 bool MapLine::isLevelExit() {
-	return special_is_level_exit(special());
+	return get_line_state(id).flags & FL_LINE_IS_LEVEL_EXIT;
 }
 
 bool MapLine::isImpassable() {
-	return is_impassable_line(id);
+	return get_line_state(id).flags & FL_LINE_IMPASSABLE;
 }
 
 bool MapLine::canPlayerActivate() {
-	return can_player_activate_line(id);
+	return get_line_state(id).flags & FL_LINE_PLAYER_ACTIVATE;
 }
 
 vec2 MapLine::getTeleportDest() {
@@ -343,7 +341,7 @@ MapSector* BotMapInfo::GetSector(int x, int y) {
 }
 
 MapSector* BotMapInfo::GetSector(AActor* actor) {
-	vec3 pos = get_actor_pos(actor);
+	vec3 pos = get_actor_state(actor).origin;
 	return GetSector(pos.x, pos.y);
 }
 
@@ -353,9 +351,10 @@ std::vector<int> BotMapInfo::GetTouchedSubsectors(AActor* actor) {
 	
 	unordered_set<int> subs;
 
-	int r = get_actor_radius(actor);
+	ActorState astate = get_actor_state(actor);
+	int r = astate.radius;
 	float d = (r * 0.7071f);
-	vec3 pos = get_actor_pos(actor);
+	vec3 pos = astate.origin;
 	int x = pos.x;
 	int y = pos.y;
 
@@ -517,7 +516,7 @@ std::vector<LinkSeg> BotMapInfo::get_neighbor_subsectors(MapSubsector* rootSub, 
 }
 
 bool BotMapInfo::subsector_does_damage(MapSubsector* sub) {
-	return sector_special_is_damage(sub->sector->special());
+	return get_sector_state(sub->sector->id).floorDamage;
 }
 
 void BotMapInfo::find_linedef_sectors() {
@@ -531,8 +530,9 @@ void BotMapInfo::find_linedef_sectors() {
 		if (!line.canPlayerActivate())
 			continue;
 
-		int lineAction = get_linedef_goal_action(&line);
-		bool doubleSidedCrossLine = is_double_sided_cross_line(i);
+		LineState lstate = get_line_state(i);
+		int lineAction = lstate.goalAction;
+		bool doubleSidedCrossLine = lstate.flags & FL_LINE_DOUBLE_SIDE_CROSS;
 
 		vec2 center = line.center();
 		vec2 normal = line.normal();
@@ -577,14 +577,14 @@ void BotMapInfo::add_sector_info() {
 			for (int k = 0; k < numlines; k++) {
 				MapLine& line = lines[k];
 
-				if (!line.tag || line.tag != sec.tag || !line.canPlayerActivate())
+				if (!line.tag || line.tag != sec.tag)
 					continue;
 
-				int flags = get_linedef_move_flag(&line);
+				LineState state = get_line_state(k);
 
-				if (flags) {
-					sec.moveFlags |= flags;
-					sec.triggers.push_back(BotGoal(get_linedef_goal_action(&line), k));
+				if (state.moveFlags && (state.flags & FL_LINE_PLAYER_ACTIVATE)) {
+					sec.moveFlags |= state.moveFlags;
+					sec.triggers.push_back(BotGoal(state.goalAction, k));
 				}
 			}
 
@@ -600,14 +600,14 @@ void BotMapInfo::add_sector_info() {
 		for (int k = 0; k < numlines; k++) {
 			MapLine& line = lines[k];
 
-			if (line.tag || line.backsector != &sec || !line.canPlayerActivate())
+			if (line.tag || line.backsector != &sec)
 				continue;
 
-			int flags = get_linedef_move_flag(&line);
+			LineState state = get_line_state(k);
 
-			if (flags) {
-				sec.moveFlags |= flags;
-				sec.triggers.push_back(BotGoal(get_linedef_goal_action(&line), &line - lines));
+			if (state.moveFlags && (state.flags & FL_LINE_PLAYER_ACTIVATE)) {
+				sec.moveFlags |= state.moveFlags;
+				sec.triggers.push_back(BotGoal(state.goalAction, &line - lines));
 			}
 		}
 	}

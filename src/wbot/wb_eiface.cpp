@@ -313,24 +313,13 @@ namespace wbot {
 
 		player_t* plr = pBot->m_pPlayer;
 		APlayerPawn* actor = pBot->m_pPlayer->mo;
-		pBot->m_health = actor->health;
-		pBot->m_origin = vec3(actor->x, actor->y, actor->z) / (float)FRACUNIT;
-		pBot->m_velocity = vec3(actor->velx, actor->vely, actor->velz) / (float)FRACUNIT;
-		pBot->m_viewHeight = plr->viewheight >> FRACBITS;
-		pBot->m_useDistance = actor->UseRange >> FRACBITS;
-		pBot->m_radius = actor->radius >> FRACBITS;
-		pBot->m_isFrozen = plr->cheats & CF_FROZEN;
-		pBot->m_onGround = plr->onground;
-		pBot->m_pitch = actor->pitch;
-		pBot->m_weaponName = NULL;
-		pBot->pActor = actor;
-		if (plr->ReadyWeapon)
-			pBot->m_weaponName = plr->ReadyWeapon->GetClass()->TypeName.GetChars();
+		pBot->m_astate = get_actor_state(actor);
+		pBot->m_pstate = get_player_state(plr);
 
 		pBot->Think();
 
-		actor->pitch = pBot->m_pitch;
-		actor->angle = pBot->m_yaw;
+		actor->pitch = pBot->m_astate.pitch;
+		actor->angle = pBot->m_astate.yaw;
 
 		// [AK] Don't allow the bot to move while frozen.
 		if ((pBot->m_pPlayer->cheats & CF_FROZEN) == false)
@@ -350,44 +339,28 @@ namespace wbot {
 		return plr->mo;
 	}
 
-	vec3 get_actor_pos(AActor* actor) {
-		return vec3(actor->x, actor->y, actor->z) / (float)(1 << 16);
+	ActorState get_actor_state(AActor* actor) {
+		ActorState ret;
+		ret.origin = vec3(actor->x, actor->y, actor->z) / (float)FRACUNIT;
+		ret.velocity = vec3(actor->velx, actor->vely, actor->velz) / (float)FRACUNIT;
+		ret.health = actor->health;
+		ret.height = actor->height >> FRACBITS;
+		ret.pClass = actor->GetClass();
+		ret.pitch = actor->pitch;
+		ret.yaw = actor->angle;
+		ret.radius = actor->radius >> FRACBITS;
+		ret.sector = &g_map.sectors[actor->Sector - ::sectors];
+		ret.name = ret.pClass->TypeName.GetChars();
+		return ret;
 	}
 
-	int get_actor_height(AActor* actor) {
-		return actor->height >> FRACBITS;
-	}
-
-	MapSector* get_actor_sector(AActor* actor) {
-		return &g_map.sectors[actor->Sector - ::sectors];
-	}
-
-	PClass* get_actor_class(AActor* actor) {
-		return actor->GetClass();
-	}
-
-	int get_actor_radius(AActor* actor) {
-		return actor->radius >> FRACBITS;
-	}
-
-	uint32_t get_actor_angle(AActor* actor) {
-		return actor->angle;
-	}
-
-	uint32_t get_actor_pitch(AActor* actor) {
-		return actor->pitch;
-	}
-
-	int get_player_viewheight(player_t* actor) {
-		return actor->viewheight >> 16;
-	}
-
-	bool player_on_ground(player_t* plr) {
-		return plr->onground;
-	}
-
-	int get_actor_health(AActor* actor) {
-		return actor->health;
+	PlayerState get_player_state(player_t* plr) {
+		PlayerState ret;
+		ret.isFrozen = plr->cheats & (CF_FROZEN | CF_TOTALLYFROZEN);
+		ret.onGround = plr->onground;
+		ret.viewHeight = plr->viewheight >> FRACBITS;
+		ret.weaponName = plr->ReadyWeapon ? plr->ReadyWeapon->GetClass()->TypeName.GetChars() : NULL;
+		return ret;
 	}
 
 	void player_select_weapon(player_t* pPlayer, AActor* weapon) {
@@ -400,10 +373,6 @@ namespace wbot {
 				P_BringUpWeapon(pPlayer);
 			}
 		}
-	}
-
-	bool is_player_frozen(player_t* plr) {
-		return plr->cheats & (CF_FROZEN | CF_TOTALLYFROZEN);
 	}
 	
 	CWootBot* get_player_bot(player_t* plr) {
@@ -659,10 +628,6 @@ namespace wbot {
 		return pclass->TypeName.GetChars();
 	}
 
-	const char* get_actor_type_name(AActor* actor) {
-		return actor->GetClass()->TypeName.GetChars();
-	}
-
 	bool intermission_active() {
 		return gamestate == GS_INTERMISSION;
 	}
@@ -859,23 +824,70 @@ namespace wbot {
 		return lumps;
 	}
 
-	bool sector_special_is_damage(int special) {
-		switch (special) {
+	SectorState get_sector_state(int id) {
+		sector_t& sec = ::sectors[id];
+
+		SectorState ret;
+		ret.floorZ = sec.floorplane.Zat0() / (float)FRACUNIT;
+		ret.ceilZ = sec.ceilingplane.Zat0() / (float)FRACUNIT;
+		ret.ceilMoving = sec.ceilingdata;
+		ret.floorMoving = sec.floordata;
+		ret.special = sec.special;
+		
+		switch (sec.special) {
 		case dDamage_Hellslime:
 		case dDamage_LavaHefty:
 		case dDamage_LavaWimpy:
 		case dDamage_Nukage:
 		case dDamage_SuperHellslime:
-			return true;
+			ret.floorDamage = true;
+			break;
+		default:
+			ret.floorDamage = false;
+			break;
 		}
-
-		return false;
+		
+		return ret;
 	}
 
-	int get_linedef_move_flag(MapLine* line) {
-		int timingFlag = 0;
+	LineState get_line_state(int id) {
+		line_t& line = ::lines[id];
 
-		switch (line->special()) {
+		LineState state;
+		memset(&state, 0, sizeof(state));
+		memcpy(state.args, line.args, sizeof(int) * 5);
+		state.special = line.special;
+
+		if (line.activation & SPAC_PlayerActivate) {
+			state.flags |= FL_LINE_PLAYER_ACTIVATE;
+
+			if (line.activation & SPAC_Impact) {
+				state.goalAction = WBOT_GOAL_ACTION_SHOOT;
+			}
+			else if (line.activation & (SPAC_Use | SPAC_UseThrough)) {
+				state.goalAction = WBOT_GOAL_ACTION_USE;
+			}
+			else if (line.activation & (SPAC_Cross | SPAC_AnyCross)) {
+				state.goalAction = WBOT_GOAL_ACTION_CROSS;
+			}
+			else if (line.activation & SPAC_Push) {
+				state.goalAction = WBOT_GOAL_ACTION_TOUCH;
+			}
+			else {
+				gprintf("Don't know how to activate line %d\n", id);
+			}
+		}
+		else {
+			state.goalAction = -1;
+		}
+
+		if (state.goalAction == WBOT_GOAL_ACTION_CROSS && (line.flags & ML_TWOSIDED))
+			state.flags |= FL_LINE_DOUBLE_SIDE_CROSS;
+
+		if (!line.backsector || (line.flags & ML_BLOCKING))
+			state.flags |= FL_LINE_IMPASSABLE;
+
+		switch (line.special) {
 		case Plat_UpWaitDownStay:
 		case Plat_UpNearestWaitDownStay:
 		case Plat_DownWaitUpStay:
@@ -883,19 +895,18 @@ namespace wbot {
 		case Ceiling_CrushRaiseAndStayA:
 		case Ceiling_CrushAndRaiseA:
 		case Ceiling_CrushAndRaiseSilentA:
-			timingFlag = FL_SECTOR_MOVE_TIMED;
+			state.moveFlags |= FL_SECTOR_MOVE_TIMED;
 			break;
 		}
 
 		// only add specials here that could be potentially helpful for unblocking a path.
 		// For instance, raising a door or elevator. A ceiling or door coming down lower 
 		// will not help a bot pass the sector
-		switch (line->special()) {
+		switch (line.special) {
 		case 0:
-			return 0;
+			break; // not a special line
 		case Door_Open:
 		case Door_Raise:
-		case Door_LockedRaise:
 		case Ceiling_RaiseByValue:
 		case Ceiling_RaiseToNearest:
 		case Ceiling_RaiseInstant:
@@ -903,7 +914,8 @@ namespace wbot {
 		case Generic_Ceiling: // TODO: check if really does move up
 		case Generic_Door:
 		case Ceiling_CrushAndRaiseDist:
-			return timingFlag | FL_SECTOR_MOVE_CEIL_UP;
+			state.moveFlags |= FL_SECTOR_MOVE_CEIL_UP;
+			break;
 
 		case Plat_UpWaitDownStay:
 		case Plat_UpByValue:
@@ -921,11 +933,13 @@ namespace wbot {
 		case Floor_RaiseByTexture:
 		case Floor_RaiseByValueTimes8:
 		case Floor_RaiseAndCrushDoom:
-			return timingFlag | FL_SECTOR_MOVE_FLOOR_UP;
+			state.moveFlags |= FL_SECTOR_MOVE_FLOOR_UP;
+			break;
 
 		case Plat_PerpetualRaise:
 		case Plat_PerpetualRaiseLip:
-			return timingFlag | FL_SECTOR_MOVE_FLOOR_UP | FL_SECTOR_MOVE_FLOOR_DOWN;
+			state.moveFlags |= FL_SECTOR_MOVE_FLOOR_UP | FL_SECTOR_MOVE_FLOOR_DOWN;
+			break;
 
 		case Plat_DownWaitUpStay:
 		case Plat_DownByValue:
@@ -938,13 +952,15 @@ namespace wbot {
 		case Stairs_BuildDown:
 		case Stairs_BuildDownSync:
 		case Floor_LowerByValueTimes8:
-			return timingFlag | FL_SECTOR_MOVE_FLOOR_DOWN;
+			state.moveFlags |= FL_SECTOR_MOVE_FLOOR_DOWN;
+			break;
 
 		case Generic_Floor:
 		case Elevator_MoveToFloor:
 		case Generic_Lift:
 		case Generic_Stairs:
-			return timingFlag | FL_SECTOR_MOVE_FLOOR_UP | FL_SECTOR_MOVE_FLOOR_DOWN; // TODO: can do both dirs?	
+			state.moveFlags |= FL_SECTOR_MOVE_FLOOR_UP | FL_SECTOR_MOVE_FLOOR_DOWN; // TODO: can do both dirs?	
+			break;
 
 		case Ceiling_LowerToHighestFloor:
 		case Ceiling_LowerInstant:
@@ -954,7 +970,7 @@ namespace wbot {
 		case Ceiling_LowerByValueTimes8:
 		case Door_Close:
 		case Door_CloseWaitOpen:
-			return 0; // a ceiling getting lower is not helpful
+			break; // a ceiling getting lower is not helpful
 
 		case Scroll_Texture_Left:
 		case Scroll_Texture_Right:
@@ -969,31 +985,32 @@ namespace wbot {
 		case Light_Flicker:
 		case Light_Strobe:
 		case Light_Stop:
-			return 0; // visual-only specials
+			break; // visual-only specials
 
-		case Teleport:
 		case Plat_Stop:
 		case Ceiling_CrushStop:
+			break; // does not cause sectors to move
+
+		case Teleport:
+			state.flags |= FL_LINE_IS_TELEPORT;
+			break;
+
+		case Door_LockedRaise:
+			state.moveFlags |= FL_SECTOR_MOVE_CEIL_UP;
+			state.flags |= FL_LINE_IS_LOCKED_DOOR;
+			break;
+
 		case Exit_Normal:
 		case Exit_Secret:
-			return 0; // does not cause sectors to move
+			state.flags |= FL_LINE_IS_LEVEL_EXIT;
+			break;
 
 		default:
-			Printf("Unknown special %d for line %d\n", line->special(), line - g_map.lines);
-			return 0;
+			Printf("Unknown special %d for line %d\n", line.special, id);
+			break;
 		}
-	}
 
-	bool special_is_teleport(int special) {
-		return special == Teleport;
-	}
-
-	bool special_is_locked_door(int special) {
-		return special == Door_LockedRaise;
-	}
-
-	bool special_is_level_exit(int special) {
-		return (special == Exit_Normal || special == Exit_Secret);
+		return state;
 	}
 
 	void add_stair_sector_info() {
@@ -1055,7 +1072,7 @@ namespace wbot {
 
 			BotGoal stairTrigger;
 			if (line.canPlayerActivate())
-				stairTrigger = BotGoal(get_linedef_goal_action(&line), s);
+				stairTrigger = BotGoal(get_line_state(s).goalAction, s);
 
 			int secnum = -1;
 			int newsecnum = -1;
@@ -1126,86 +1143,13 @@ namespace wbot {
 		}
 	}
 
-	float get_sector_floor_z(int id) {
-		sector_t& sec = ::sectors[id];
-		return sec.floorplane.Zat0() / (float)FRACUNIT;
-	}
-
-	float get_sector_ceil_z(int id) {
-		sector_t& sec = ::sectors[id];
-		return sec.ceilingplane.Zat0() / (float)FRACUNIT;
-	}
-
-	bool is_sector_floor_moving(int id) {
-		return ::sectors[id].floordata;
-	}
-
-	bool is_sector_ceil_moving(int id) {
-		return ::sectors[id].ceilingdata;
-	}
-
-	int get_sector_special(int id) {
-		return ::sectors[id].special;
-	}
-
-	int get_line_special(int id) {
-		return ::lines[id].special;
-	}
-
-	int get_line_activation(int id) {
-		return ::lines[id].activation;
-	}
-
-	int get_line_arg(int id, int arg) {
-		return ::lines[id].args[arg];
-	}
-
-	bool can_player_activate_line(int id) {
-		return ::lines[id].activation & SPAC_PlayerActivate;
-	}
-
-	bool is_double_sided_cross_line(int id) {
-		MapLine* line = &g_map.lines[id];
-		int lineAction = get_linedef_goal_action(line);
-		return lineAction == WBOT_GOAL_ACTION_CROSS && (line->flags & ML_TWOSIDED);
-	}
-
-	bool is_impassable_line(int id) {
-		line_t& line = lines[id];
-		return !line.backsector || (line.flags & ML_BLOCKING);
-	}
-
 	MapLine* get_map_line_from_engine_line(line_t* line) {
 		return &g_map.lines[line - ::lines];
 	}
 
-	int get_linedef_goal_action(MapLine* line) {
-		if (!line)
-			return -1;
-
-		line_t* eline = &::lines[line - g_map.lines];
-
-		if (eline->activation & SPAC_Impact) {
-			return WBOT_GOAL_ACTION_SHOOT;
-		}
-		if (eline->activation & (SPAC_Use | SPAC_UseThrough)) {
-			return WBOT_GOAL_ACTION_USE;
-		}
-		if (eline->activation & (SPAC_Cross | SPAC_AnyCross)) {
-			return WBOT_GOAL_ACTION_CROSS;
-		}
-		if (eline->activation & SPAC_Push) {
-			return WBOT_GOAL_ACTION_TOUCH;
-		}
-
-		if (eline->activation)
-			gprintf("Don't know how to activate line %d\n", line - g_map.lines);
-
-		return -1;
-	}
-
 	vec2 get_tele_dest(int lineid) {
-		AActor* actor = SelectTeleDest(get_line_arg(lineid, 0), get_line_arg(lineid, 1));
+		line_t& line = ::lines[lineid];
+		AActor* actor = SelectTeleDest(line.args[0], line.args[1]);
 		return actor ? vec2(actor->x, actor->y) / (float)FRACUNIT : vec2(0, 0);
 	}
 

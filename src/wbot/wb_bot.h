@@ -2,6 +2,7 @@
 #include "wb_route.h"
 #include "wb_combat.h"
 #include "wb_goal.h"
+#include "wb_eiface.h"
 #include <unordered_set>
 #include <stdint.h>
 
@@ -27,17 +28,8 @@ public:
 	int m_lSideMove = 0;
 
 	// state copied from the engine
-	int m_health;
-	int m_viewHeight;
-	int m_useDistance;
-	int m_radius;
-	vec3 m_origin;
-	vec3 m_velocity;
-	bool m_isFrozen;
-	bool m_onGround;
-	int m_pitch;
-	int m_yaw;
-	const char* m_weaponName; // NULL if no weapon ready
+	wbot::ActorState m_astate;
+	wbot::PlayerState m_pstate;
 
 	std::vector<BotGoal> m_goals;	// stack of goals
 	int m_forwardMove = 0;		// range of +/-100
