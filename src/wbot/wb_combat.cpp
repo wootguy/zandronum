@@ -37,13 +37,13 @@ void CBotCombatController::Think() {
 
 	AActor* targ = pBot->target;
 
-	if (!targ || get_actor_state(targ).health <= 0) {
+	if (!targ || g_engine.get_actor_state(targ).health <= 0) {
 		pBot->target = NULL;
 		return;
 	}
 
-	ActorState bstate = get_actor_state((AActor*)pActor);
-	ActorState tstate = get_actor_state(targ);
+	ActorState bstate = g_engine.get_actor_state((AActor*)pActor);
+	ActorState tstate = g_engine.get_actor_state(targ);
 
 	SelectBestWeapon();
 
@@ -70,17 +70,17 @@ void CBotCombatController::Think() {
 		return; // ignore enemies not close enough to punch
 	}
 
-	bool hasLineOfSight = check_line_of_sight((AActor*)pActor, targ);
+	bool hasLineOfSight = g_engine.check_line_of_sight((AActor*)pActor, targ);
 
 	if (!hasLineOfSight) {
 		// forget about the target if not seen for a while
-		if (get_game_tics() - m_targetLastSeenTic < 35) {
+		if (g_engine.get_game_tics() - m_targetLastSeenTic < 35) {
 			pBot->target = NULL;
 			return;
 		}
 	}
 
-	m_targetLastSeenTic = get_game_tics();
+	m_targetLastSeenTic = g_engine.get_game_tics();
 
 	// aim at enemy
 	pBot->AimAtPos(tstate.origin + vec3(0, 0, tstate.height / 2));
@@ -113,8 +113,8 @@ void CBotCombatController::Think() {
 void CBotCombatController::SelectBestWeapon() {
 	AActor* bestWeapon = NULL;
 	int bestPriority = -1;
-	for (AActor* weapon : get_player_weapons(pBot->pActor, true)) {
-		WeaponInfo& info = g_wbot_weapon_info[get_actor_state(weapon).name];
+	for (AActor* weapon : g_engine.get_player_weapons(pBot->pActor, true)) {
+		WeaponInfo& info = g_wbot_weapon_info[g_engine.get_actor_state(weapon).name];
 		int prio = info.priority;
 		if (prio > bestPriority) {
 			bestPriority = prio;
@@ -122,13 +122,13 @@ void CBotCombatController::SelectBestWeapon() {
 		}
 	}
 
-	player_select_weapon(pBot->m_pPlayer, bestWeapon);
+	g_engine.player_select_weapon(pBot->m_pPlayer, bestWeapon);
 }
 
 AActor* CBotCombatController::GetWeaponByName(const char* selname) {
 
-	for (AActor* weapon : get_player_weapons(pBot->pActor, true)) {
-		if (!strcmp(get_actor_state(weapon).name, selname))
+	for (AActor* weapon : g_engine.get_player_weapons(pBot->pActor, true)) {
+		if (!strcmp(g_engine.get_actor_state(weapon).name, selname))
 			return weapon;
 	}
 
@@ -139,7 +139,7 @@ bool CBotCombatController::SelectWeapon(const char* selname) {
 	AActor* weapon = GetWeaponByName(selname);
 
 	if (weapon) {
-		player_select_weapon(pBot->m_pPlayer, weapon);
+		g_engine.player_select_weapon(pBot->m_pPlayer, weapon);
 		return true;
 	}
 
@@ -147,7 +147,7 @@ bool CBotCombatController::SelectWeapon(const char* selname) {
 }
 
 AActor* CBotCombatController::BestEnemy() {
-	return find_enemy(pBot);
+	return g_engine.find_enemy(pBot);
 }
 
 void CBotCombatController::DebugPrint(const char* msg) {

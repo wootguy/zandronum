@@ -27,8 +27,8 @@ char* VarArgs(const char* format, ...) {
 
 player_t* getAnyPlayer() {
 	for (int i = 0; i < MAXPLAYERS; i++) {
-		player_t* plr = get_player_for_index(i);
-		CWootBot* bot = get_bot_for_index(i);
+		player_t* plr = g_engine.get_player_for_index(i);
+		CWootBot* bot = g_engine.get_bot_for_index(i);
 
 		if (plr && !bot)
 			return plr;
@@ -217,7 +217,7 @@ float BoxRadiusForDir(const vec2& dir, float radius)
 }
 
 bool IsBoxWallClipped(const vec2& pos, float radius) {
-	for (MapLine* ld : get_crossed_lines(pos, radius)) {
+	for (MapLine* ld : g_engine.get_crossed_lines(pos, radius)) {
 		if (ld->isImpassable())
 			return true;  // crosses an impassable line
 	}
@@ -230,7 +230,7 @@ vec2 GetFloorPosition(const vec3& pos, float radius) {
 
 	vec2 bestFloorPoint = pos;
 
-	for (MapLine* ld : get_crossed_lines(pos, radius)) {
+	for (MapLine* ld : g_engine.get_crossed_lines(pos, radius)) {
 		if (ld->isImpassable())
 			return pos; // crosses an impassable line. stuck.
 
@@ -257,7 +257,7 @@ bool IsBoxClipped(const vec3& pos, float radius, float height) {
 	float z = pos.z;
 	float topZ = z + height;
 
-	for (MapLine* ld : get_crossed_lines(pos, radius)) {
+	for (MapLine* ld : g_engine.get_crossed_lines(pos, radius)) {
 		if (ld->isImpassable())
 			return true; // crosses an impassable line
 		
@@ -282,7 +282,7 @@ std::vector<MapSector*> GetBoxClipSectors(const vec3& pos, float radius, float h
 	float z = pos.z;
 	float topZ = z + height;
 
-	for (MapLine* ld : get_crossed_lines(pos, radius)) {
+	for (MapLine* ld : g_engine.get_crossed_lines(pos, radius)) {
 		if (ld->isImpassable())
 			continue; // crosses an impassable line, no sector to trigger
 
@@ -413,7 +413,7 @@ int draw_debug_line(vec3 start, vec3 end, AActor* actor) {
 		if (i == spawns - 1) {
 			pos = end;
 		}
-		SpawnBlood(pos, 1, actor);
+		g_engine.SpawnBlood(pos, 1, actor);
 	}
 
 	return i;
@@ -430,7 +430,7 @@ bool TraceRadius(vec3 start, vec3 end, float radius, bool ignoreMonsters, AActor
 
 	for (int i = -2; i <= 2; i++) {
 		TraceResult temp;
-		TraceLine(start + rightDir * i * rightStep, end + rightDir * i * rightStep, ignoreMonsters, ignoreEnt, &temp);
+		g_engine.TraceLine(start + rightDir * i * rightStep, end + rightDir * i * rightStep, ignoreMonsters, ignoreEnt, &temp);
 		
 		if (temp.frac < minFrac) {
 			minFrac = temp.frac;

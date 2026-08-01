@@ -18,7 +18,7 @@ bool SectorNavMeshGenerator::trace_jump(vec3 start, vec3 end, int fromMovement, 
 	TraceResult tr;
 
 	for (int i = -2; i <= 2; i++) {
-		if (TraceLine(start + rightDir * i * rightStep, end + rightDir * i * rightStep, true, NULL, &tr)) {
+		if (g_engine.TraceLine(start + rightDir * i * rightStep, end + rightDir * i * rightStep, true, NULL, &tr)) {
 			if (tr.hitType == TRACE_HitWall && tr.line && tr.line->backsector) {
 				if (tr.sector != tr.line->backsector && tr.line->backsector->moveFlags) {
 					continue; // wall may move out of the way in the future
@@ -149,7 +149,7 @@ bool SectorNavMeshGenerator::is_potential_jump_link(NavSector& fromNav, NavSecto
 	bool toNavMovesDown = toMovement & FL_SECTOR_MOVE_FLOOR_DOWN;
 
 	// First test if any impassable walls are intersected.
-	if (TraceImpassable(jumpStart, jumpEnd))
+	if (g_engine.TraceImpassable(jumpStart, jumpEnd))
 		return false;
 
 	if (jumpTooFarCurrently && jumpMayBeLowerLater) {
@@ -381,7 +381,7 @@ void SectorNavMeshGenerator::add_walkable_links(BotMeshData& mesh, int nodeid, s
 			vec2 linkPos = link.movePos;
 			for (int i = 0; i < propBlockers.size(); i++) {
 				AActor* actor = propBlockers[i];
-				ActorState astate = get_actor_state(actor);
+				ActorState astate = g_engine.get_actor_state(actor);
 				vec2 propPos = astate.origin;
 				if ((propPos - linkPos).length() < astate.radius + playerRadius) {
 					propBlocked = true;
@@ -426,7 +426,7 @@ BotMeshData SectorNavMeshGenerator::generate(std::vector<AActor*> propBlockers) 
 
 	add_jump_links(mesh);
 
-	gprintf("Generated %d nodes, %d links in %d ms\n", (int)g_map.numsubsectors, mesh.numLinks, (int)(getEpochMillis() - genStart));
+	g_engine.gprintf("Generated %d nodes, %d links in %d ms\n", (int)g_map.numsubsectors, mesh.numLinks, (int)(getEpochMillis() - genStart));
 
 	return mesh;
 }

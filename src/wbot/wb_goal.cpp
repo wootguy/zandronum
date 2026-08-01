@@ -15,7 +15,7 @@ using namespace wbot;
 std::string BotGoal::desc() const {
 	std::string thingName;
 	if (h_actor.get()) {
-		thingName = get_actor_state(h_actor.get()).name;
+		thingName = g_engine.get_actor_state(h_actor.get()).name;
 	}
 	else if (lineid) {
 		thingName = "Line " + to_string(lineid);
@@ -88,7 +88,7 @@ int BotGoal::getNavId() const {
 		int ret = g_map.line_subsectors[lineid];
 
 		if (ret == -1)
-			gprintf("Failed to find subsector for line %d\n", lineid);
+			g_engine.gprintf("Failed to find subsector for line %d\n", lineid);
 		else {
 			NavSector& node = g_wb_nav.mesh.nodes[ret];
 			if (node.links.empty() && (action == WBOT_GOAL_ACTION_USE || action == WBOT_GOAL_ACTION_SHOOT)) {
@@ -104,7 +104,7 @@ int BotGoal::getNavId() const {
 				float startZ = centersub->sector->getFloorZ();
 				float endZ = frontsub->sector->getFloorZ();
 
-				if (fabs(startZ - endZ) < JUMP_HEIGHT && !TraceImpassable(center, front)) {
+				if (fabs(startZ - endZ) < JUMP_HEIGHT && !g_engine.TraceImpassable(center, front)) {
 					// no impassable walls between the line sector and the one in front
 					// try routing to that subsector instead
 					ret = frontsub - g_map.subsectors;
@@ -115,7 +115,7 @@ int BotGoal::getNavId() const {
 		return ret;
 	}
 	else {
-		gprintf("Routing not implemented for this type of goal\n");
+		g_engine.gprintf("Routing not implemented for this type of goal\n");
 	}
 
 	return -1;
@@ -123,7 +123,7 @@ int BotGoal::getNavId() const {
 
 vec3 BotGoal::pos() {
 	if (h_actor.get()) {
-		vec3 actorPos = get_actor_state(h_actor.get()).origin;
+		vec3 actorPos = g_engine.get_actor_state(h_actor.get()).origin;
 		return vec3(actorPos.x, actorPos.y, g_map.GetSector(h_actor.get())->getFloorZ());
 	}
 	else if (lineid >= 0) {
@@ -132,16 +132,16 @@ vec3 BotGoal::pos() {
 		return vec3(line.center(), z);
 	}
 
-	gprintf("Goal has no actor nor lineid\n");
+	g_engine.gprintf("Goal has no actor nor lineid\n");
 	return vec3(0, 0, 0);
 }
 
 int BotGoal::touchDistance(AActor* toucher) {
 	if (h_actor.get()) {
-		return (get_actor_state(h_actor.get()).radius + get_actor_state(toucher).radius) - 1; // subtracted 1 unit just in case
+		return (g_engine.get_actor_state(h_actor.get()).radius + g_engine.get_actor_state(toucher).radius) - 1; // subtracted 1 unit just in case
 	}
 	else if (lineid >= 0) {
-		return get_actor_state(toucher).radius + 1; // added 1 in case wall is solid and you can't go inside it
+		return g_engine.get_actor_state(toucher).radius + 1; // added 1 in case wall is solid and you can't go inside it
 	}
 
 	return 0;
@@ -165,12 +165,12 @@ void BotGoal::TestBossBrainShootRay(vec3 brainPos, vec3 rayStart, vec3 rayDir,
 
 	if (!isCeilTrace) {
 		vec3 impactPos = rayStart + rayDir * (ROCKET_EXPLODE_RADIUS + 64);
-		if (!TraceLine(rayStart, impactPos, true, NULL, NULL)) {
+		if (!g_engine.TraceLine(rayStart, impactPos, true, NULL, NULL)) {
 			return; // no impact
 		}
 	}
 
-	float maxDist = (ROCKET_EXPLODE_RADIUS + ROCKET_RADIUS) + get_actor_state(h_actor.get()).radius;
+	float maxDist = (ROCKET_EXPLODE_RADIUS + ROCKET_RADIUS) + g_engine.get_actor_state(h_actor.get()).radius;
 
 	if ((impactPos - brainPos).length() > maxDist) {
 		return; // impact point not close enough to the target to do damage
@@ -179,21 +179,21 @@ void BotGoal::TestBossBrainShootRay(vec3 brainPos, vec3 rayStart, vec3 rayDir,
 	// trace in the opposite direction to find a sector to shoot the impact point from
 	TraceResult tr;
 	vec3 shootPos = impactPos - rayDir * 4000;
-	TraceLine(impactPos, shootPos, true, NULL, &tr);
+	g_engine.TraceLine(impactPos, shootPos, true, NULL, &tr);
 	shootPos = tr.endPos;
 	vec3 shootDelta = shootPos - impactPos;
 	float shootLen = shootDelta.length();
 
 	// check vertical clearance for the rocket
 	vec3 lowerPos = impactPos - vec3(0, 0, ROCKET_RADIUS / 2);
-	TraceLine(lowerPos, shootPos, true, NULL, &tr);
+	g_engine.TraceLine(lowerPos, shootPos, true, NULL, &tr);
 	if (tr.frac < 0.9f) {
 		return; // not enough clearance
 	}
 
 	// find which sectors are interesected
 	std::unordered_set<MapSector*> isectors;
-	for (TraceIsect& isect : TraceIntersections(rayStart, shootPos)) {
+	for (TraceIsect& isect : g_engine.TraceIntersections(rayStart, shootPos)) {
 		isectors.insert(isect.sector);
 	}
 
@@ -267,7 +267,7 @@ void BotGoal::TestBossBrainShootRay(vec3 brainPos, vec3 rayStart, vec3 rayDir,
 
 unordered_map<int, IndirectShootPos> BotGoal::FindBossBrainShootPositions() {
 	// boss brain is normally unreachable, but can be damaged by rockets
-	vec3 actorPos = get_actor_state(h_actor.get()).origin;
+	vec3 actorPos = g_engine.get_actor_state(h_actor.get()).origin;
 	const int maxPitch = 20;
 
 	unordered_map<int, IndirectShootPos> shootFromNodes;

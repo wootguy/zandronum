@@ -40,10 +40,10 @@ int NavSectorLink::blocked(AActor* actor, bool recurse) {
 	int walkability = g_map.sector_border_walkability(parent->sector, sector);
 	if (walkability != LINK_BLOCK_CLEAR) {
 		MapLine* line = linedef;
-		LineState lstate = get_line_state(line->id);
+		LineState lstate = g_engine.get_line_state(line->id);
 
 		if (line && lstate.args[0] == 0 && lstate.moveFlags) {
-			if (actor && (lstate.flags & FL_LINE_IS_LOCKED_DOOR) && !can_unlock_door(actor, line)) {
+			if (actor && (lstate.flags & FL_LINE_IS_LOCKED_DOOR) && !g_engine.can_unlock_door(actor, line)) {
 				return walkability; // don't have the keys required to use this
 			}
 
@@ -99,7 +99,7 @@ bool NavSectorLink::jumpable() {
 		return false;
 	}
 
-	if (TraceLine(start, end, true, NULL, NULL)) {
+	if (g_engine.TraceLine(start, end, true, NULL, NULL)) {
 		return false;
 	}
 
@@ -158,7 +158,7 @@ vec2 NavSectorLink::GetJumpEndPos(vec2 targetPos) {
 
 	MapLine* line;
 	vec2 edgePos;
-	if (TraceSectorEdge(targetPos, targetPos + ledgeDir * 1000, edgePos, &line)) {
+	if (g_engine.TraceSectorEdge(targetPos, targetPos + ledgeDir * 1000, edgePos, &line)) {
 		// move edge away from the line endings to avoid collision with a wall
 		vec2 a = line->v1;
 		vec2 b = line->v2;
@@ -187,7 +187,7 @@ NavSector* NavSectorLink::GetJumpBackupBlocker(vec2 targetPos) {
 
 	vec2 edge;
 	MapLine* line;
-	if (TraceSectorEdge(backupStartPos, backupPos, edge, &line)) {
+	if (g_engine.TraceSectorEdge(backupStartPos, backupPos, edge, &line)) {
 		MapSubsector& sub = g_map.subsectors[parent->id];
 		for (NavSectorLink* link : parent->links) {
 			if (link->linedef == line) {
@@ -226,7 +226,7 @@ vec2 NavSectorLink::GetJumpBackupPos(vec2 targetPos, AActor* jumper) {
 	float startZ = parent->getFloorZ();
 	int isects = 0;
 
-	for (TraceIsect& isect : TraceIntersections(backupStartPos, backupPos)) {
+	for (TraceIsect& isect : g_engine.TraceIntersections(backupStartPos, backupPos)) {
 		float sectorZ = isect.sector->getFloorZ();
 		int heightDiff = (sectorZ - startZ);
 
@@ -281,7 +281,7 @@ bool NavSector::touches(AActor* actor) {
 	if (!actor)
 		return false;
 
-	ActorState astate = get_actor_state(actor);
+	ActorState astate = g_engine.get_actor_state(actor);
 	vec2 actorPos = astate.origin;
 
 	int subid = g_map.GetSubsector(actorPos.x, actorPos.y)->id;
@@ -334,7 +334,7 @@ float NavSector::getCeilZ() {
 
 void SectorNavMesh::init() {
 	pending_sector_relinks.clear();
-	propBlockers = find_prop_blockers();
+	propBlockers = g_engine.find_prop_blockers();
 
 	mesh = SectorNavMeshGenerator::generate(propBlockers);
 	astarNodes = new AstarNode[g_map.numsubsectors];
@@ -344,19 +344,19 @@ void SectorNavMesh::init() {
 void SectorNavMesh::draw_nodes(AActor* actor) {
 	static int lastDraw;
 
-	if (get_game_tics() - lastDraw < 10 && lastDraw < get_game_tics()) {
+	if (g_engine.get_game_tics() - lastDraw < 10 && lastDraw < g_engine.get_game_tics()) {
 		return;
 	}
 
-	lastDraw = get_game_tics();
+	lastDraw = g_engine.get_game_tics();
 
 	player_t* player = getAnyPlayer();
 	if (!player)
 		return;
 
-	AActor* playerActor = (AActor*)get_player(player);
+	AActor* playerActor = (AActor*)g_engine.get_player(player);
 
-	vec3 playerPos = get_actor_state(playerActor).origin;
+	vec3 playerPos = g_engine.get_actor_state(playerActor).origin;
 	MapSubsector* sub = g_map.GetSubsector(playerPos.x, playerPos.y);
 
 	if (sub && sub->id < g_map.numsubsectors) {
@@ -427,7 +427,7 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 		}
 
 		if (spritesDrawn >= maxSprites) {
-			gprintf("Overflow sprites!\n");
+			g_engine.gprintf("Overflow sprites!\n");
 		}
 	}
 
@@ -440,7 +440,7 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 			continue;
 		}
 
-		SpawnBlood(pos + vec3(0, 0, 16), 100, actor);
+		g_engine.SpawnBlood(pos + vec3(0, 0, 16), 100, actor);
 	}
 }
 
@@ -449,18 +449,18 @@ int SectorNavMesh::get_nav_id(vec2 pos) {
 }
 
 int SectorNavMesh::get_nav_id(AActor* actor) {
-	return get_nav_id(get_actor_state(actor).origin);
+	return get_nav_id(g_engine.get_actor_state(actor).origin);
 }
 
 int SectorNavMesh::get_nav_id(player_t* plr) {
-	AActor* pActor = (AActor*)get_player(plr);
-	vec3 pos = get_actor_state(pActor).origin;
+	AActor* pActor = (AActor*)g_engine.get_player(plr);
+	vec3 pos = g_engine.get_actor_state(pActor).origin;
 
 	MapSubsector* centeredSub = g_map.GetSubsector(pos.x, pos.y);
 	
-	if (centeredSub->sector->getFloorZ() + STEP_HEIGHT < pos.z && get_player_state(plr).onGround) {
+	if (centeredSub->sector->getFloorZ() + STEP_HEIGHT < pos.z && g_engine.get_player_state(plr).onGround) {
 		// above the centered subsector because of hanging over a ledge
-		vec2 floorPoint = GetFloorPosition(pos, get_actor_state(pActor).radius);
+		vec2 floorPoint = GetFloorPosition(pos, g_engine.get_actor_state(pActor).radius);
 		return g_map.GetSubsector(floorPoint.x, floorPoint.y)->id;
 	}
 
@@ -549,11 +549,11 @@ BotRoute SectorNavMesh::get_astar_route(const RouteOpts& opts)
 	BotRoute emptyRoute;
 
 	if (verbose) {
-		gprintf("START route from %d to %d\n", opts.start, opts.end);
+		g_engine.gprintf("START route from %d to %d\n", opts.start, opts.end);
 	}
 
 	if (opts.start < 0 || opts.end < 0 || opts.start >= g_map.numsubsectors || opts.end >= g_map.numsubsectors) {
-		gprintf("AStarRoute: invalid start/end nodes\n");
+		g_engine.gprintf("AStarRoute: invalid start/end nodes\n");
 		g_route_ignore_num++;
 		return emptyRoute;
 	}
@@ -579,7 +579,7 @@ BotRoute SectorNavMesh::get_astar_route(const RouteOpts& opts)
 	while (!openQueue.empty()) {
 
 		if (++curIter > maxIter) {
-			gprintf("AStarRoute exceeded max iterations searching path (%d)", maxIter);
+			g_engine.gprintf("AStarRoute exceeded max iterations searching path (%d)", maxIter);
 			break;
 		}
 
@@ -610,7 +610,7 @@ BotRoute SectorNavMesh::get_astar_route(const RouteOpts& opts)
 			reverse(route.route.begin(), route.route.end());
 
 			if (verbose) {
-				gprintf("FINISH route calculation from %d to %d. Size is %d.\n",
+				g_engine.gprintf("FINISH route calculation from %d to %d. Size is %d.\n",
 					opts.start, opts.end, route.route.size());
 			}
 
@@ -668,10 +668,10 @@ bool SectorNavMesh::get_key_goals_for_line(AActor* actor, MapLine* line, vector<
 	if (!line->isLockedDoor())
 		return true; // not a locked door
 
-	if (can_unlock_door(actor, line))
+	if (g_engine.can_unlock_door(actor, line))
 		return true; // already have all the keys
 
-	vector<vector<PClass*>> keyGroups = get_required_key_types(line);
+	vector<vector<PClass*>> keyGroups = g_engine.get_required_key_types(line);
 
 	if (keyGroups.size() == 0)
 		return true; // no keys required
@@ -691,7 +691,7 @@ bool SectorNavMesh::get_key_goals_for_line(AActor* actor, MapLine* line, vector<
 
 	int oldRouteIgnoreNum = g_route_ignore_num;
 
-	for (AActor* mapKey : find_map_keys()) {
+	for (AActor* mapKey : g_engine.find_map_keys()) {
 		int keyNavId = get_nav_id(mapKey);
 		opts.end = keyNavId;
 
@@ -701,7 +701,7 @@ bool SectorNavMesh::get_key_goals_for_line(AActor* actor, MapLine* line, vector<
 		keyRoute.key = mapKey;
 		keyRoute.routeSize = get_astar_route(opts).dist;
 
-		mapKeys[get_actor_state(mapKey).pClass] = keyRoute;
+		mapKeys[g_engine.get_actor_state(mapKey).pClass] = keyRoute;
 	}
 
 	for (int i = 0; i < keyGroups.size(); i++) {
@@ -731,20 +731,20 @@ bool SectorNavMesh::get_key_goals_for_line(AActor* actor, MapLine* line, vector<
 
 		if (!bestKey) {
 			// no key satisfies the group requirement
-			gprintf("Impossible key requirements for line %d:\n", line->id);
+			g_engine.gprintf("Impossible key requirements for line %d:\n", line->id);
 
 			for (int i = 0; i < keyGroups.size(); i++) {
 				vector<PClass*>& group = keyGroups[i];
 				for (int k = 0; k < group.size(); k++) {
-					gprintf("  %s", get_class_type_name(group[k]));
+					g_engine.gprintf("  %s", g_engine.get_class_type_name(group[k]));
 				}
-				gprintf("\n");
+				g_engine.gprintf("\n");
 			}
-			gprintf("Map keys:\n");
+			g_engine.gprintf("Map keys:\n");
 			for (auto item : mapKeys) {
-				gprintf("   %s", get_actor_state(item.second.key).name);
+				g_engine.gprintf("   %s", g_engine.get_actor_state(item.second.key).name);
 			}
-			gprintf("\n");
+			g_engine.gprintf("\n");
 
 			return false;
 		}
@@ -761,7 +761,7 @@ bool SectorNavMesh::get_key_goals_for_line(AActor* actor, MapLine* line, vector<
 vector<BotGoal> SectorNavMesh::get_weapon_goals(const char* wepname) {
 	vector<BotGoal> goals;
 
-	for (AActor* weapon : find_map_weapons(wepname)) {
+	for (AActor* weapon : g_engine.find_map_weapons(wepname)) {
 		goals.push_back(BotGoal(WBOT_GOAL_ACTION_TOUCH, weapon));
 	}
 
@@ -771,7 +771,7 @@ vector<BotGoal> SectorNavMesh::get_weapon_goals(const char* wepname) {
 vector<BotGoal> SectorNavMesh::get_ammo_goals(const char* ammoname, const char* ammoname2) {
 	vector<BotGoal> goals;
 
-	for (AActor* weapon : find_map_ammo(ammoname, ammoname2)) {
+	for (AActor* weapon : g_engine.find_map_ammo(ammoname, ammoname2)) {
 		goals.push_back(BotGoal(WBOT_GOAL_ACTION_TOUCH, weapon));
 	}
 
@@ -815,7 +815,7 @@ void SectorNavMesh::relink_pending_sector() {
 	}
 	
 	if (!g_wbot_test_mode)
-		gprintf("Relinked sector %d (%+d links)\n", secid, linksAdded);
+		g_engine.gprintf("Relinked sector %d (%+d links)\n", secid, linksAdded);
 
 	pending_sector_relinks.erase(pending_sector_relinks.begin() + idx);
 }

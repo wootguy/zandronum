@@ -643,7 +643,7 @@ void CBotRouteController::HandleStuckPath() {
 
 void CBotRouteController::CancelRoute() {
 	if (m_route.route.size() && m_freezeOnRouteChange) {
-		freeze_player(pBot->m_pPlayer, true);
+		g_engine.freeze_player(pBot->m_pPlayer, true);
 	}
 
 	m_route = BotRoute();

@@ -17,8 +17,8 @@ void wbot_debug_player_nav() {
 	if (!player)
 		return;
 
-	AActor* pActor = (AActor*)get_player(player);
-	vec3 playerPos = get_actor_state((AActor*)get_player(player)).origin;
+	AActor* pActor = (AActor*)g_engine.get_player(player);
+	vec3 playerPos = g_engine.get_actor_state((AActor*)g_engine.get_player(player)).origin;
 
 	string navInfo;
 	int plrnavid = g_wb_nav.get_nav_id(player);
@@ -91,11 +91,11 @@ void wbot_debug_player_nav() {
 		navInfo += "\n      Special: " + to_string(nav.sector->special());
 
 	vec3 forward, right;
-	MakeVectors(get_actor_state(pActor).yaw, forward, right);
-	vec3 start = playerPos + vec3(0, 0, get_player_state(player).viewHeight);
+	g_engine.MakeVectors(g_engine.get_actor_state(pActor).yaw, forward, right);
+	vec3 start = playerPos + vec3(0, 0, g_engine.get_player_state(player).viewHeight);
 	MapSector* sector = g_map.GetSector(start.x, start.y);
 	TraceResult tr;
-	if (TraceLine(start, start + forward * 64, false, pActor, &tr))
+	if (g_engine.TraceLine(start, start + forward * 64, false, pActor, &tr))
 	{
 		MapLine* line = tr.line;
 
@@ -110,8 +110,8 @@ void wbot_debug_player_nav() {
 			}
 		}
 		if (tr.actor) {
-			navInfo += string("\nActor ") + get_actor_state(tr.actor).name + ":";
-			navInfo += "\n   radius: " + to_string(get_actor_state(tr.actor).radius);
+			navInfo += string("\nActor ") + g_engine.get_actor_state(tr.actor).name + ":";
+			navInfo += "\n   radius: " + to_string(g_engine.get_actor_state(tr.actor).radius);
 		}
 	}
 
@@ -119,14 +119,14 @@ void wbot_debug_player_nav() {
 		+ " "+ to_string((int)playerPos.y)
 		+ " " + to_string((int)playerPos.z);
 
-	int yaw = (int)((uint64_t)get_actor_state(pActor).yaw * 360 / 0x100000000ULL);
-	int pitch = (int)((uint64_t)get_actor_state(pActor).pitch * 360 / 0x100000000ULL);
+	int yaw = (int)((uint64_t)g_engine.get_actor_state(pActor).yaw * 360 / 0x100000000ULL);
+	int pitch = (int)((uint64_t)g_engine.get_actor_state(pActor).pitch * 360 / 0x100000000ULL);
 	navInfo += "\nAngles: " + to_string(yaw) + " " + to_string(pitch);
 
-	bool isClipped = IsBoxClipped(playerPos, get_actor_state(pActor).radius, DUCK_HEIGHT);
+	bool isClipped = IsBoxClipped(playerPos, g_engine.get_actor_state(pActor).radius, DUCK_HEIGHT);
 	//navInfo += string("\nClipped: ") + (isClipped ? "Yes" : "No");
 
-	print_hud_test(navInfo.c_str(), 0.94f, 0.5f, 1234);
+	g_engine.print_hud_test(navInfo.c_str(), 0.94f, 0.5f, 1234);
 }
 
 void wbot_debug(CWootBot* pBot) {
@@ -134,7 +134,7 @@ void wbot_debug(CWootBot* pBot) {
 
 	player_t* pPlayer = pBot->m_pPlayer;
 	AActor* pActor = (AActor*)pBot->pActor;
-	vec3 playerPos = get_actor_state(pActor).origin;
+	vec3 playerPos = g_engine.get_actor_state(pActor).origin;
 	g_wb_nav.draw_nodes(pActor);
 
 	int thisSubId = g_wb_nav.get_nav_id(pPlayer);
@@ -183,7 +183,7 @@ void wbot_debug(CWootBot* pBot) {
 	if (pBot->stateFlags & FL_WBOT_OVERHANG) { stateStr += " OVERHANG"; }
 	if (pBot->stateFlags & FL_WBOT_RUSHING) { stateStr += " RUSH"; }
 	if (pBot->stateFlags & FL_WBOT_SLOW_DOWN) { stateStr += " SLOW_DOWN"; }
-	if (get_player_state(pPlayer).isFrozen) { stateStr += " FROZEN"; }
+	if (g_engine.get_player_state(pPlayer).isFrozen) { stateStr += " FROZEN"; }
 
 	string btnStr = "Buttons: ";
 	if (pBot->m_lButtons & IN_ATTACK) btnStr += " ATTACK";
@@ -196,17 +196,17 @@ void wbot_debug(CWootBot* pBot) {
 	string enemyStr = "Enemy: <none>";
 	if (pBot->target) {
 		AActor* targ = pBot->target;
-		int dist = ((vec2)playerPos - get_actor_state(targ).origin).length();
-		enemyStr = string("Enemy: ") + get_actor_state(targ).name
+		int dist = ((vec2)playerPos - g_engine.get_actor_state(targ).origin).length();
+		enemyStr = string("Enemy: ") + g_engine.get_actor_state(targ).name
 			+ ", Dist: " + to_string(dist);
 	}
 
 	string weaponStr = "Weapons:";
-	for (AActor* item : get_player_weapons((APlayerPawn*)pActor, false)) {
-		string wepname = get_actor_state(item).name;
+	for (AActor* item : g_engine.get_player_weapons((APlayerPawn*)pActor, false)) {
+		string wepname = g_engine.get_actor_state(item).name;
 		WeaponInfo& info = g_wbot_weapon_info[wepname];
 		weaponStr += "\n   " + wepname + " "
-			+ to_string(get_weapon_ammo(item))
+			+ to_string(g_engine.get_weapon_ammo(item))
 			+ " p" + to_string(info.priority);
 		//+ ", [" + to_string(info.minRange) + "," + to_string(info.idealRange) + "," + to_string(info.maxRange) + "] range";
 		if (pBot->m_pstate.weaponName == wepname) {
@@ -222,5 +222,5 @@ void wbot_debug(CWootBot* pBot) {
 	string botInfo = enemyStr + "\n" + weaponStr + "\n" + routeStr + "\n"
 		+ stateStr + "\n" + btnStr + "\n" + stuckStr + "\n" + goalStr;
 
-	print_hud_test(botInfo.c_str(), 0, 0.5f, 1235);
+	g_engine.print_hud_test(botInfo.c_str(), 0, 0.5f, 1235);
 }

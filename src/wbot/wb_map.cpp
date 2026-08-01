@@ -12,33 +12,33 @@ using namespace wbot;
 BotMapInfo wbot::g_map;
 
 float MapSector::getHeight() {
-	SectorState state = get_sector_state(id);
+	SectorState state = g_engine.get_sector_state(id);
 	return state.ceilZ - state.floorZ;
 }
 
 float MapSector::getFloorZ() {
-	return get_sector_state(id).floorZ;
+	return g_engine.get_sector_state(id).floorZ;
 }
 
 float MapSector::getCeilZ() {
-	return get_sector_state(id).ceilZ;
+	return g_engine.get_sector_state(id).ceilZ;
 }
 
 bool MapSector::isMoving() {
-	SectorState state = get_sector_state(id);
+	SectorState state = g_engine.get_sector_state(id);
 	return state.floorMoving || state.ceilMoving;
 }
 
 bool MapSector::isFloorMoving() {
-	return get_sector_state(id).floorMoving;
+	return g_engine.get_sector_state(id).floorMoving;
 }
 
 bool MapSector::isCeilMoving() {
-	return get_sector_state(id).ceilMoving;
+	return g_engine.get_sector_state(id).ceilMoving;
 }
 
 int MapSector::special() {
-	return get_sector_state(id).special;
+	return g_engine.get_sector_state(id).special;
 }
 
 vec2 MapLine::center() {
@@ -56,35 +56,35 @@ int MapLine::length() {
 }
 
 int MapLine::special() {
-	return get_line_state(id).special;
+	return g_engine.get_line_state(id).special;
 }
 
 int MapLine::getArg(int idx) {
-	return get_line_state(id).args[idx];
+	return g_engine.get_line_state(id).args[idx];
 }
 
 bool MapLine::isTeleport() {
-	return get_line_state(id).flags & FL_LINE_IS_TELEPORT;
+	return g_engine.get_line_state(id).flags & FL_LINE_IS_TELEPORT;
 }
 
 bool MapLine::isLockedDoor() {
-	return get_line_state(id).flags & FL_LINE_IS_LOCKED_DOOR;
+	return g_engine.get_line_state(id).flags & FL_LINE_IS_LOCKED_DOOR;
 }
 
 bool MapLine::isLevelExit() {
-	return get_line_state(id).flags & FL_LINE_IS_LEVEL_EXIT;
+	return g_engine.get_line_state(id).flags & FL_LINE_IS_LEVEL_EXIT;
 }
 
 bool MapLine::isImpassable() {
-	return get_line_state(id).flags & FL_LINE_IMPASSABLE;
+	return g_engine.get_line_state(id).flags & FL_LINE_IMPASSABLE;
 }
 
 bool MapLine::canPlayerActivate() {
-	return get_line_state(id).flags & FL_LINE_PLAYER_ACTIVATE;
+	return g_engine.get_line_state(id).flags & FL_LINE_PLAYER_ACTIVATE;
 }
 
 vec2 MapLine::getTeleportDest() {
-	return get_tele_dest(id);
+	return g_engine.get_tele_dest(id);
 }
 
 
@@ -130,16 +130,16 @@ void BotMapInfo::load_lumps() {
 		lines = NULL;
 	}
 
-	MapLumps lumps = load_wad_lump_data();
+	MapLumps lumps = g_engine.load_wad_lump_data();
 
 	if (!lumps.numsubsectors) {
-		gprintf("[wbot] failed to load map data\n");
+		g_engine.gprintf("[wbot] failed to load map data\n");
 		return;
 	}
 
 	for (int i = 0; i < lumps.numsides; i++) {
 		if (lumps.sides[i].sector >= lumps.numsectors) {
-			gprintf("[wbot] Bad lump side %d\n", i);
+			g_engine.gprintf("[wbot] Bad lump side %d\n", i);
 			return;
 		}
 	}
@@ -341,7 +341,7 @@ MapSector* BotMapInfo::GetSector(int x, int y) {
 }
 
 MapSector* BotMapInfo::GetSector(AActor* actor) {
-	vec3 pos = get_actor_state(actor).origin;
+	vec3 pos = g_engine.get_actor_state(actor).origin;
 	return GetSector(pos.x, pos.y);
 }
 
@@ -351,7 +351,7 @@ std::vector<int> BotMapInfo::GetTouchedSubsectors(AActor* actor) {
 	
 	unordered_set<int> subs;
 
-	ActorState astate = get_actor_state(actor);
+	ActorState astate = g_engine.get_actor_state(actor);
 	int r = astate.radius;
 	float d = (r * 0.7071f);
 	vec3 pos = astate.origin;
@@ -516,7 +516,7 @@ std::vector<LinkSeg> BotMapInfo::get_neighbor_subsectors(MapSubsector* rootSub, 
 }
 
 bool BotMapInfo::subsector_does_damage(MapSubsector* sub) {
-	return get_sector_state(sub->sector->id).floorDamage;
+	return g_engine.get_sector_state(sub->sector->id).floorDamage;
 }
 
 void BotMapInfo::find_linedef_sectors() {
@@ -530,7 +530,7 @@ void BotMapInfo::find_linedef_sectors() {
 		if (!line.canPlayerActivate())
 			continue;
 
-		LineState lstate = get_line_state(i);
+		LineState lstate = g_engine.get_line_state(i);
 		int lineAction = lstate.goalAction;
 		bool doubleSidedCrossLine = lstate.flags & FL_LINE_DOUBLE_SIDE_CROSS;
 
@@ -552,7 +552,7 @@ void BotMapInfo::find_linedef_sectors() {
 		int routeToId = frontSubId;
 
 		if (line.backsector && frontSubId == backSubId)
-			gprintf("Front/back subsectors of line %d are the same!\n", i);
+			g_engine.gprintf("Front/back subsectors of line %d are the same!\n", i);
 
 		if (doubleSidedCrossLine) {
 			// pick the side that allows crossing so that bot doesn't try to cross lines from the bottom of a cliff
@@ -580,7 +580,7 @@ void BotMapInfo::add_sector_info() {
 				if (!line.tag || line.tag != sec.tag)
 					continue;
 
-				LineState state = get_line_state(k);
+				LineState state = g_engine.get_line_state(k);
 
 				if (state.moveFlags && (state.flags & FL_LINE_PLAYER_ACTIVATE)) {
 					sec.moveFlags |= state.moveFlags;
@@ -603,7 +603,7 @@ void BotMapInfo::add_sector_info() {
 			if (line.tag || line.backsector != &sec)
 				continue;
 
-			LineState state = get_line_state(k);
+			LineState state = g_engine.get_line_state(k);
 
 			if (state.moveFlags && (state.flags & FL_LINE_PLAYER_ACTIVATE)) {
 				sec.moveFlags |= state.moveFlags;
@@ -612,7 +612,7 @@ void BotMapInfo::add_sector_info() {
 		}
 	}
 
-	add_stair_sector_info();
+	g_engine.add_stair_sector_info();
 }
 
 void BotMapInfo::remove_invalid_goals(int secid) {

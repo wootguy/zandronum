@@ -14,7 +14,7 @@ using namespace std;
 using namespace wbot;
 
 CWootBot::CWootBot(const char* pszName, const char* pszTeamName, uint32_t ulPlayerNum)
-	: m_pPlayer(init_bot(this, ulPlayerNum, "", "", "", pszTeamName)), m_routeController(this), m_combatController(this) {
+	: m_pPlayer(g_engine.init_bot(this, ulPlayerNum, "", "", "", pszTeamName)), m_routeController(this), m_combatController(this) {
 
 	m_fov = 180;
 	m_debug = true;
@@ -22,7 +22,7 @@ CWootBot::CWootBot(const char* pszName, const char* pszTeamName, uint32_t ulPlay
 }
 
 void CWootBot::Think() {
-	if (intermission_active()) {
+	if (g_engine.intermission_active()) {
 		return;
 	}
 
@@ -37,7 +37,7 @@ void CWootBot::Think() {
 		wbot_debug(this);
 	}
 
-	if (get_game_tics() < m_nextThink || m_pstate.isFrozen) {
+	if (g_engine.get_game_tics() < m_nextThink || m_pstate.isFrozen) {
 		return;
 	}
 
@@ -78,7 +78,7 @@ void CWootBot::Think() {
 }
 
 void CWootBot::Reset() {
-	pActor = get_player(m_pPlayer);
+	pActor = g_engine.get_player(m_pPlayer);
 	target = NULL;
 	m_routeController = CBotRouteController(this);
 	m_combatController = CBotCombatController(this);
@@ -101,8 +101,8 @@ void CWootBot::Reset() {
 
 void CWootBot::DebugPrint(const char* msg) {
 	if (m_debug) {
-		PrintNotification(msg);
-		gprintf(msg);
+		g_engine.PrintNotification(msg);
+		g_engine.gprintf(msg);
 	}
 }
 
@@ -269,17 +269,17 @@ bool CWootBot::StuckThink(int maxStuck) {
 void CWootBot::AimAtPos(vec3 pos) {
 	float viewZ = m_astate.origin.z + m_pstate.viewHeight;
 	float dist = (vec2(pos.x, pos.y) - m_astate.origin).length();
-	m_astate.pitch = -(int32_t)PointToAngle2(0, viewZ, dist, pos.z);
-	m_astate.yaw = PointToAngle2(m_astate.origin.x, m_astate.origin.y, pos.x, pos.y);
+	m_astate.pitch = -(int32_t)g_engine.PointToAngle2(0, viewZ, dist, pos.z);
+	m_astate.yaw = g_engine.PointToAngle2(m_astate.origin.x, m_astate.origin.y, pos.x, pos.y);
 }
 
 bool CWootBot::TraceAhead(int dist, vec3 offset, bool ignoreMonsters, TraceResult* tr) {
 	vec3 forward, right;
-	MakeVectors(m_astate.yaw, forward, right);
+	g_engine.MakeVectors(m_astate.yaw, forward, right);
 	vec3 start = m_astate.origin + offset;
 	vec3 end = start + forward * dist;
 
-	return TraceLine(start, end, ignoreMonsters, (AActor*)pActor, tr);
+	return g_engine.TraceLine(start, end, ignoreMonsters, (AActor*)pActor, tr);
 }
 
 bool CWootBot::MoveTo(vec2 pos, int radius, int speed) {
@@ -310,7 +310,7 @@ bool CWootBot::MoveTo(vec2 pos, int radius, int speed) {
 		if (!lineIsMoving) {
 			// activate any triggered line to fix face rubbing on walls when the bot is failing
 			// to get to a tiny sector in front of a door/button.
-			int action = get_line_state(tr.line->id).goalAction;
+			int action = g_engine.get_line_state(tr.line->id).goalAction;
 
 			if (action == WBOT_GOAL_ACTION_USE)
 				Use();
@@ -344,7 +344,7 @@ bool CWootBot::MoveTo(vec2 pos, int radius, int speed) {
 
 	// convert directinal vectors to forward/strafe movents relative to the look direction
 	vec3 forward, right;
-	MakeVectors(m_astate.yaw, forward, right);
+	g_engine.MakeVectors(m_astate.yaw, forward, right);
 	m_forwardMove = dotProduct(moveDir, forward);
 	m_sideMove = dotProduct(moveDir, right);
 
@@ -377,11 +377,11 @@ vec2 CWootBot::AvoidCornersVector(vec2 wantDir) {
 	vec3 leftPos = viewPos + rightDir * -rightOfs;
 	TraceResult trLeft, trRight;
 
-	TraceLine(rightPos, rightPos + testDir, false, (AActor*)pActor, &trRight);
-	TraceLine(leftPos, leftPos + testDir, false, (AActor*)pActor, &trLeft);
+	g_engine.TraceLine(rightPos, rightPos + testDir, false, (AActor*)pActor, &trRight);
+	g_engine.TraceLine(leftPos, leftPos + testDir, false, (AActor*)pActor, &trLeft);
 
 	bool hitProp = trRight.actor || trLeft.actor;
-	bool canChangeDir = !hitProp || get_game_tics() - m_lastAvoidPropDirChange > 70;
+	bool canChangeDir = !hitProp || g_engine.get_game_tics() - m_lastAvoidPropDirChange > 70;
 	if (!canChangeDir) {
 		if (trLeft.frac < 1.0f || trRight.frac < 1.0f) {
 			return rightDir * m_lastAvoidPropDir;
@@ -405,7 +405,7 @@ vec2 CWootBot::AvoidCornersVector(vec2 wantDir) {
 				draw_debug_line(leftPos, leftPos + testDir * 32, pActor);
 			}
 			*/
-			m_lastAvoidPropDirChange = get_game_tics();
+			m_lastAvoidPropDirChange = g_engine.get_game_tics();
 			m_lastAvoidPropDir = trRight.frac < trLeft.frac ? -1 : 1;
 			return rightDir * m_lastAvoidPropDir;
 		}
@@ -549,7 +549,7 @@ bool CWootBot::FindGoal() {
 	}
 	else if (m_followPlayer) {
 		int thisSubId = g_wb_nav.get_nav_id((AActor*)pActor);
-		AActor* player = find_followable_player(thisSubId);
+		AActor* player = g_engine.find_followable_player(thisSubId);
 	}
 
 	return m_routeController.HasRoute();
@@ -561,13 +561,13 @@ bool CWootBot::PushLevelEndGoal() {
 	for (int i = 0; i < g_map.numlines; i++) {
 		MapLine& line = g_map.lines[i];
 		if (line.isLevelExit()) {
-			if (PushGoal(BotGoal(get_line_state(i).goalAction, i), NULL)) {
+			if (PushGoal(BotGoal(g_engine.get_line_state(i).goalAction, i), NULL)) {
 				return true;
 			}
 		}
 	}
 
-	AActor* boss = find_boss_brain();
+	AActor* boss = g_engine.find_boss_brain();
 	if (boss && PushGoal(BotGoal(WBOT_GOAL_ACTION_BOSS_BRAIN, boss), NULL)) {
 		return true;
 	}
@@ -615,7 +615,7 @@ bool CWootBot::PushGoal(const BotGoal& goal, NavSectorLink* purposeLink) {
 }
 
 bool CWootBot::PushKeyGoals(MapLine* line) {
-	if (line->isLockedDoor() && !can_unlock_door((AActor*)pActor, line)) {
+	if (line->isLockedDoor() && !g_engine.can_unlock_door((AActor*)pActor, line)) {
 		vector<BotGoal> keyGoals;
 
 		m_routeController.MarkBlockedPaths();
@@ -658,7 +658,7 @@ bool CWootBot::SelectGoal(vector<BotGoal>& goals, NavSectorLink* purposeLink, in
 			continue;
 
 		MapLine* line = goal.lineid >= 0 ? &g_map.lines[goal.lineid] : NULL;
-		if (line && !(get_line_state(line->id).moveFlags & movementNeeded)) {
+		if (line && !(g_engine.get_line_state(line->id).moveFlags & movementNeeded)) {
 			continue; // line would not move the sector in a way thats needed
 		}
 
@@ -729,7 +729,7 @@ void CWootBot::CompleteGoal() {
 }
 
 void CWootBot::FailGoal() {
-	m_nextThink = get_game_tics() + 7; // failing lots of goals at once could cause lag
+	m_nextThink = g_engine.get_game_tics() + 7; // failing lots of goals at once could cause lag
 
 	if (m_goals.empty()) {
 		return;
@@ -741,7 +741,7 @@ void CWootBot::FailGoal() {
 	DebugPrint(VarArgs("FAILED %s '%s'\n", m_goals.size() == 1 ? "goal" : "subgoal", curGoal.desc().c_str()));
 
 	if (m_routeController.m_freezeOnGoalFail) {
-		freeze_player(m_pPlayer, true);
+		g_engine.freeze_player(m_pPlayer, true);
 	}
 
 	bool bubbleFailure = curGoal.required;
@@ -749,7 +749,7 @@ void CWootBot::FailGoal() {
 	if ((!bubbleFailure || m_goals.size() == 1)) {
 		if (++goalFailCounter > 10) {
 			DebugPrint("I can't reach any goals from here! Time to die.\n");
-			kill_actor((AActor*)pActor);
+			g_engine.kill_actor((AActor*)pActor);
 		}
 	}
 
@@ -769,22 +769,22 @@ void CWootBot::FailGoal() {
 }
 
 void CWootBot::Use(int ticsBetweenUses) {
-	if (get_game_tics() - m_lastUse < ticsBetweenUses) {
+	if (g_engine.get_game_tics() - m_lastUse < ticsBetweenUses) {
 		return;
 	}
 
 	m_lButtons |= IN_USE;
-	m_lastUse = get_game_tics();
+	m_lastUse = g_engine.get_game_tics();
 }
 
 void CWootBot::Attack() {
 	m_lButtons |= IN_ATTACK;
-	m_combatController.m_lastAttack = get_game_tics();
+	m_combatController.m_lastAttack = g_engine.get_game_tics();
 }
 
 void CWootBot::HandleLineActivation(MapLine* line, AActor* activator) {
 	if (line->special() && line->isLockedDoor()) {
-		if (!can_unlock_door(activator, line)) {
+		if (!g_engine.can_unlock_door(activator, line)) {
 			// door wasn't actually opened
 			if (activator == (AActor*)pActor) {
 				// we tried to activate this. Add the key goals now. They may have been skipped if this
