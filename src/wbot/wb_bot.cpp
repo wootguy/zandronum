@@ -179,10 +179,8 @@ void CWootBot::GoalActionThink() {
 		if (goal.lineid >= 0) {
 			// move through the line to the backside of it
 			MapLine* line = &g_map.lines[goal.lineid];
-			FVector2 backDir = line->normal() * -1;
-			FVector2 backGoal = line->center() + backDir * 32;
-
-			fixed_t dist = (backGoal - m_origin).Length();
+			vec2 backDir = line->normal() * -1;
+			vec2 backGoal = line->center() + backDir * 32;
 
 			// be careful not to miss skinny lines
 			int speed = line->length() > 32 ? RUN_SPEED : RUN_SPEED / 4;
@@ -206,7 +204,7 @@ void CWootBot::GoalActionThink() {
 		MoveTo(goal.pos(), 100);
 
 		TraceResult tr;
-		TraceAhead(shootRange, FVector3(0, 0, m_viewHeight), false, &tr);
+		TraceAhead(shootRange, vec3(0, 0, m_viewHeight / FRACUNIT), false, &tr);
 		if (tr.line && (tr.line - g_map.lines) == goal.lineid) {
 			Attack();
 		}
@@ -233,7 +231,7 @@ void CWootBot::GoalActionThink() {
 
 		//draw_debug_line(goal.shootAlignment.shootFrom, goal.shootAlignment.shootAt, pActor);
 
-		int dist = GetDistance(goal.shootAlignment.shootFrom) >> FRACBITS;
+		int dist = GetDistance(goal.shootAlignment.shootFrom);
 		int moveSpeed = std::min(RUN_SPEED, dist);
 		if (MoveTo(goal.shootAlignment.shootFrom, 8, moveSpeed) && GetSpeed2D() < 10) {
 			AimAtPos(goal.shootAlignment.shootAt);
@@ -249,10 +247,10 @@ void CWootBot::GoalActionThink() {
 }
 
 bool CWootBot::StuckThink(int maxStuck) {
-	fixed_t movedDist = (m_origin - lastPos).Length();
+	float movedDist = (m_origin - lastPos).length();
 	lastPos = m_origin;
 
-	if ((m_forwardMove || m_sideMove) && movedDist <= (1 << FRACBITS) * m_speedMult) {
+	if ((m_forwardMove || m_sideMove) && movedDist <= 1.0f * m_speedMult) {
 		stuckCounter += 10;
 		if (stuckCounter > maxStuck) {
 			stuckCounter = 0;
@@ -268,39 +266,38 @@ bool CWootBot::StuckThink(int maxStuck) {
 	return false;
 }
 
-void CWootBot::AimAtPos(FVector3 pos) {
-	fixed_t viewZ = m_origin.Z + m_viewHeight;
-	fixed_t dist = (FVector2(pos.X, pos.Y) - m_origin).Length();
-	m_pitch = -(SDWORD)PointToAngle2(0, viewZ, dist, pos.Z);
-	m_yaw = PointToAngle2(m_origin.X, m_origin.Y, pos.X, pos.Y);
+void CWootBot::AimAtPos(vec3 pos) {
+	float viewZ = m_origin.z + m_viewHeight / (float)FRACUNIT;
+	float dist = (vec2(pos.x, pos.y) - m_origin).length();
+	m_pitch = -(SDWORD)PointToAngle2(0, viewZ * FRACUNIT, dist * FRACUNIT, pos.z * FRACUNIT);
+	m_yaw = PointToAngle2(m_origin.x * FRACUNIT, m_origin.y * FRACUNIT, pos.x * FRACUNIT, pos.y * FRACUNIT);
 }
 
-bool CWootBot::TraceAhead(int dist, FVector3 offset, bool ignoreMonsters, TraceResult* tr) {
-	FVector3 forward, right;
+bool CWootBot::TraceAhead(int dist, vec3 offset, bool ignoreMonsters, TraceResult* tr) {
+	vec3 forward, right;
 	MakeVectors(m_yaw, forward, right);
-	FVector3 start = m_origin + offset;
-	FVector3 end = start + forward * dist;
+	vec3 start = m_origin + offset;
+	vec3 end = start + forward * dist;
 
 	return TraceLine(start, end, ignoreMonsters, (AActor*)pActor, tr);
 }
 
-bool CWootBot::MoveTo(FVector2 pos, int radius, int speed) {
-	float z = (float)(m_origin.Z + m_viewHeight);
-	AimAtPos(FVector3(pos.X, pos.Y, z));
+bool CWootBot::MoveTo(vec2 pos, int radius, int speed) {
+	float z = (float)(m_origin.z + m_viewHeight / (float)FRACUNIT);
+	AimAtPos(vec3(pos.x, pos.y, z));
 
-	FVector2 wantDir = pos - m_origin;
-	wantDir.MakeUnit();
+	vec2 wantDir = (pos - m_origin).normalize();
 
 	// jump over walls and activate things in front of us
 	TraceResult tr;
 	int useDist = m_useDistance - 1;
-	if (TraceAhead(useDist, FVector3(0, 0, STEP_HEIGHT << FRACBITS), true, &tr)) {
+	if (TraceAhead(useDist, vec3(0, 0, STEP_HEIGHT), true, &tr)) {
 		int d = tr.frac * useDist;
 
 		// jump if not too far and this isn't an impassable wall
 		if (tr.line->backsector && d < 32 && m_onGround) {
-			fixed_t backZ = tr.line->backsector->getFloorZ();
-			int jumpHeight = (fixed_t)(backZ - m_origin.Z) >> FRACBITS;
+			float backZ = tr.line->backsector->getFloorZ();
+			int jumpHeight = backZ - m_origin.z;
 
 			// ...and it's possible and necessary to jump up
 			if (jumpHeight > STEP_HEIGHT && jumpHeight <= JUMP_HEIGHT)
@@ -324,9 +321,9 @@ bool CWootBot::MoveTo(FVector2 pos, int radius, int speed) {
 	}
 
 	// combine desired vector with avoidance vectors
-	FVector2 avoidCornersDir = AvoidCornersVector(wantDir);
-	FVector2 avoidLedgeDir = AvoidLedges((AActor*)pActor, m_cliffDist);
-	FVector2 moveDir = wantDir + avoidCornersDir;
+	vec2 avoidCornersDir = AvoidCornersVector(wantDir);
+	vec2 avoidLedgeDir = AvoidLedges((AActor*)pActor, m_cliffDist);
+	vec2 moveDir = wantDir + avoidCornersDir;
 
 	if (!m_routeController.jumpState) {
 		if (m_cliffDist < 0) {
@@ -335,33 +332,29 @@ bool CWootBot::MoveTo(FVector2 pos, int radius, int speed) {
 			moveDir = avoidLedgeDir;
 			speed = std::min(RUN_SPEED, speed * 2);
 
-			//FVector3 dpos(pos, z);
-			//draw_debug_line(dpos, dpos + FVector3(avoidLedgeDir, 0) * (100 << FRACBITS), pActor);
+			//vec3 dpos(pos, z);
+			//draw_debug_line(dpos, dpos + vec3(avoidLedgeDir, 0) * 100, pActor);
 		}
 		else {
 			moveDir += avoidLedgeDir * 0.5f;
 		}
 	}
 
-	moveDir.MakeUnit();
-	moveDir *= speed;
+	moveDir = moveDir.normalize(speed);
 
 	// convert directinal vectors to forward/strafe movents relative to the look direction
-	FVector3 forward, right;
+	vec3 forward, right;
 	MakeVectors(m_yaw, forward, right);
-	forward.MakeUnit();
-	right.MakeUnit();
-	m_forwardMove = DotProduct(moveDir, forward);
-	m_sideMove = DotProduct(moveDir, right);
+	m_forwardMove = dotProduct(moveDir, forward);
+	m_sideMove = dotProduct(moveDir, right);
 
-	fixed_t dist = (pos - m_origin).Length();
-	return dist < (radius << FRACBITS);
+	float dist = (pos - m_origin).length();
+	return dist < radius;
 }
 
 bool CWootBot::StopMoving() {
-	FVector2 pos = m_origin;
-	FVector2 vel = m_velocity;
-	FVector2 opposingPos = m_origin - (vel.Unit() * (100 << FRACBITS));
+	vec2 vel = m_velocity;
+	vec2 opposingPos = m_origin - (vel.normalize() * 100);
 
 	int speed = GetSpeed2D();
 
@@ -373,15 +366,15 @@ bool CWootBot::StopMoving() {
 	return speed == 0;
 }
 
-FVector2 CWootBot::AvoidCornersVector(FVector2 wantDir) {
+vec2 CWootBot::AvoidCornersVector(vec2 wantDir) {
 	// strafe around objects/walls partially blocking the way
-	fixed_t zTest = (STEP_HEIGHT + 1) << FRACBITS;
-	FVector3 testDir = FVector3(wantDir.X * FRACUNIT, wantDir.Y * FRACUNIT, 0) * 32;
-	FVector3 viewPos = m_origin + FVector3(0, 0, zTest);
-	fixed_t rightOfs = 16 << FRACBITS;
-	FVector3 rightDir(wantDir.Y, -wantDir.X, 0);
-	FVector3 rightPos = viewPos + rightDir * rightOfs;
-	FVector3 leftPos = viewPos + rightDir * -rightOfs;
+	float zTest = STEP_HEIGHT + 1;
+	vec3 testDir = vec3(wantDir.x, wantDir.y, 0) * 32;
+	vec3 viewPos = m_origin + vec3(0, 0, zTest);
+	float rightOfs = 16;
+	vec3 rightDir(wantDir.y, -wantDir.x, 0);
+	vec3 rightPos = viewPos + rightDir * rightOfs;
+	vec3 leftPos = viewPos + rightDir * -rightOfs;
 	TraceResult trLeft, trRight;
 
 	TraceLine(rightPos, rightPos + testDir, false, (AActor*)pActor, &trRight);
@@ -418,15 +411,13 @@ FVector2 CWootBot::AvoidCornersVector(FVector2 wantDir) {
 		}
 	}
 
-	return FVector2(0, 0);
+	return vec2(0, 0);
 }
 
-FVector2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
-	//NavSector& nav = g_wb_nav.mesh[m_navid];
-	//FVector2 plrPos(pActor->x, pActor->y);
-	int subid = g_map.GetSubsector(m_origin.X, m_origin.Y) - g_map.subsectors;
+vec2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
+	int subid = g_map.GetSubsector(m_origin.x, m_origin.y) - g_map.subsectors;
 	NavSector* nav = &g_wb_nav.mesh.nodes[subid];
-	FVector2 plrPos = m_origin;
+	vec2 plrPos = m_origin;
 
 	int targetNav = -1;
 	int idealNav = -1;
@@ -448,7 +439,7 @@ FVector2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
 		}
 	}
 
-	fixed_t ignoreZ = m_origin.Z + (STEP_HEIGHT << FRACBITS); // can't fall off a cliff above us
+	float ignoreZ = m_origin.z + STEP_HEIGHT; // can't fall off a cliff above us
 
 	// get nearby sectors in case nearest ledge is at the corner of the current
 	std::vector<NavSector*> sectors;
@@ -463,7 +454,7 @@ FVector2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
 		}
 	}
 
-	FVector2 worstNormal(0,0);
+	vec2 worstNormal(0,0);
 	int worstDist = INT_MAX;
 	int worsetSec = -1;
 	int worstLink = -1;
@@ -483,17 +474,18 @@ FVector2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
 			if (ignoreLinks.count(link->id))
 				continue;
 
-			FVector2 v1 = link->seg.a;
-			FVector2 v2 = link->seg.b;
-			FVector2 normal = link->seg.normal();
+			vec2 v1 = link->seg.a;
+			vec2 v2 = link->seg.b;
+			vec2 normal = link->seg.normal();
 
 			// distance to axis
-			int dist = (int)DotProduct(plrPos - v1, normal) >> FRACBITS;
+			int dist = (int)dotProduct(plrPos - v1, normal);
 			
 			if (dist < 0 && testSec != nav)
 				continue; // can't have fallen off a cliff in a neighbor sector
 
-			ExtendSegment(v1, v2, m_radius);
+			ExtendSegment(v1, v2, m_radius >> FRACBITS);
+
 			if (!PointAlignedSegment(plrPos, v1, v2))
 				continue; // off to the side of this segment
 
@@ -506,7 +498,7 @@ FVector2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
 		}
 	}
 
-	FVector2 avoidForce(0, 0);
+	vec2 avoidForce(0, 0);
 
 	if (worstDist < SAFE_CLIFF_DIST) {
 		cliffDist = worstDist;
@@ -516,9 +508,9 @@ FVector2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
 		cliffDist = 9999;
 	}
 
-	//FVector3 headPos = FVector3(plrPos.X, plrPos.Y, pActor->z + (56 << FRACBITS));
-	//FVector3 dir = FVector3(avoidForce.X, avoidForce.Y, 0);
-	//fixed_t scale = 200 << FRACBITS;
+	//FVector3 headPos = vec3(plrPos, pActor->z / FRACUNIT + 56);
+	//FVector3 dir = vec3(avoidForce, 0);
+	//float scale = 200;
 	//draw_debug_line(headPos, headPos + dir * scale, pActor);
 
 	return avoidForce;
@@ -530,24 +522,24 @@ void CWootBot::UpdatePositionFlags() {
 	stateFlags &= ~(FL_WBOT_FLYING | FL_WBOT_ON_ELEV | FL_WBOT_OVERHANG);
 	if (m_routeController.m_navCur) {
 		NavSector& nav = g_wb_nav.mesh.nodes[m_routeController.m_navid];
-		if (m_origin.Z > nav.getFloorZ())
+		if (m_origin.z > nav.getFloorZ())
 			stateFlags |= m_onGround ? FL_WBOT_OVERHANG : FL_WBOT_FLYING;
 		if (nav.sector->isFloorMoving())
 			stateFlags |= FL_WBOT_ON_ELEV;
 	}
 }
 
-FVector3 CWootBot::GetViewPos() {
-	return m_origin + FVector3(0, 0, m_viewHeight);
+vec3 CWootBot::GetViewPos() {
+	return m_origin + vec3(0, 0, m_viewHeight / FRACUNIT);
 }
 
-fixed_t CWootBot::GetDistance(FVector2 p) {
-	return (p - m_origin).Length();
+float CWootBot::GetDistance(vec2 p) {
+	return (p - m_origin).length();
 }
 
 int CWootBot::GetSpeed2D() {
 	// TODO: why is this conversion to cmd speeds weird?
-	return (FVector2(m_velocity.X, m_velocity.Y).Length() / FRACUNIT) * 8.0f;
+	return vec2(m_velocity.x, m_velocity.y).length() * 8.0f;
 }
 
 bool CWootBot::FindGoal() {

@@ -63,7 +63,7 @@ void CBotRouteController::Think() {
 	}
 	else if (route.size() == 1) {
 		// reached the final node. Move to the center.
-		FVector2 centerGoal = m_navIdeal->pos();
+		vec2 centerGoal = m_navIdeal->pos();
 		if (pBot->MoveTo(centerGoal, m_nodeRadius, m_routeSpeed)) {
 			route.clear(); // don't reset pretendsector in case a goal is inside it
 		}
@@ -97,9 +97,9 @@ void CBotRouteController::UpdateRoute() {
 			}
 		}
 		else {
-			FVector2 center = g_wb_nav.mesh.nodes[route[1]].pos();
-			fixed_t dist = (center - pBot->m_origin).Length();
-			if (pBot->stuckCounter >= 200 && dist < (16 << FRACBITS)) {
+			vec2 center = g_wb_nav.mesh.nodes[route[1]].pos();
+			float dist = (center - pBot->m_origin).length();
+			if (pBot->stuckCounter >= 200 && dist < 16) {
 				// already very close to the center, so this is probably a tiny polygon jammed
 				// up against a wall. The bot can't get close enough in this case, so advance
 				// the route now and pretend the bot is inside the target sector.
@@ -168,7 +168,7 @@ bool CBotRouteController::BeCareful() {
 		NavSector& targetNav = g_wb_nav.mesh.nodes[route[1]];
 		NavSectorLink* link = idealNav.getLink(route[1]);
 		headingTowardsCliff = targetNav.hasCliffs && link->linkWidth < 32
-			&& targetNav.getFloorZ() < (pBot->m_origin.Z + (STEP_HEIGHT << FRACBITS));
+			&& targetNav.getFloorZ() < (pBot->m_origin.z + STEP_HEIGHT);
 	}
 
 	if (pBot->m_cliffDist < SAFE_CLIFF_DIST * 0.5f || headingTowardsCliff) {
@@ -201,11 +201,11 @@ bool CBotRouteController::BeCareful() {
 }
 
 void CBotRouteController::JumpThink() {
-	FVector3 pos = pBot->m_origin;
+	vec3 pos = pBot->m_origin;
 
 	switch (jumpState) {
 	case WBOT_JUMP_PREP: {
-		int dist = pBot->GetDistance(jumpBackupPos) >> FRACBITS;
+		int dist = pBot->GetDistance(jumpBackupPos);
 		int startSpeed = RUN_SPEED * 0.2f;
 		m_routeSpeed = RUN_SPEED;
 		if (dist < 64) {
@@ -230,10 +230,10 @@ void CBotRouteController::JumpThink() {
 	}
 	case WBOT_JUMP_LAUNCH: {
 		if (pBot->stateFlags & FL_WBOT_OVERHANG) {
-			if (g_wb_nav.get_nav_id(pos.X, pos.Y) == m_navTarget->id) {
+			if (g_wb_nav.get_nav_id(vec2(pos.x, pos.y)) == m_navTarget->id) {
 				// target is underneath us and close to a cliff. Keep moving forward until falling off
-				FVector2 moveDir = (jumpEndPos - jumpStartPos).Unit();
-				pBot->MoveTo(jumpEndPos + moveDir * (100 << FRACUNIT), 0, m_routeSpeed);
+				vec2 moveDir = (jumpEndPos - jumpStartPos).normalize();
+				pBot->MoveTo(jumpEndPos + moveDir * 100, 0, m_routeSpeed);
 			}
 		}
 		else {
@@ -243,8 +243,8 @@ void CBotRouteController::JumpThink() {
 
 		if (pBot->stateFlags & (FL_WBOT_OVERHANG | FL_WBOT_FLYING)) {
 			// bot is over a ledge now, start the jump
-			bool bigJump = m_navLink->jumpDist > 100 << FRACBITS;
-			if (m_navTarget->getFloorZ() > m_navIdeal->getFloorZ() + (STEP_HEIGHT << FRACBITS))
+			bool bigJump = m_navLink->jumpDist > 100;
+			if (m_navTarget->getFloorZ() > m_navIdeal->getFloorZ() + STEP_HEIGHT)
 				bigJump = true;
 
 			if (bigJump)
@@ -274,16 +274,16 @@ void CBotRouteController::JumpThink() {
 		}
 		else {
 			// try to land in the right spot
-			FVector3 landPos = FVector3(jumpEndPos, m_navTarget->getFloorZ());
+			vec3 landPos = vec3(jumpEndPos, m_navTarget->getFloorZ());
 
 			// TODO: this is totally wrong but for some reason passes the tests
-			FVector3 typoPos(pBot->m_origin.Z, pBot->m_origin.Y, pBot->m_origin.Z);
+			vec3 typoPos(pBot->m_origin.z, pBot->m_origin.y, pBot->m_origin.z);
 
-			FVector3 idealDir = (landPos - typoPos).Unit();
-			FVector3 velDir = pBot->m_velocity.Unit();
-			fixed_t distLeft = pBot->GetDistance(landPos);
+			vec3 idealDir = (landPos - typoPos).normalize();
+			vec3 velDir = pBot->m_velocity.normalize();
+			float distLeft = pBot->GetDistance(landPos);
 
-			if (distLeft > (192 << FRACBITS) || idealDir.Z > velDir.Z) {
+			if (distLeft > 192 || idealDir.z > velDir.z) {
 				// falling short, keep building speed
 				pBot->MoveTo(jumpEndPos, 0, m_routeSpeed);
 				pBot->m_lButtons |= IN_DUCK; // just in case
@@ -294,7 +294,7 @@ void CBotRouteController::JumpThink() {
 			}
 		}
 
-		if (m_navTarget->getFloorZ() > pBot->m_origin.Z + (JUMP_HEIGHT << FRACBITS)) {
+		if (m_navTarget->getFloorZ() > pBot->m_origin.z + JUMP_HEIGHT) {
 			JumpFail();
 			return;
 		}
@@ -379,8 +379,8 @@ bool CBotRouteController::ElevatorThink(bool linkBlocked) {
 
 		if (m_navLink->isJump) {
 			// If the next link is a jump, wait until the very top for better success chance
-			fixed_t elevZ = thisSector->getFloorZ();
-			fixed_t moveDelta = elevZ - m_lastElevZ;
+			float elevZ = thisSector->getFloorZ();
+			float moveDelta = elevZ - m_lastElevZ;
 
 			// elevator stopped at the top
 			waitedLongEnough = !linkBlocked && moveDelta == 0;
@@ -404,15 +404,15 @@ bool CBotRouteController::ElevatorThink(bool linkBlocked) {
 			pBot->stateFlags |= FL_WBOT_WAIT_ELEV;
 
 			// stay centered on the elevator to avoid blocking it or falling off
-			FVector2 navPos = m_navCur->pos();
-			if ((navPos - pBot->m_origin).Length() > (16 << FRACBITS))
+			vec2 navPos = m_navCur->pos();
+			if ((navPos - pBot->m_origin).length() > 16)
 				pBot->MoveTo(navPos, 0, RUN_SPEED / 4);
 
 			if (linkBlocked) {
-				fixed_t backFloor = m_navTarget->getFloorZ();
-				fixed_t frontCeil = m_navIdeal->getCeilZ();
+				float backFloor = m_navTarget->getFloorZ();
+				float frontCeil = m_navIdeal->getCeilZ();
 
-				if (frontCeil - backFloor < (DUCK_HEIGHT << FRACBITS)) {
+				if (frontCeil - backFloor < DUCK_HEIGHT) {
 					// too low of a ceil in the start sector to duck thru to the target floor
 					// see if the ceiling can be raised, to avoid waiting on an elevator
 					// forever (doom2 map15, map27)
@@ -433,22 +433,22 @@ bool CBotRouteController::ElevatorThink(bool linkBlocked) {
 
 void CBotRouteController::MoveThruLink() {
 	// duck if unable to fit while standing
-	int targetHeight = m_navTarget->getHeight() >> FRACBITS;
-	int borderHeight = (m_navTarget->getCeilZ() - m_navIdeal->getFloorZ()) >> FRACBITS;
+	int targetHeight = m_navTarget->getHeight();
+	int borderHeight = m_navTarget->getCeilZ() - m_navIdeal->getFloorZ();
 	if (std::min(targetHeight, borderHeight) < STAND_HEIGHT) {
 		pBot->m_lButtons |= IN_DUCK;
 	}
 
 	if (m_navLink->isJump) {
 		// get a running start for the jump
-		if (m_navLink->jumpDist > (PLAYER_WIDTH << FRACBITS)) {
+		if (m_navLink->jumpDist > PLAYER_WIDTH) {
 			jumpState = WBOT_JUMP_PREP;
 		}
 		else {
 			jumpState = WBOT_JUMP_RUN; // skip the prep and head straight for the jump point
 		}
 		
-		FVector2 targetPos = m_navLink->target->pos();
+		vec2 targetPos = m_navLink->target->pos();
 		jumpBackupPos = m_navLink->GetJumpBackupPos(targetPos, (AActor*)pActor);
 		jumpStartPos = m_navLink->GetJumpStartPos(targetPos);
 		jumpEndPos = m_navLink->GetJumpEndPos(targetPos);
@@ -466,15 +466,15 @@ void CBotRouteController::MoveThruLink() {
 			if (m_navLink->isTeleport && m_navLink->linedef) {
 				// move behind the teleporter line edge.
 				// The target sector may be in a completely different direction.
-				FVector2 backDir = m_navLink->linedef->normal() * -1;
-				FVector2 teleGoal = m_navLink->pos() + backDir * 200;
+				vec2 backDir = m_navLink->linedef->normal() * -1;
+				vec2 teleGoal = m_navLink->pos() + backDir * 200;
 				pBot->MoveTo(teleGoal, 0, m_routeSpeed);
 			}
 			else {
 				if (m_navLink->isCliff) {
 					// may need to move past the center in case its a tiny polygon under a cliff
-					FVector2 dropDir = (m_navTarget->pos() - m_navLink->pos()).Unit();
-					pBot->MoveTo(m_navLink->pos() + dropDir * (100 << FRACBITS), 0, m_routeSpeed);
+					vec2 dropDir = (m_navTarget->pos() - m_navLink->pos()).normalize();
+					pBot->MoveTo(m_navLink->pos() + dropDir * 100, 0, m_routeSpeed);
 				}
 				else {
 					// move towards the target sector until we end up inside it
@@ -509,9 +509,9 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link, int blockReason)
 	// wait for doors to open
 	bool isBlockerMoving = link->target->isMoving();
 	if (!isBlockerMoving && blockReason == LINK_BLOCK_CLIPPED) {
-		fixed_t linkZ = link->parent->getFloorZ() + (JUMP_HEIGHT << FRACBITS);
+		float linkZ = link->parent->getFloorZ() + JUMP_HEIGHT;
 		for (MapSector* sec : link->getClippedSectors((AActor*)pActor)) {
-			fixed_t blockerZ = sec->getFloorZ();
+			float blockerZ = sec->getFloorZ();
 			if (sec->isFloorMoving() && linkZ < blockerZ) {
 				isBlockerMoving = true;
 				break;

@@ -17,8 +17,8 @@ enum BotGoalAction {
 
 // position to shoot a target from indirectly
 struct IndirectShootPos {
-	FVector3 shootFrom;
-	FVector3 shootAt;
+	vec3 shootFrom;
+	vec3 shootAt;
 	int subid = -1;
 };
 
@@ -43,7 +43,7 @@ struct BotGoal {
 	std::string desc() const;
 	std::string descLong() const;
 	int getNavId() const;
-	FVector3 pos();
+	vec3 pos();
 	int touchDistance(AActor* toucher); // how close the player needs to be to consider this goal as touched
 
 	bool matches(const BotGoal& other);
@@ -54,6 +54,6 @@ struct BotGoal {
 	std::unordered_map<int, IndirectShootPos> FindBossBrainShootPositions();
 
 private:
-	void TestBossBrainShootRay(FVector3 brainPos, FVector3 rayStart, FVector3 rayDir, bool isCeilTrace,
+	void TestBossBrainShootRay(vec3 brainPos, vec3 rayStart, vec3 rayDir, bool isCeilTrace,
 		std::unordered_map<int, IndirectShootPos>& shootNodes);
 };

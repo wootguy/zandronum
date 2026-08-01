@@ -6,6 +6,8 @@
 #include "wb_map.h"
 
 #include <limits.h>
+#include <cmath>
+#include <float.h>
 
 using namespace std;
 using namespace wbot;
@@ -16,7 +18,7 @@ void wbot_debug_player_nav() {
 		return;
 
 	AActor* pActor = (AActor*)get_player(player);
-	FVector3 playerPos = get_actor_pos((AActor*)get_player(player));
+	vec3 playerPos = get_actor_pos((AActor*)get_player(player));
 
 	string navInfo;
 	int plrnavid = g_wb_nav.get_nav_id(player);
@@ -36,10 +38,10 @@ void wbot_debug_player_nav() {
 	}
 
 	int closestLink = -1;
-	fixed_t bestDist = INT_MAX;
+	float bestDist = FLT_MAX;
 	for (int i = 0; i < nav.links.size(); i++) {
 		NavSectorLink& link = *nav.links[i];
-		fixed_t dist = (playerPos - link.pos()).Length();
+		float dist = (playerPos - link.pos()).length();
 		if (dist < bestDist || (dist == bestDist && link.isJump)) {
 			bestDist = dist;
 			closestLink = link.id;
@@ -72,10 +74,10 @@ void wbot_debug_player_nav() {
 	}
 
 	int closestSeg = -1;
-	bestDist = INT_MAX;
+	bestDist = FLT_MAX;
 	for (int i = 0; i < sub.numsegs; i++) {
 		MapSeg& seg = g_map.segs[sub.firstseg + i];
-		fixed_t dist = abs(DistanceToLine(playerPos, seg.start(), seg.end()));
+		float dist = fabs(DistanceToLine(playerPos, seg.v1, seg.v2));
 		if (dist < bestDist) {
 			bestDist = dist;
 			closestSeg = sub.firstseg + i;
@@ -88,12 +90,12 @@ void wbot_debug_player_nav() {
 	if (nav.sector->special())
 		navInfo += "\n      Special: " + to_string(nav.sector->special());
 
-	FVector3 forward, right;
+	vec3 forward, right;
 	MakeVectors(get_actor_angle(pActor), forward, right);
-	FVector3 start = playerPos + FVector3(0, 0, get_player_viewheight(player));
-	MapSector* sector = g_map.GetSector((fixed_t)start.X, (fixed_t)start.Y);
+	vec3 start = playerPos + vec3(0, 0, get_player_viewheight(player) / FRACUNIT);
+	MapSector* sector = g_map.GetSector(start.x, start.y);
 	TraceResult tr;
-	if (TraceLine(start, start + forward*64, false, pActor, &tr))
+	if (TraceLine(start, start + forward * 64, false, pActor, &tr))
 	{
 		MapLine* line = tr.line;
 
@@ -113,15 +115,15 @@ void wbot_debug_player_nav() {
 		}
 	}
 
-	navInfo += "\nOrigin: " + to_string((int)playerPos.X >> FRACBITS)
-		+ " "+ to_string((int)playerPos.Y >> FRACBITS)
-		+ " " + to_string((int)playerPos.Z >> FRACBITS);
+	navInfo += "\nOrigin: " + to_string((int)playerPos.x)
+		+ " "+ to_string((int)playerPos.y)
+		+ " " + to_string((int)playerPos.z);
 
 	int yaw = (int)((uint64_t)get_actor_angle(pActor) * 360 / 0x100000000ULL);
 	int pitch = (int)((uint64_t)get_actor_pitch(pActor) * 360 / 0x100000000ULL);
 	navInfo += "\nAngles: " + to_string(yaw) + " " + to_string(pitch);
 
-	bool isClipped = IsBoxClipped(playerPos, get_actor_radius(pActor), DUCK_HEIGHT);
+	bool isClipped = IsBoxClipped(playerPos, get_actor_radius(pActor) / (float)FRACUNIT, DUCK_HEIGHT);
 	//navInfo += string("\nClipped: ") + (isClipped ? "Yes" : "No");
 
 	print_hud_test(navInfo.c_str(), 0.94f, 0.5f, 1234);
@@ -132,7 +134,7 @@ void wbot_debug(CWootBot* pBot) {
 
 	player_t* pPlayer = pBot->m_pPlayer;
 	AActor* pActor = (AActor*)pBot->pActor;
-	FVector3 playerPos = get_actor_pos(pActor);
+	vec3 playerPos = get_actor_pos(pActor);
 	g_wb_nav.draw_nodes(pActor);
 
 	int thisSubId = g_wb_nav.get_nav_id(pPlayer);
@@ -194,9 +196,9 @@ void wbot_debug(CWootBot* pBot) {
 	string enemyStr = "Enemy: <none>";
 	if (pBot->target) {
 		AActor* targ = pBot->target;
-		fixed_t dist = ((FVector2)playerPos - get_actor_pos(targ)).Length();
+		int dist = ((vec2)playerPos - get_actor_pos(targ)).length();
 		enemyStr = string("Enemy: ") + get_actor_type_name(targ)
-			+ ", Dist: " + to_string(dist >> FRACBITS);
+			+ ", Dist: " + to_string(dist);
 	}
 
 	string weaponStr = "Weapons:";

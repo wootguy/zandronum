@@ -4,7 +4,9 @@
 #include "wb_nav.h"
 #include "wb_eiface.h"
 #include "wb_hooks.h"
+
 #include <string>
+#include <cstring>
 
 using namespace std;
 using namespace wbot;
@@ -382,8 +384,8 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 
 		if (target) {
 			AActor* actor = (AActor*)get_player(target);
-			FVector3 pos = get_actor_pos(actor);
-			pos.X += ((PLAYER_WIDTH + 1) << FRACBITS);
+			vec3 pos = get_actor_pos(actor);
+			pos.x += (PLAYER_WIDTH + 1);
 
 			for (int i = 0; i < MAXPLAYERS; i++) {
 				CWootBot* bot = get_bot_for_index(i);
@@ -391,7 +393,7 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 				if (!bot)
 					continue;
 
-				set_actor_origin((AActor*)bot->pActor, pos.X, pos.Y, 0, true);
+				set_actor_origin((AActor*)bot->pActor, pos.x, pos.y, 0, true);
 			}
 		}
 	}
@@ -401,9 +403,9 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 		int id = atoi(msg + 5);
 		if (id >= 0 && id < g_map.numsubsectors) {
 			NavSector& nav = g_wb_nav.mesh.nodes[id];
-			FVector3 pos = nav.pos3D();
+			vec3 pos = nav.pos3D();
 			AActor* player = (AActor*)get_player(get_player_for_index(ulPlayer));
-			set_actor_origin(player, pos.X, pos.Y, 0, true);
+			set_actor_origin(player, pos.x, pos.y, 0, true);
 		}
 	}
 
@@ -416,9 +418,9 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 			NavSector& nav = g_wb_nav.mesh.nodes[i];
 			for (int k = 0; k < nav.links.size(); k++) {
 				if (nav.links[k]->id == id) {
-					FVector3 pos = nav.links[k]->pos3D();
+					vec3 pos = nav.links[k]->pos3D();
 					AActor* player = (AActor*)get_player(get_player_for_index(ulPlayer));
-					set_actor_origin(player, pos.X, pos.Y, 0, true);
+					set_actor_origin(player, pos.x, pos.y, 0, true);
 					found = true;
 					break;
 				}
@@ -434,9 +436,9 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 			int x = atoi(args.substr(0, splitter).c_str());
 			int y = atoi(args.substr(splitter + 1).c_str());
 
-			FVector3 pos(x << FRACBITS, y << FRACBITS, 0);
+			vec3 pos(x, y, 0);
 			AActor* player = (AActor*)get_player(get_player_for_index(ulPlayer));
-			set_actor_origin(player, pos.X, pos.Y, 0, true);
+			set_actor_origin(player, pos.x, pos.y, 0, true);
 		}
 	}
 

@@ -35,24 +35,24 @@ struct NavSectorLink {
 	NavSector* target = NULL;
 	NavSector* jumpNeighbor = NULL; // node that must be partially run into to begin the jump
 	wbot::MapSector* sector = NULL; // sector that the bot must enter to cross this link (may be different than the target sector in the case of teleports)
-	FVector2 movePos; // position to move to for crossing the link
+	vec2 movePos; // position to move to for crossing the link
 	int linkWidth = 0;
 	bool isTeleport = false;
 	bool isCliff = false; // crossing this segs drops you down to a floor so low that you can't get back
 	bool isJump = false; // jump required to reach the target sector
-	fixed_t jumpDist = 0; // distance to the nearest landing point in the target sector
+	float jumpDist = 0; // distance to the nearest landing point in the target sector
 	wbot::MapLine* linedef = NULL; // linedef this link crosses
 	wbot::FSegment2 seg; // overlapping region between the source and target nodes
 	
 	int routeNumIgnore; // ignore this path for the next route if set to the current route call num
 
-	FVector2 pos();
-	FVector3 pos3D();
-	fixed_t GetJumpBackupSpaceNeeded(FVector3 start, FVector3 end); // calculate how much of a running start is needed to complete the jump
-	FVector2 GetJumpBackupPos(FVector2 targetPos, AActor* jumper); // find the best place to begin running for a jump
-	NavSector* GetJumpBackupBlocker(FVector2 targetPos); // get the movable sector that blocks the backup position, if any
-	FVector2 GetJumpStartPos(FVector2 targetPos); // find the best place to begin the jump
-	FVector2 GetJumpEndPos(FVector2 targetPos); // find the closest point to land
+	vec2 pos();
+	vec3 pos3D();
+	float GetJumpBackupSpaceNeeded(vec3 start, vec3 end); // calculate how much of a running start is needed to complete the jump
+	vec2 GetJumpBackupPos(vec2 targetPos, AActor* jumper); // find the best place to begin running for a jump
+	NavSector* GetJumpBackupBlocker(vec2 targetPos); // get the movable sector that blocks the backup position, if any
+	vec2 GetJumpStartPos(vec2 targetPos); // find the best place to begin the jump
+	vec2 GetJumpEndPos(vec2 targetPos); // find the closest point to land
 
 	int blocked(AActor* actor, bool recurse=true); // returns LinkBlockReason
 	std::vector<wbot::MapSector*> getClippedSectors(AActor* actor);
@@ -63,7 +63,7 @@ struct NavSectorLink {
 };
 
 struct NavSector {
-	FVector2 center;
+	vec2 center;
 	int id = -1; // also index into nav array
 	bool hasCliffs = false; // bot should be careful here
 	bool doesDamage = false; // bot should try to route around this
@@ -72,8 +72,8 @@ struct NavSector {
 
 	int routeNumIgnore; // ignore this sector for the next route if set to the current route call num
 
-	FVector2 pos();
-	FVector3 pos3D();
+	vec2 pos();
+	vec3 pos3D();
 
 	// get link by id
 	NavSectorLink* getLink(int subSectorId);
@@ -87,9 +87,9 @@ struct NavSector {
 	std::vector<BotGoal>& getTriggers();
 
 	// get vertical space between the floor and ceiling at the center point of the subsector
-	fixed_t getHeight();
-	fixed_t getFloorZ();
-	fixed_t getCeilZ();
+	float getHeight();
+	float getFloorZ();
+	float getCeilZ();
 };
 
 struct BotMeshData {
@@ -169,7 +169,7 @@ public:
 	// find all ammo in the map with the given name(s)
 	std::vector<BotGoal> get_ammo_goals(const char* ammoname, const char* ammoname2=NULL);
 
-	int get_nav_id(fixed_t x, fixed_t y);
+	int get_nav_id(vec2 pos);
 	int get_nav_id(AActor* actor);
 	int get_nav_id(player_t* plr);
 

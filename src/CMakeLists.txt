@@ -1058,6 +1058,7 @@ set(WBOT_SOURCES
 	wbot/wb_map.h wbot/wb_map.cpp
 	wbot/wb_debug.h wbot/wb_debug.cpp
 	wbot/wb_eiface.h wbot/wb_eiface.cpp
+	wbot/wb_vec.h wbot/wb_vec.cpp
 )
 
 # [TP] servercommands.cpp is generated from the protocol specification. CMake needs to know this or it raises an error

@@ -3,7 +3,7 @@
 
 #include <vector>
 #include <stdint.h>
-#include "vectors.h"
+#include "wb_vec.h"
 
 class AActor;
 class APlayerPawn;
@@ -139,7 +139,7 @@ namespace wbot {
 
 	struct TraceResult {
 		MapSector* sector;
-		FVector3 endPos;
+		vec3 endPos;
 		float frac;
 		AActor* actor;		// valid if hit an actor
 		MapLine* line;		// valid if hit a line
@@ -149,7 +149,7 @@ namespace wbot {
 	struct TraceIsect {
 		wbot::MapLine* line;
 		wbot::MapSector* sector;
-		FVector2 pos;
+		vec2 pos;
 		int fraction;
 	};
 
@@ -167,7 +167,7 @@ namespace wbot {
 
 	APlayerPawn* get_player(player_t* plr);
 
-	FVector3 get_actor_pos(AActor* actor);
+	vec3 get_actor_pos(AActor* actor);
 
 	int get_actor_height(AActor* actor);
 
@@ -242,16 +242,16 @@ namespace wbot {
 
 	const char* get_map_name();
 
-	bool TraceLine(FVector3 start, FVector3 end, bool ignoreMonsters, AActor* ignore, TraceResult* tr);
+	bool TraceLine(vec3 start, vec3 end, bool ignoreMonsters, AActor* ignore, TraceResult* tr);
 
 	// returns all walls/sectors intersected by the given line
-	std::vector<TraceIsect> TraceIntersections(FVector2 start, FVector2 end);
+	std::vector<TraceIsect> TraceIntersections(vec2 start, vec2 end);
 
 	// returns true if the trace intersects any impassable walls
-	bool TraceImpassable(FVector2 start, FVector2 end);
+	bool TraceImpassable(vec2 start, vec2 end);
 
 	// trace until the first intersected sector edge
-	bool TraceSectorEdge(FVector2 start, FVector2 end, FVector2& edge, wbot::MapLine** line);
+	bool TraceSectorEdge(vec2 start, vec2 end, vec2& edge, wbot::MapLine** line);
 
 	MapLumps load_wad_lump_data();
 
@@ -295,10 +295,10 @@ namespace wbot {
 	// how to trigger the given line
 	int get_linedef_goal_action(MapLine* line);
 
-	FVector2 get_tele_dest(int lineid);
+	vec2 get_tele_dest(int lineid);
 
 	// get lines that the given box intersects
-	std::vector<MapLine*> get_crossed_lines(const FVector2& pos, int radius);
+	std::vector<MapLine*> get_crossed_lines(const vec2& pos, int radius);
 
 	player_t* get_player_for_index(int i); // may be a real player or a bot
 
@@ -307,9 +307,9 @@ namespace wbot {
 	// angle is given in degrees
 	void set_actor_origin(AActor* actor, int x, int y, uint32_t angle, bool teleportFx);
 
-	void MakeVectors(uint32_t angle, FVector3& forward, FVector3& right);
+	void MakeVectors(uint32_t angle, vec3& forward, vec3& right);
 
-	void SpawnBlood(FVector3 pos, int damage, AActor* owner);
+	void SpawnBlood(vec3 pos, int damage, AActor* owner);
 
 	void PrintNotification(const char* msg);
 

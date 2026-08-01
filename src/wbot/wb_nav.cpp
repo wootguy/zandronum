@@ -13,6 +13,9 @@
 #include <vector>
 #include <string>
 #include <limits.h>
+#include <cstring>
+#include <cmath>
+#include <float.h>
 
 using namespace std;
 using namespace wbot;
@@ -20,12 +23,12 @@ using namespace wbot;
 SectorNavMesh g_wb_nav;
 int g_route_ignore_num;
 
-FVector2 NavSectorLink::pos() {
+vec2 NavSectorLink::pos() {
 	return movePos;
 }
 
-FVector3 NavSectorLink::pos3D() {
-	return FVector3(movePos.X, movePos.Y, parent->getFloorZ());
+vec3 NavSectorLink::pos3D() {
+	return vec3(movePos.x, movePos.y, parent->getFloorZ());
 }
 
 int NavSectorLink::blocked(AActor* actor, bool recurse) {
@@ -51,10 +54,10 @@ int NavSectorLink::blocked(AActor* actor, bool recurse) {
 		return walkability;
 	}
 
-	const fixed_t pradius = PLAYER_RADIUS << FRACBITS;
-	fixed_t parentFloorZ = parent->getFloorZ();
-	FVector3 jumpOverPos = FVector3(movePos, parentFloorZ + (JUMP_HEIGHT << FRACBITS));
-	FVector3 duckUnderPos = FVector3(movePos, parentFloorZ + (DUCK_HEIGHT << FRACBITS));
+	const float pradius = PLAYER_RADIUS;
+	float parentFloorZ = parent->getFloorZ();
+	vec3 jumpOverPos = vec3(movePos, parentFloorZ + JUMP_HEIGHT);
+	vec3 duckUnderPos = vec3(movePos, parentFloorZ + DUCK_HEIGHT);
 	if (IsBoxClipped(jumpOverPos, pradius, 0) && IsBoxClipped(duckUnderPos, pradius, 0)) {
 		return LINK_BLOCK_CLIPPED;
 	}
@@ -68,8 +71,8 @@ int NavSectorLink::blocked(AActor* actor, bool recurse) {
 }
 
 std::vector<MapSector*> NavSectorLink::getClippedSectors(AActor* actor) {
-	fixed_t bottomZ = parent->getFloorZ() + (JUMP_HEIGHT << FRACBITS);
-	return GetBoxClipSectors(FVector3(movePos, bottomZ), PLAYER_RADIUS << FRACBITS, 0);
+	float bottomZ = parent->getFloorZ() + JUMP_HEIGHT;
+	return GetBoxClipSectors(vec3(movePos, bottomZ), PLAYER_RADIUS, 0);
 }
 
 bool NavSectorLink::walkable() {
@@ -84,13 +87,13 @@ bool NavSectorLink::jumpable() {
 		return false;
 	}
 
-	FVector3 start = pos3D() + FVector3(0, 0, 56 << FRACBITS);
-	FVector3 end = target->pos3D() + FVector3(0, 0, 56 << FRACBITS);
+	vec3 start = pos3D() + vec3(0, 0, 56);
+	vec3 end = target->pos3D() + vec3(0, 0, 56);
 
-	const fixed_t pradius = PLAYER_RADIUS << FRACBITS;
-	fixed_t targetFloorZ = target->getFloorZ();
-	FVector3 jumpOverPos = FVector3(end, targetFloorZ + (JUMP_HEIGHT << FRACBITS));
-	FVector3 duckUnderPos = FVector3(end, targetFloorZ + (DUCK_HEIGHT << FRACBITS));
+	const float pradius = PLAYER_RADIUS;
+	float targetFloorZ = target->getFloorZ();
+	vec3 jumpOverPos = vec3(end, targetFloorZ + JUMP_HEIGHT);
+	vec3 duckUnderPos = vec3(end, targetFloorZ + DUCK_HEIGHT);
 	if (IsBoxClipped(jumpOverPos, pradius, 0) && IsBoxClipped(duckUnderPos, pradius, 0)) {
 		return false;
 	}
@@ -103,12 +106,12 @@ bool NavSectorLink::jumpable() {
 }
 
 bool NavSectorLink::isJumpValid() {
-	fixed_t floorZ = parent->getFloorZ();
-	fixed_t jumpHeight = target->getFloorZ() - floorZ;
-	if (jumpHeight >= (JUMP_HEIGHT << FRACBITS))
+	float floorZ = parent->getFloorZ();
+	float jumpHeight = target->getFloorZ() - floorZ;
+	if (jumpHeight >= JUMP_HEIGHT)
 		return false;
 
-	if (jumpDist > (JUMP_DIST << FRACBITS) - jumpHeight)
+	if (jumpDist > JUMP_DIST - jumpHeight)
 		return false; // too far to make it
 
 	if (jumpNeighbor->getFloorZ() - floorZ == 0)
@@ -119,7 +122,7 @@ bool NavSectorLink::isJumpValid() {
 
 void NavSectorLink::updateFlags() {
 	bool oldCliff = isCliff;
-	isCliff = parent->getFloorZ() - target->getFloorZ() > (JUMP_HEIGHT << FRACBITS);
+	isCliff = parent->getFloorZ() - target->getFloorZ() > JUMP_HEIGHT;
 
 	if (isCliff && !oldCliff) {
 		parent->hasCliffs = true;
@@ -135,55 +138,53 @@ void NavSectorLink::updateFlags() {
 	}
 }
 
-FVector2 NavSectorLink::GetJumpStartPos(FVector2 targetPos) {	
+vec2 NavSectorLink::GetJumpStartPos(vec2 targetPos) {
 	// bring points inward a bit to avoid getting too close to a cliff or wall
-	fixed_t dist = (seg.b - seg.a).Length();
-	FVector2 dir = (seg.b - seg.a).Unit();
-	fixed_t nudgeDist = std::min(dist / 2, 32 << FRACBITS);
-	FVector2 a = seg.a + dir * nudgeDist;
-	FVector2 b = seg.b - dir * nudgeDist;
+	float dist = (seg.b - seg.a).length();
+	vec2 dir = (seg.b - seg.a).normalize();
+	float nudgeDist = std::min(dist / 2.0f, 32.0f);
+	vec2 a = seg.a + dir * nudgeDist;
+	vec2 b = seg.b - dir * nudgeDist;
 
 	return ClosestPointOnSegment(targetPos, a, b);
 }
 
-FVector2 NavSectorLink::GetJumpEndPos(FVector2 targetPos) {
-	FVector2 jumpPos = GetJumpStartPos(targetPos);
+vec2 NavSectorLink::GetJumpEndPos(vec2 targetPos) {
+	vec2 jumpPos = GetJumpStartPos(targetPos);
 
 	// move the landing point from the center to the nearest ledge
-	FVector2 ledgeDir = (jumpPos - targetPos).Unit();
+	vec2 ledgeDir = (jumpPos - targetPos).normalize();
 
 	MapLine* line;
-	FVector2 edgePos;
-	if (TraceSectorEdge(targetPos, targetPos + ledgeDir * (1000 << FRACBITS), edgePos, &line)) {
+	vec2 edgePos;
+	if (TraceSectorEdge(targetPos, targetPos + ledgeDir * 1000, edgePos, &line)) {
 		// move edge away from the line endings to avoid collision with a wall
-		FVector2 a = line->start();
-		FVector2 b = line->end();
-		FVector2 dir = (b - a).Unit();
-		fixed_t nudgeDist = std::min((fixed_t)(b - a).Length() / 2, 32 << FRACBITS);
+		vec2 a = line->v1;
+		vec2 b = line->v2;
+		vec2 dir = (b - a).normalize();
+		fixed_t nudgeDist = std::min((b - a).length() / 2, 32.0f);
 		a += dir * nudgeDist;
 		b -= dir * nudgeDist;
 
-		edgePos = ClosestPointOnSegment(jumpPos, a, b);
-
-		return edgePos;
+		return ClosestPointOnSegment(jumpPos, a, b);
 	}
 
 	return targetPos;
 }
 
-NavSector* NavSectorLink::GetJumpBackupBlocker(FVector2 targetPos) {
-	FVector2 startPos = GetJumpStartPos(targetPos);
+NavSector* NavSectorLink::GetJumpBackupBlocker(vec2 targetPos) {
+	vec2 startPos = GetJumpStartPos(targetPos);
 
 	// back up the starting position to get a running start for the jump
-	FVector2 jumpDir = (targetPos - startPos).Unit();
+	vec2 jumpDir = (targetPos - startPos).normalize();
 
-	fixed_t maxBackupDist = 256 << FRACBITS;
-	FVector2 backupStartPos = startPos - (jumpDir * FRACUNIT); // avoid clipping against the backoff line
-	FVector2 backupPos = startPos - jumpDir * maxBackupDist;
-	fixed_t startZ = parent->getFloorZ();
+	float maxBackupDist = 256;
+	vec2 backupStartPos = startPos - jumpDir; // avoid clipping against the backoff line
+	vec2 backupPos = startPos - jumpDir * maxBackupDist;
+	float startZ = parent->getFloorZ();
 	int isects = 0;
 
-	FVector2 edge;
+	vec2 edge;
 	MapLine* line;
 	if (TraceSectorEdge(backupStartPos, backupPos, edge, &line)) {
 		MapSubsector& sub = g_map.subsectors[parent->id];
@@ -198,35 +199,35 @@ NavSector* NavSectorLink::GetJumpBackupBlocker(FVector2 targetPos) {
 	return NULL;
 }
 
-fixed_t NavSectorLink::GetJumpBackupSpaceNeeded(FVector3 start, FVector3 end) {
-	fixed_t gap = jumpDist - (PLAYER_WIDTH << FRACBITS);
+float NavSectorLink::GetJumpBackupSpaceNeeded(vec3 start, vec3 end) {
+	float gap = jumpDist - PLAYER_WIDTH;
 
-	const fixed_t maxBackup = 256 << FRACBITS;
+	const float maxBackup = 256;
 
-	FVector3 dir = (end - start).Unit();
-	float distScale = dir.Z + 1; // increase gap for upward jumps, decrease for downward
+	vec3 dir = (end - start).normalize();
+	float distScale = dir.z + 1; // increase gap for upward jumps, decrease for downward
 
-	return std::min(maxBackup, (fixed_t)(gap * distScale));
+	return std::min(maxBackup, gap * distScale);
 }
 
-FVector2 NavSectorLink::GetJumpBackupPos(FVector2 targetPos, AActor* jumper) {
-	FVector2 startPos = GetJumpStartPos(targetPos);
-	FVector2 endPos = GetJumpEndPos(targetPos);
-	FVector3 startPos3D(startPos, parent->getFloorZ());
-	FVector3 endPos3D(endPos, target->getFloorZ());
+vec2 NavSectorLink::GetJumpBackupPos(vec2 targetPos, AActor* jumper) {
+	vec2 startPos = GetJumpStartPos(targetPos);
+	vec2 endPos = GetJumpEndPos(targetPos);
+	vec3 startPos3D(startPos, parent->getFloorZ());
+	vec3 endPos3D(endPos, target->getFloorZ());
 
 	// back up the starting position to get a running start for the jump
-	FVector2 jumpDir = (endPos - startPos).Unit();
+	vec2 jumpDir = (endPos - startPos).normalize();
 
 	fixed_t maxBackupDist = GetJumpBackupSpaceNeeded(startPos3D, endPos3D);
-	FVector2 backupStartPos = startPos - (jumpDir * FRACUNIT); // avoid clipping against the backoff line
-	FVector2 backupPos = startPos - jumpDir * maxBackupDist;
-	fixed_t startZ = parent->getFloorZ();
+	vec2 backupStartPos = startPos - jumpDir; // avoid clipping against the backoff line
+	vec2 backupPos = startPos - jumpDir * maxBackupDist;
+	float startZ = parent->getFloorZ();
 	int isects = 0;
 
 	for (TraceIsect& isect : TraceIntersections(backupStartPos, backupPos)) {
-		fixed_t sectorZ = isect.sector->getFloorZ();
-		int heightDiff = (sectorZ - startZ) >> FRACBITS;
+		float sectorZ = isect.sector->getFloorZ();
+		int heightDiff = (sectorZ - startZ);
 
 		if (isect.line->isImpassable() || heightDiff > STEP_HEIGHT) {
 			if (isects++ == 0) {
@@ -240,24 +241,24 @@ FVector2 NavSectorLink::GetJumpBackupPos(FVector2 targetPos, AActor* jumper) {
 
 	// clip against walls for our radius
 	TraceResult tr;
-	FVector2 backupDelta = backupPos - backupStartPos;
-	fixed_t traceZ = startZ + (STEP_HEIGHT << FRACBITS);
-	if (TraceRadius(FVector3(backupStartPos, traceZ), FVector3(backupPos, traceZ), PLAYER_WIDTH / 2, false, jumper, &tr)) {
+	vec2 backupDelta = backupPos - backupStartPos;
+	float traceZ = startZ + STEP_HEIGHT;
+	if (TraceRadius(vec3(backupStartPos, traceZ), vec3(backupPos, traceZ), PLAYER_WIDTH / 2, false, jumper, &tr)) {
 		backupPos = backupStartPos + backupDelta * tr.frac;
 	}
 
-	fixed_t backupDist = (backupPos - backupStartPos).Length();
-	fixed_t nudgeDist = std::min(8 << FRACBITS, backupDist);
+	float backupDist = (backupPos - backupStartPos).length();
+	float nudgeDist = std::min(8.0f, backupDist);
 	backupPos += jumpDir * nudgeDist;
 
 	return backupPos;
 }
 
-FVector3 NavSector::pos3D() {
-	return FVector3(center.X, center.Y, getFloorZ());
+vec3 NavSector::pos3D() {
+	return vec3(center, getFloorZ());
 }
 
-FVector2 NavSector::pos() {
+vec2 NavSector::pos() {
 	return center;
 }
 
@@ -279,9 +280,9 @@ bool NavSector::touches(AActor* actor) {
 	if (!actor)
 		return false;
 
-	FVector2 actorPos = get_actor_pos(actor);
+	vec2 actorPos = get_actor_pos(actor);
 
-	int subid = g_map.GetSubsector(actorPos.X, actorPos.Y)->id;
+	int subid = g_map.GetSubsector(actorPos.x, actorPos.y)->id;
 	if (subid == id)
 		return true;
 
@@ -289,7 +290,7 @@ bool NavSector::touches(AActor* actor) {
 	for (int i = 0; i < sub.numsegs; i++) {
 		MapSeg& seg = g_map.segs[sub.firstseg + i];
 
-		if (CircleIntersectsSegment(actorPos, get_actor_radius(actor), seg.start(), seg.end())) {
+		if (CircleIntersectsSegment(actorPos, get_actor_radius(actor) / (float)FRACUNIT, seg.v1, seg.v2)) {
 			return true;
 		}
 	}
@@ -317,15 +318,15 @@ std::vector<BotGoal>& NavSector::getTriggers() {
 	return sector->triggers;
 }
 
-fixed_t NavSector::getHeight() {
+float NavSector::getHeight() {
 	return sector->getHeight();
 }
 
-fixed_t NavSector::getFloorZ() {
+float NavSector::getFloorZ() {
 	return sector->getFloorZ();
 }
 
-fixed_t NavSector::getCeilZ() {
+float NavSector::getCeilZ() {
 	return sector->getCeilZ();
 }
 
@@ -353,8 +354,8 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 
 	AActor* playerActor = (AActor*)get_player(player);
 
-	FVector3 playerPos = get_actor_pos(playerActor);
-	MapSubsector* sub = g_map.GetSubsector(playerPos.X, playerPos.Y);
+	vec3 playerPos = get_actor_pos(playerActor);
+	MapSubsector* sub = g_map.GetSubsector(playerPos.x, playerPos.y);
 
 	if (sub && sub->id < g_map.numsubsectors) {
 		NavSector& nav = mesh.nodes[sub->id];
@@ -365,21 +366,21 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 			NavSectorLink& link = *nav.links[k];
 			
 			if (!link.blocked(playerActor)) {
-				FVector3 linkPos = link.pos3D();
-				FVector2 targetPos = link.target->pos();
+				vec3 linkPos = link.pos3D();
+				vec2 targetPos = link.target->pos();
 
 				if (link.isJump) {
-					FVector3 jumpStart = FVector3(link.GetJumpStartPos(targetPos), 0);
-					FVector3 jumpStartFloor = jumpStart;
-					FVector3 jumpEnd = FVector3(link.GetJumpEndPos(targetPos), 0);
-					FVector3 jumpEndFloor = jumpEnd;
-					jumpEndFloor.Z = link.target->getFloorZ();
-					jumpStartFloor.Z = link.parent->getFloorZ();
-					jumpStart.Z = link.parent->getFloorZ() + (56 << FRACBITS);
-					jumpEnd.Z = link.target->getFloorZ() + (56 << FRACBITS);
+					vec3 jumpStart = vec3(link.GetJumpStartPos(targetPos), 0);
+					vec3 jumpStartFloor = jumpStart;
+					vec3 jumpEnd = vec3(link.GetJumpEndPos(targetPos), 0);
+					vec3 jumpEndFloor = jumpEnd;
+					jumpEndFloor.z = link.target->getFloorZ();
+					jumpStartFloor.z = link.parent->getFloorZ();
+					jumpStart.z = link.parent->getFloorZ() + 56;
+					jumpEnd.z = link.target->getFloorZ() + 56;
 					
-					FVector2 backupPos = link.GetJumpBackupPos(targetPos, playerActor);
-					FVector3 backupEnd = FVector3(backupPos.X, backupPos.Y, jumpStart.Z);
+					vec2 backupPos = link.GetJumpBackupPos(targetPos, playerActor);
+					vec3 backupEnd = vec3(backupPos, jumpStart.z);
 
 					spritesDrawn += draw_debug_line(nav.pos3D(), jumpStartFloor, actor);
 					spritesDrawn += draw_debug_line(jumpStartFloor, jumpStart, actor);
@@ -387,7 +388,7 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 					spritesDrawn += draw_debug_line(jumpEnd, jumpEndFloor, actor);
 					spritesDrawn += draw_debug_line(jumpEndFloor, link.target->pos3D(), actor);
 
-					if (link.jumpDist > (PLAYER_WIDTH << FRACBITS))
+					if (link.jumpDist > PLAYER_WIDTH)
 						spritesDrawn += draw_debug_line(jumpStart, backupEnd, actor);
 				}
 				else {
@@ -397,19 +398,19 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 			}
 		}
 
-		fixed_t borderZ = nav.getFloorZ();
+		float borderZ = nav.getFloorZ();
 		for (int k = 0; k < sub->numsegs && spritesDrawn < maxSprites; k++) {
 			MapSeg& seg = g_map.segs[sub->firstseg + k];
-			FVector3 start(seg.start(), borderZ);
-			FVector3 end(seg.end(), borderZ);
+			vec3 start(seg.v1, borderZ);
+			vec3 end(seg.v2, borderZ);
 			spritesDrawn += draw_debug_line(start, end, actor);
 		}
 
 		int closestSeg = -1;
-		fixed_t bestDist = INT_MAX;
+		float bestDist = FLT_MAX;
 		for (int i = 0; i < sub->numsegs; i++) {
 			MapSeg& seg = g_map.segs[sub->firstseg + i];
-			fixed_t dist = abs(DistanceToLine(playerPos, seg.start(), seg.end()));
+			float dist = fabs(DistanceToLine(playerPos, seg.v1, seg.v2));
 			if (dist < bestDist) {
 				bestDist = dist;
 				closestSeg = sub->firstseg + i;
@@ -417,9 +418,9 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 		}
 		if (closestSeg != -1) {
 			MapSeg& seg = g_map.segs[closestSeg];
-			fixed_t z = borderZ + FRACUNIT * 16;
-			FVector3 normStart(seg.center(), z);
-			FVector3 normEnd(seg.center() + seg.normal() * FRACUNIT * 32, z);
+			float z = borderZ * 16;
+			vec3 normStart(seg.center(), z);
+			vec3 normEnd(seg.center() + seg.normal() * 32, z);
 			spritesDrawn += draw_debug_line(normStart, normEnd, actor);
 		}
 
@@ -430,36 +431,35 @@ void SectorNavMesh::draw_nodes(AActor* actor) {
 
 	for (int i = 0; i < g_map.numsubsectors; i++) {
 		NavSector& node = mesh.nodes[i];
-		FVector3 pos = node.pos3D();
+		vec3 pos = node.pos3D();
 
-		FVector2 delta = (FVector2)pos - playerPos;
-		if (delta.Length() > (1000 << FRACBITS)) {
+		vec2 delta = (vec2)pos - playerPos;
+		if (delta.length() > 1000) {
 			continue;
 		}
 
-		SpawnBlood(pos + FVector3(0, 0, (16 << FRACBITS)), 100, actor);
+		SpawnBlood(pos + vec3(0, 0, 16), 100, actor);
 	}
 }
 
-int SectorNavMesh::get_nav_id(fixed_t x, fixed_t y) {
-	return g_map.GetSubsector(x, y)->id;
+int SectorNavMesh::get_nav_id(vec2 pos) {
+	return g_map.GetSubsector(pos.x, pos.y)->id;
 }
 
 int SectorNavMesh::get_nav_id(AActor* actor) {
-	FVector2 pos = get_actor_pos(actor);
-	return get_nav_id(pos.X, pos.Y);
+	return get_nav_id(get_actor_pos(actor));
 }
 
 int SectorNavMesh::get_nav_id(player_t* plr) {
 	AActor* pActor = (AActor*)get_player(plr);
-	FVector3 pos = get_actor_pos(pActor);
+	vec3 pos = get_actor_pos(pActor);
 
-	MapSubsector* centeredSub = g_map.GetSubsector(pos.X, pos.Y);
+	MapSubsector* centeredSub = g_map.GetSubsector(pos.x, pos.y);
 	
-	if (centeredSub->sector->getFloorZ() + (STEP_HEIGHT << FRACBITS) < pos.Z && player_on_ground(plr)) {
+	if (centeredSub->sector->getFloorZ() + STEP_HEIGHT < pos.z && player_on_ground(plr)) {
 		// above the centered subsector because of hanging over a ledge
-		FVector2 floorPoint = GetFloorPosition(pos, get_actor_radius(pActor));
-		return g_map.GetSubsector(floorPoint.X, floorPoint.Y)->id;
+		vec2 floorPoint = GetFloorPosition(pos, get_actor_radius(pActor) / (float)FRACUNIT);
+		return g_map.GetSubsector(floorPoint.x, floorPoint.y)->id;
 	}
 
 	return centeredSub->id;
@@ -468,8 +468,8 @@ int SectorNavMesh::get_nav_id(player_t* plr) {
 float SectorNavMesh::node_heuristic(int a, int b) {
 	NavSector& nodea = mesh.nodes[a];
 	NavSector& nodeb = mesh.nodes[b];
-	FVector2 delta = nodea.pos() - nodeb.pos();
-	return delta.Length() / (float)FRACUNIT;
+	vec2 delta = nodea.pos() - nodeb.pos();
+	return delta.length();
 }
 
 float SectorNavMesh::path_dist(NavSectorLink& link) {
@@ -477,9 +477,9 @@ float SectorNavMesh::path_dist(NavSectorLink& link) {
 	NavSector& target = *link.target;
 
 	if (link.isTeleport)
-		return (link.pos() - parent.pos()).Length() / (float)FRACUNIT;
+		return (link.pos() - parent.pos()).length();
 
-	return (parent.pos() - target.pos()).Length() / (float)FRACUNIT;
+	return (parent.pos() - target.pos()).length();
 }
 
 

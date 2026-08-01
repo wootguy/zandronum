@@ -2,7 +2,9 @@
 #include "wb_bot.h"
 #include "wb_util.h"
 #include "wb_eiface.h"
+
 #include <algorithm>
+#include <cstring>
 
 using namespace std;
 using namespace wbot;
@@ -42,21 +44,21 @@ void CBotCombatController::Think() {
 
 	SelectBestWeapon();
 
-	FVector2 targPos = get_actor_pos(targ);
+	vec2 targPos = get_actor_pos(targ);
 
-	fixed_t dist = (targPos - pBot->m_origin).Length();
-	fixed_t minChaseDist = 200 << FRACBITS;
-	fixed_t maxChaseDist = 500 << FRACBITS;
-	fixed_t maxRange = 2000 << FRACBITS;
-	fixed_t minRange = 0;
+	float dist = (targPos - pBot->m_origin).length();
+	float minChaseDist = 200;
+	float maxChaseDist = 500;
+	float maxRange = 2000;
+	float minRange = 0;
 	bool isMeleeWeapon = false;
 
 	if (pBot->m_weaponName) {
 		WeaponInfo& info = g_wbot_weapon_info[pBot->m_weaponName];
-		minChaseDist = (info.minRange << FRACBITS) + 64;
-		maxChaseDist = std::max(minChaseDist, (info.idealRange << FRACBITS));
-		minRange = info.minRange << FRACBITS;
-		maxRange = info.maxRange << FRACBITS;
+		minChaseDist = info.minRange + 64;
+		maxChaseDist = std::max(minChaseDist, (float)info.idealRange);
+		minRange = info.minRange;
+		maxRange = info.maxRange;
 		isMeleeWeapon = info.maxRange < 200;
 	}
 
@@ -80,7 +82,7 @@ void CBotCombatController::Think() {
 	m_targetLastSeenTic = get_game_tics();
 
 	// aim at enemy
-	pBot->AimAtPos(get_actor_pos(targ) + FVector3(0, 0, get_actor_height(targ) / 2));
+	pBot->AimAtPos(get_actor_pos(targ) + vec3(0, 0, get_actor_height(targ) / 2 * FRACUNIT));
 
 	pBot->m_forwardMove = 0;
 	pBot->m_sideMove = 0;

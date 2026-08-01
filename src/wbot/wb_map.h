@@ -1,5 +1,4 @@
 #pragma once
-#include "vectors.h"
 #include "basictypes.h"
 #include "wb_goal.h"
 #include <unordered_set>
@@ -13,11 +12,11 @@ namespace wbot {
 	struct MapSubsector;
 
 	struct FSegment2 {
-		FVector2 a = FVector2(0, 0);
-		FVector2 b = FVector2(0, 0);
-		inline float length() { return (b - a).Length(); }
-		inline FVector2 center() { return (a + b) * 0.5f; }
-		inline FVector2 normal() { FVector2 dir = (b - a).Unit(); return FVector2(dir.Y, -dir.X); }
+		vec2 a = vec2(0, 0);
+		vec2 b = vec2(0, 0);
+		inline float length() { return (b - a).length(); }
+		inline vec2 center() { return (a + b) * 0.5f; }
+		inline vec2 normal() { vec2 dir = (b - a).normalize(); return vec2(dir.y, -dir.x); }
 	};
 
 	struct MapNode {
@@ -35,9 +34,9 @@ namespace wbot {
 		std::vector<BotGoal> triggers;
 		std::vector<MapSubsector*> subsectors;
 
-		fixed_t getHeight();
-		fixed_t getFloorZ();
-		fixed_t getCeilZ();
+		float getHeight();
+		float getFloorZ();
+		float getCeilZ();
 		bool isMoving();
 		bool isFloorMoving();
 		bool isCeilMoving();
@@ -46,17 +45,15 @@ namespace wbot {
 
 	struct MapLine {
 		int id;
-		FVector2 v1, v2;
+		vec2 v1, v2;
 		uint16_t tag;
 		uint16_t flags;
 		MapSector* frontsector;
 		MapSector* backsector;
 
-		inline FVector2 start() { return v1 * FRACUNIT; }
-		inline FVector2 end() { return v2 * FRACUNIT; }
-		FVector2 dir() { return (end() - start()).Unit(); }
-		FVector2 center();
-		FVector2 normal();
+		vec2 dir() { return (v2 - v1).normalize(); }
+		vec2 center();
+		vec2 normal();
 		int length();
 		int activation();
 		int special();
@@ -66,18 +63,16 @@ namespace wbot {
 		bool isLevelExit();
 		bool isImpassable();
 		bool canPlayerActivate();
-		FVector2 getTeleportDest();
+		vec2 getTeleportDest();
 	};
 
 	struct MapSeg {
-		FVector2 v1, v2; // may be off grid for implicit segs
+		vec2 v1, v2; // may be off grid for implicit segs
 		std::vector<MapLine*> lines; // linedefs that this segment overlaps
 
-		inline FVector2 start() { return v1 * FRACUNIT; }
-		inline FVector2 end() { return v2 * FRACUNIT; }
 		float length();
-		FVector2 center();
-		FVector2 normal();
+		vec2 center();
+		vec2 normal();
 	};
 
 	struct MapSubsector {
@@ -85,7 +80,7 @@ namespace wbot {
 		int firstseg = 0;
 		int numsegs = 0;
 		MapSector* sector = NULL;
-		FVector2 mins, maxs; // bounding box
+		vec2 mins, maxs; // bounding box
 	};
 
 	struct LinkSeg {
@@ -95,8 +90,8 @@ namespace wbot {
 	};
 
 	struct BspClip {
-		FVector2 linePoint;
-		FVector2 lineDir;
+		vec2 linePoint;
+		vec2 lineDir;
 		bool front;
 	};
 
@@ -134,10 +129,10 @@ namespace wbot {
 			std::vector<MapSeg>& totalSegs, MapLumps& lumps);
 
 		// get subsector for position
-		MapSubsector* GetSubsector(fixed_t x, fixed_t y);
+		MapSubsector* GetSubsector(int x, int y);
 
 		// get sector for position
-		MapSector* GetSector(fixed_t x, fixed_t y);
+		MapSector* GetSector(int x, int y);
 
 		MapSector* GetSector(AActor* actor);
 

@@ -1,64 +1,57 @@
 #pragma once
 #include "wb_map.h"
+#include "wb_vec.h"
 #include <vector>
 
 char* VarArgs(const char* format, ...);
 
 player_t* getAnyPlayer();
 
-bool DoLinesIntersect(const FVector2& la1, const FVector2& la2, const FVector2& lb1, const FVector2& lb2);
+bool DoLinesIntersect(const vec2& la1, const vec2& la2, const vec2& lb1, const vec2& lb2);
 
-FVector2 LineIntersect(const FVector2& la1, const FVector2& la2, const FVector2& lb1, const FVector2& lb2);
+vec2 LineIntersect(const vec2& la1, const vec2& la2, const vec2& lb1, const vec2& lb2);
 
-bool LineIntersectsZRange(const FVector3& a, const FVector3& b, float zMin, float zMax, FVector3& enter, FVector3& exit);
+bool LineIntersectsZRange(const vec3& a, const vec3& b, float zMin, float zMax, vec3& enter, vec3& exit);
 
-FVector2 ClosestPointOnSegment(const FVector2& p, const FVector2& a, const FVector2& b);
+vec2 ClosestPointOnSegment(const vec2& p, const vec2& a, const vec2& b);
 
 // returns an empty segment if no overlap
-wbot::FSegment2 LineSegmentOverlap(const FVector2& a1, const FVector2& a2, const FVector2& b1, const FVector2& b2);
+wbot::FSegment2 LineSegmentOverlap(const vec2& a1, const vec2& a2, const vec2& b1, const vec2& b2);
 
-float DistanceToLine(const FVector2& p, const FVector2& a, const FVector2& b);
+float DistanceToLine(const vec2& p, const vec2& a, const vec2& b);
 
-float DistanceToLine(const FVector2& p, wbot::MapLine* line);
+float DistanceToLine(const vec2& p, wbot::MapLine* line);
 
 // get the distance from the inside to the outside of a box in the given direction (longer at the corners)
-fixed_t BoxRadiusForDir(const FVector2& dir, fixed_t radius);
+float BoxRadiusForDir(const vec2& dir, float radius);
 
 // true if the box is stuck inside a wall, ceiling, or floor
-bool IsBoxClipped(const FVector3& pos, fixed_t radius, fixed_t height);
+bool IsBoxClipped(const vec3& pos, float radius, float height);
 
 // true if the box is stuck inside an impassable wall
-bool IsBoxWallClipped(const FVector2& pos, fixed_t radius);
+bool IsBoxWallClipped(const vec2& pos, float radius);
 
 // returns the position inside the box which is preventing the box from falling
-FVector2 GetFloorPosition(const FVector3& pos, fixed_t radius);
+vec2 GetFloorPosition(const vec3& pos, float radius);
 
 // get sectors the box is clipping into
-std::vector<wbot::MapSector*> GetBoxClipSectors(const FVector3& pos, fixed_t radius, fixed_t height);
+std::vector<wbot::MapSector*> GetBoxClipSectors(const vec3& pos, float radius, float height);
 
 // clip the polygon against the given line.
 // lp = point on the line
 // ldir = direction of the line
 // front = clip in front of the line, else behind
-void ClipPoly(std::vector<FVector2>& poly, FVector2 lp, FVector2 ldir, bool front);
+void ClipPoly(std::vector<vec2>& poly, vec2 lp, vec2 ldir, bool front);
 
 // true if the point is in front of or behind the segment, not to the side
-bool PointAlignedSegment(const FVector2& p, const FVector2& a, const FVector2& b);
+bool PointAlignedSegment(const vec2& p, const vec2& a, const vec2& b);
 
-bool CircleIntersectsSegment(const FVector2& center, float radius, const FVector2& a, const FVector2& b);
+bool CircleIntersectsSegment(const vec2& center, float radius, const vec2& a, const vec2& b);
 
-void ExtendSegment(FVector2& a, FVector2& b, float amount);
-
-float DotProduct(const FVector2& a, const FVector2& b);
-
-float CrossProduct(const FVector2& a, const FVector2& b);
+void ExtendSegment(vec2& a, vec2& b, float amount);
 
 uint64_t getEpochMillis();
 
-int draw_debug_line(FVector3 start, FVector3 end, AActor* actor);
+int draw_debug_line(vec3 start, vec3 end, AActor* actor);
 
-bool TraceRadius(FVector3 start, FVector3 end, fixed_t radius, bool ignoreMonsters=true, AActor* ignoreEnt=NULL, wbot::TraceResult* tr=NULL);
-
-std::vector<int> debugv2(const FVector2& v);
-
-std::vector<int> debugv3(const FVector2& v);
+bool TraceRadius(vec3 start, vec3 end, float radius, bool ignoreMonsters=true, AActor* ignoreEnt=NULL, wbot::TraceResult* tr=NULL);

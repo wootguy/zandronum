@@ -30,8 +30,8 @@ public:
 	int m_viewHeight;
 	int m_useDistance;
 	int m_radius;
-	FVector3 m_origin;
-	FVector3 m_velocity;
+	vec3 m_origin;
+	vec3 m_velocity;
 	bool m_isFrozen;
 	bool m_onGround;
 	int m_pitch;
@@ -50,7 +50,7 @@ public:
 	int stuckCounter = 0;		// increases while trying to move with nothing happening
 	int goalFailCounter = 0;	// for suiciding in areas that can't reach any goals
 	int m_cliffDist = 9999;
-	FVector2 lastPos = FVector2(0, 0);	// used to detect being stuck
+	vec2 lastPos = vec2(0, 0);	// used to detect being stuck
 	bool m_wasDead = false;
 	int rushNav = -1;				// subsector/nav ID that the bot is rushing for
 	BotGoal rushTrigger;		// goal which caused the bot to start rushing
@@ -80,11 +80,11 @@ public:
 	inline bool HasGoal() { return m_goals.size(); };
 	inline BotGoal* CurrentGoal() { return m_goals.size() ? &m_goals[m_goals.size() - 1] : NULL; }
 	
-	void AimAtPos(FVector3 pos);
-	bool MoveTo(FVector2 pos, int radius=32, int speed=100);
+	void AimAtPos(vec3 pos);
+	bool MoveTo(vec2 pos, int radius=32, int speed=100);
 	bool StopMoving(); // try to stop movement. Returns true if stationary.
-	FVector2 AvoidCornersVector(FVector2 wantDir); // direction to move to avoid hitting corners
-	FVector2 AvoidLedges(AActor* actor, int& cliffDist); // direction to move to avoid falling off a ledge
+	vec2 AvoidCornersVector(vec2 wantDir); // direction to move to avoid hitting corners
+	vec2 AvoidLedges(AActor* actor, int& cliffDist); // direction to move to avoid falling off a ledge
 	void UpdatePositionFlags();
 
 	void Think();
@@ -94,15 +94,15 @@ public:
 	bool HandleStuckPath();
 	void GoalActionThink(); // do something with the goal object, after routing to it
 
-	bool TraceAhead(int dist, FVector3 offset, bool ignoreMonsters, wbot::TraceResult* tr);
+	bool TraceAhead(int dist, vec3 offset, bool ignoreMonsters, wbot::TraceResult* tr);
 
 	void DebugPrint(const char* msg);
 
 	void Use(int ticsBetweenUses=7); // anti-spam use pressing
 	void Attack();
 
-	FVector3 GetViewPos();
-	fixed_t GetDistance(FVector2 p);
+	vec3 GetViewPos();
+	float GetDistance(vec2 p);
 	int GetSpeed2D();
 
 	// something somewhere triggered a line

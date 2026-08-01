@@ -314,8 +314,8 @@ namespace wbot {
 		player_t* plr = pBot->m_pPlayer;
 		APlayerPawn* actor = pBot->m_pPlayer->mo;
 		pBot->m_health = actor->health;
-		pBot->m_origin = FVector3(actor->x, actor->y, actor->z);
-		pBot->m_velocity = FVector3(actor->velx, actor->vely, actor->velz);
+		pBot->m_origin = vec3(actor->x, actor->y, actor->z) / (float)FRACUNIT;
+		pBot->m_velocity = vec3(actor->velx, actor->vely, actor->velz) / (float)FRACUNIT;
 		pBot->m_viewHeight = plr->viewheight;
 		pBot->m_useDistance = actor->UseRange >> FRACBITS;
 		pBot->m_radius = actor->radius;
@@ -350,8 +350,8 @@ namespace wbot {
 		return plr->mo;
 	}
 
-	FVector3 get_actor_pos(AActor* actor) {
-		return FVector3(actor->x, actor->y, actor->z);
+	vec3 get_actor_pos(AActor* actor) {
+		return vec3(actor->x, actor->y, actor->z) / (float)(1 << 16);
 	}
 
 	int get_actor_height(AActor* actor) {
@@ -690,21 +690,24 @@ namespace wbot {
 		return level.mapname;
 	}
 
-	bool TraceLine(FVector3 start, FVector3 end, bool ignoreMonsters, AActor* ignore, TraceResult* tr) {
-		FVector3 delta = end - start;
-		fixed_t dist = delta.Length();
-		delta = delta.Unit() * FRACUNIT;
+	bool TraceLine(vec3 start, vec3 end, bool ignoreMonsters, AActor* ignore, TraceResult* tr) {
+		start *= FRACUNIT;
+		end *= FRACUNIT;
+		
+		vec3 delta = end - start;
+		fixed_t dist = delta.length();
+		delta = delta.normalize(FRACUNIT);		
 
-		sector_t* sector = P_PointInSector(start.X, start.Y);
+		sector_t* sector = P_PointInSector(start.x, start.y);
 
 		FTraceResults trInternal;
 
-		bool hit = ::Trace((fixed_t)start.X, (fixed_t)start.Y, (fixed_t)start.Z, sector,
-			(fixed_t)delta.X, (fixed_t)delta.Y, (fixed_t)delta.Z, dist, ignoreMonsters ? 0 : MF_SOLID,
+		bool hit = ::Trace((fixed_t)start.x, (fixed_t)start.y, (fixed_t)start.z, sector,
+			(fixed_t)delta.x, (fixed_t)delta.y, (fixed_t)delta.z, dist, ignoreMonsters ? 0 : MF_SOLID,
 			ML_BLOCKING | ML_BLOCKEVERYTHING | ML_BLOCK_PLAYERS, ignore, trInternal);
 
 		if (tr) {
-			tr->endPos = FVector3(trInternal.X, trInternal.Y, trInternal.Z);
+			tr->endPos = vec3(trInternal.X, trInternal.Y, trInternal.Z) / (float)(1 << 16);
 			tr->actor = trInternal.Actor;
 			tr->frac = trInternal.Fraction / (float)FRACUNIT;
 			tr->hitType = (TraceHitType)trInternal.HitType;
@@ -715,17 +718,20 @@ namespace wbot {
 		return hit;
 	}
 
-	vector<TraceIsect> TraceIntersections(FVector2 start, FVector2 end) {
-		FVector2 delta = end - start;
-		fixed_t maxDist = delta.Length();
-		delta = delta.Unit() * FRACUNIT;
+	vector<TraceIsect> TraceIntersections(vec2 start, vec2 end) {
+		start *= FRACUNIT;
+		end *= FRACUNIT;
 
-		fixed_t StartX = start.X;
-		fixed_t StartY = start.Y;
-		fixed_t Vx = delta.X;
-		fixed_t Vy = delta.Y;
+		vec2 delta = end - start;
+		fixed_t maxDist = delta.length();
+		delta = delta.normalize(FRACUNIT);
 
-		FPathTraverse path(start.X, start.Y, end.X, end.Y, PT_ADDLINES);
+		fixed_t StartX = start.x;
+		fixed_t StartY = start.y;
+		fixed_t Vx = delta.x;
+		fixed_t Vy = delta.y;
+
+		FPathTraverse path(start.x, start.y, end.x, end.y, PT_ADDLINES);
 		intercept_t* in;
 
 		vector<TraceIsect> intersections;
@@ -736,7 +742,7 @@ namespace wbot {
 
 			TraceIsect isect;
 			isect.line = &g_map.lines[wall - lines];
-			isect.pos = FVector2(StartX + FixedMul(Vx, dist), StartY + FixedMul(Vy, dist));
+			isect.pos = vec2(StartX + FixedMul(Vx, dist), StartY + FixedMul(Vy, dist)) / (float)FRACUNIT;
 			isect.fraction = in->frac;
 
 			if (wall->backsector == NULL) {
@@ -754,30 +760,33 @@ namespace wbot {
 		return intersections;
 	}
 
-	bool TraceImpassable(FVector2 start, FVector2 end) {
-		FPathTraverse path(start.X, start.Y, end.X, end.Y, PT_ADDLINES);
+	bool TraceImpassable(vec2 start, vec2 end) {
+		start *= FRACUNIT;
+		end *= FRACUNIT;
+
+		FPathTraverse path(start.x, start.y, end.x, end.y, PT_ADDLINES);
 		intercept_t* in;
 
-		FVector2 delta = end - start;
-		fixed_t maxDist = delta.Length();
-		delta = delta.Unit() * FRACUNIT;
+		vec2 delta = end - start;
+		fixed_t maxDist = delta.length();
+		delta = delta.normalize(FRACUNIT);
 
-		fixed_t StartX = start.X;
-		fixed_t StartY = start.Y;
-		fixed_t Vx = delta.X;
-		fixed_t Vy = delta.Y;
+		fixed_t StartX = start.x;
+		fixed_t StartY = start.y;
+		fixed_t Vx = delta.x;
+		fixed_t Vy = delta.y;
 
 		while ((in = path.Next())) {
 			line_t* line = in->d.line;
 
 			if (!line->backsector || (line->flags & ML_BLOCKING)) {
 				fixed_t dist = FixedMul(maxDist, in->frac);
-				FVector2 pos = FVector2(StartX + FixedMul(Vx, dist), StartY + FixedMul(Vy, dist));
-				sector_t* hitSector = R_PointInSubsector(pos.X, pos.Y)->sector;
+				vec2 pos = vec2(StartX + FixedMul(Vx, dist), StartY + FixedMul(Vy, dist)) / (float)FRACUNIT;
+				sector_t* hitSector = R_PointInSubsector(pos.x * FRACUNIT, pos.y * FRACUNIT)->sector;
 
 				if (hitSector != line->frontsector && hitSector != line->backsector) {
-					FVector2 lineStart(line->v1->x, line->v1->y);
-					FVector2 lineEnd(line->v2->x, line->v2->y);
+					vec2 lineStart = vec2(line->v1->x, line->v1->y) / (float)FRACUNIT;
+					vec2 lineEnd = vec2(line->v2->x, line->v2->y) / (float)FRACUNIT;
 					if (!PointAlignedSegment(pos, lineStart, lineEnd))
 						continue; // bug in trace where lines in other sectors nowhere near the impact point are hit
 				}
@@ -789,25 +798,28 @@ namespace wbot {
 		return false;
 	}
 
-	bool TraceSectorEdge(FVector2 start, FVector2 end, FVector2& edge, MapLine** line) {
-		FPathTraverse path(start.X, start.Y, end.X, end.Y, PT_ADDLINES);
+	bool TraceSectorEdge(vec2 start, vec2 end, vec2& edge, MapLine** line) {
+		start *= FRACUNIT;
+		end *= FRACUNIT;
+
+		FPathTraverse path(start.x, start.y, end.x, end.y, PT_ADDLINES);
 		intercept_t* in = path.Next();
 
 		if (in) {
-			FVector2 delta = end - start;
-			fixed_t dist = FixedMul((fixed_t)delta.Length(), in->frac);
-			FVector2 dir = delta.Unit() * FRACUNIT;
+			vec2 delta = end - start;
+			fixed_t dist = FixedMul((fixed_t)delta.length(), in->frac);
+			vec2 dir = delta.normalize(FRACUNIT);
 
-			fixed_t StartX = start.X;
-			fixed_t StartY = start.Y;
-			fixed_t Vx = dir.X;
-			fixed_t Vy = dir.Y;
+			fixed_t StartX = start.x;
+			fixed_t StartY = start.y;
+			fixed_t Vx = dir.x;
+			fixed_t Vy = dir.y;
 
 			if (line) {
 				*line = &g_map.lines[in->d.line - ::lines];
 			}
 
-			edge = FVector2(StartX + FixedMul(Vx, dist), StartY + FixedMul(Vy, dist));
+			edge = vec2(StartX + FixedMul(Vx, dist), StartY + FixedMul(Vy, dist)) / (float)(1 << 16);
 			return true;
 		}
 		else if (line) {
@@ -1192,13 +1204,13 @@ namespace wbot {
 		return -1;
 	}
 
-	FVector2 get_tele_dest(int lineid) {
+	vec2 get_tele_dest(int lineid) {
 		AActor* actor = SelectTeleDest(get_line_arg(lineid, 0), get_line_arg(lineid, 1));
-		return actor ? FVector2(actor->x, actor->y) : FVector2(0, 0);
+		return actor ? vec2(actor->x, actor->y) / (float)FRACUNIT : vec2(0, 0);
 	}
 
-	vector<MapLine*> get_crossed_lines(const FVector2& pos, int radius) {
-		FBoundingBox box(pos.X, pos.Y, radius);
+	vector<MapLine*> get_crossed_lines(const vec2& pos, int radius) {
+		FBoundingBox box(pos.x * FRACUNIT, pos.y * FRACUNIT, radius * FRACUNIT);
 		FBlockLinesIterator it(box);
 		line_t* ld;
 
@@ -1239,19 +1251,19 @@ namespace wbot {
 		angle *= ANGLE_1;
 		fixed_t fx = x << FRACBITS;
 		fixed_t fy = y << FRACBITS;
-		fixed_t z = g_map.GetSector(fx, fy)->getFloorZ();
 		P_Teleport(actor, fx, fy, ONFLOORZ, angle, teleportFx, teleportFx, false, true, false);
 	}
 
-	void MakeVectors(uint32_t angle, FVector3& forward, FVector3& right) {
+	void MakeVectors(uint32_t angle, vec3& forward, vec3& right) {
 		fixed_t fsine = finesine[angle >> ANGLETOFINESHIFT];
 		fixed_t fcosine = finecosine[angle >> ANGLETOFINESHIFT];
-		forward = FVector3(fcosine, fsine, 0);
-		right = FVector3(fsine, -fcosine, 0);
+		forward = vec3(fcosine, fsine, 0).normalize();
+		right = vec3(fsine, -fcosine, 0).normalize();
 	}
 
-	void SpawnBlood(FVector3 pos, int damage, AActor* owner) {
-		SERVERCOMMANDS_SpawnBlood(pos.X, pos.Y, pos.Z, 0, damage, owner);
+	void SpawnBlood(vec3 pos, int damage, AActor* owner) {
+		pos *= FRACUNIT;
+		SERVERCOMMANDS_SpawnBlood(pos.x, pos.y, pos.z, 0, damage, owner);
 	}
 
 	void PrintNotification(const char* msg) {

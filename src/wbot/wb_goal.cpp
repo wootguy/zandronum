@@ -2,7 +2,9 @@
 #include "wb_nav.h"
 #include "wb_map.h"
 #include "wb_util.h"
+
 #include <string>
+#include <cmath>
 
 using namespace std;
 using namespace wbot;
@@ -92,17 +94,17 @@ int BotGoal::getNavId() const {
 			if (node.links.empty() && (action == WBOT_GOAL_ACTION_USE || action == WBOT_GOAL_ACTION_SHOOT)) {
 				// line is in an unreachable sector.
 				// Try tracing in front of it to see if it can be activated from a sector nearby
-				fixed_t use_dist = 64 << FRACBITS; // TODO: get actor use range
+				float use_dist = 64; // TODO: get actor use range
 				MapLine& line = g_map.lines[lineid];
-				FVector2 center = line.center();
-				FVector2 front = center + line.normal() * use_dist;
-				center += (front - center).Unit() * FRACUNIT; // nudge to prevent collision with this line
+				vec2 center = line.center();
+				vec2 front = center + line.normal() * use_dist;
+				center += (front - center).normalize(); // nudge to prevent collision with this line
 				MapSubsector* centersub = &g_map.subsectors[ret];
-				MapSubsector* frontsub = g_map.GetSubsector(front.X, front.Y);
-				fixed_t startZ = centersub->sector->getFloorZ();
-				fixed_t endZ = frontsub->sector->getFloorZ();
+				MapSubsector* frontsub = g_map.GetSubsector(front.x, front.y);
+				float startZ = centersub->sector->getFloorZ();
+				float endZ = frontsub->sector->getFloorZ();
 
-				if (abs(startZ - endZ) < (JUMP_HEIGHT << FRACBITS) && !TraceImpassable(center, front)) {
+				if (fabs(startZ - endZ) < JUMP_HEIGHT && !TraceImpassable(center, front)) {
 					// no impassable walls between the line sector and the one in front
 					// try routing to that subsector instead
 					ret = frontsub - g_map.subsectors;
@@ -119,19 +121,19 @@ int BotGoal::getNavId() const {
 	return -1;
 }
 
-FVector3 BotGoal::pos() {
+vec3 BotGoal::pos() {
 	if (h_actor.get()) {
-		FVector3 actorPos = get_actor_pos(h_actor.get());
-		return FVector3(actorPos.X, actorPos.Y, g_map.GetSector(h_actor.get())->getFloorZ());
+		vec3 actorPos = get_actor_pos(h_actor.get());
+		return vec3(actorPos.x, actorPos.y, g_map.GetSector(h_actor.get())->getFloorZ());
 	}
 	else if (lineid >= 0) {
 		MapLine& line = g_map.lines[lineid];
-		fixed_t z = line.frontsector->getFloorZ();
-		return FVector3(line.center(), z);
+		float z = line.frontsector->getFloorZ();
+		return vec3(line.center(), z);
 	}
 
 	gprintf("Goal has no actor nor lineid\n");
-	return FVector3(0, 0, 0);
+	return vec3(0, 0, 0);
 }
 
 int BotGoal::touchDistance(AActor* toucher) {
@@ -156,34 +158,34 @@ bool BotGoal::valid() const {
 	return h_actor.get() != NULL;
 }
 
-void BotGoal::TestBossBrainShootRay(FVector3 brainPos, FVector3 rayStart, FVector3 rayDir,
+void BotGoal::TestBossBrainShootRay(vec3 brainPos, vec3 rayStart, vec3 rayDir,
 	bool isCeilTrace, unordered_map<int, IndirectShootPos>& shootNodes)
 {
-	FVector3 impactPos = rayStart;
+	vec3 impactPos = rayStart;
 
 	if (!isCeilTrace) {
-		FVector3 impactPos = rayStart + rayDir * ((ROCKET_EXPLODE_RADIUS + 64) << FRACBITS);
+		vec3 impactPos = rayStart + rayDir * (ROCKET_EXPLODE_RADIUS + 64);
 		if (!TraceLine(rayStart, impactPos, true, NULL, NULL)) {
 			return; // no impact
 		}
 	}
 
-	fixed_t maxDist = ((ROCKET_EXPLODE_RADIUS + ROCKET_RADIUS) << FRACBITS) + get_actor_radius(h_actor.get());
+	float maxDist = (ROCKET_EXPLODE_RADIUS + ROCKET_RADIUS) + (get_actor_radius(h_actor.get()) / (float)FRACUNIT);
 
-	if ((impactPos - brainPos).Length() > maxDist) {
+	if ((impactPos - brainPos).length() > maxDist) {
 		return; // impact point not close enough to the target to do damage
 	}
 
 	// trace in the opposite direction to find a sector to shoot the impact point from
 	TraceResult tr;
-	FVector3 shootPos = impactPos - rayDir * (4000 << FRACBITS);
+	vec3 shootPos = impactPos - rayDir * 4000;
 	TraceLine(impactPos, shootPos, true, NULL, &tr);
 	shootPos = tr.endPos;
-	FVector3 shootDelta = shootPos - impactPos;
-	fixed_t shootLen = shootDelta.Length();
+	vec3 shootDelta = shootPos - impactPos;
+	float shootLen = shootDelta.length();
 
 	// check vertical clearance for the rocket
-	FVector3 lowerPos = impactPos - FVector3(0, 0, (ROCKET_RADIUS / 2) << FRACBITS);
+	vec3 lowerPos = impactPos - vec3(0, 0, ROCKET_RADIUS / 2);
 	TraceLine(lowerPos, shootPos, true, NULL, &tr);
 	if (tr.frac < 0.9f) {
 		return; // not enough clearance
@@ -206,28 +208,25 @@ void BotGoal::TestBossBrainShootRay(FVector3 brainPos, FVector3 rayStart, FVecto
 
 		// test if the shoot line intersects this subsector
 		int numisect = 0;
-		FVector2 segsect[2];
+		vec2 segsect[2];
 		for (int s = 0; s < sub.numsegs; s++) {
 			MapSeg& seg = g_map.segs[sub.firstseg + s];
-			FVector2 v1 = seg.start();
-			FVector2 v2 = seg.end();
-			if (DoLinesIntersect(v1, v2, impactPos, shootPos)) {
-				segsect[numisect++] = LineIntersect(v1, v2, impactPos, shootPos);
+			if (DoLinesIntersect(seg.v1, seg.v2, impactPos, shootPos)) {
+				segsect[numisect++] = LineIntersect(seg.v1, seg.v2, impactPos, shootPos);
 			}
 		}
 
 		if (numisect == 0)
 			continue; // no intersection
 
-		fixed_t floorZ = sec->getFloorZ();
-		fixed_t maxZ = floorZ + ((VIEW_HEIGHT + 8) << FRACBITS);
-		fixed_t minZ = floorZ + ((VIEW_HEIGHT - 8) << FRACBITS);
+		float floorZ = sec->getFloorZ();
+		float maxZ = floorZ + (VIEW_HEIGHT + 8);
+		float minZ = floorZ + (VIEW_HEIGHT - 8);
 
-		float isectLen1 = ((segsect[0] - impactPos).Length() / (float)FRACUNIT);
-		float fShootLen = shootLen / (float)FRACUNIT;
+		float isectLen1 = (segsect[0] - impactPos).length();
+		float fShootLen = shootLen;
 
 		float frac1 = isectLen1 / fShootLen;
-		fixed_t z1 = (shootPos + shootDelta * frac1).Z;
 
 		IndirectShootPos shoot;
 		shoot.subid = k;
@@ -235,13 +234,12 @@ void BotGoal::TestBossBrainShootRay(FVector3 brainPos, FVector3 rayStart, FVecto
 
 		if (numisect == 2) {
 			// line passes thru this subsector
-			float isectLen2 = ((segsect[1] - impactPos).Length() / (float)FRACUNIT);
+			float isectLen2 = (segsect[1] - impactPos).length();
 			float frac2 = isectLen2 / fShootLen;
-			fixed_t z2 = (shootPos + shootDelta * frac2).Z;
 			
-			FVector3 start = impactPos + frac1 * shootDelta;
-			FVector3 end = impactPos + frac2 * shootDelta;
-			FVector3 goodStart, goodEnd;
+			vec3 start = impactPos + shootDelta * frac1;
+			vec3 end = impactPos + shootDelta * frac2;
+			vec3 goodStart, goodEnd;
 			if (LineIntersectsZRange(start, end, minZ, maxZ, goodStart, goodEnd)) {
 				// anywhere along this line is a good place to shoot from
 				shoot.shootFrom = goodStart + (goodEnd - goodStart) * 0.5f;
@@ -250,13 +248,13 @@ void BotGoal::TestBossBrainShootRay(FVector3 brainPos, FVector3 rayStart, FVecto
 		}
 		else if (numisect == 1) {
 			// line terminates in this sector
-			int subid = g_map.GetSubsector(shootPos.X, shootPos.Y) - g_map.subsectors;
+			int subid = g_map.GetSubsector(shootPos.x, shootPos.y) - g_map.subsectors;
 
 			if (subid == k) {
 				// line hits the floor and an earlier point on the line is a good shooting height
 
-				FVector3 start = impactPos + frac1 * shootDelta;
-				FVector3 goodStart, goodEnd;
+				vec3 start = impactPos + shootDelta * frac1;
+				vec3 goodStart, goodEnd;
 				if (LineIntersectsZRange(start, shootPos, minZ, maxZ, goodStart, goodEnd)) {
 					// anywhere along this line is a good place to shoot from
 					shoot.shootFrom = goodStart + (goodEnd - goodStart) * 0.5f;
@@ -269,14 +267,14 @@ void BotGoal::TestBossBrainShootRay(FVector3 brainPos, FVector3 rayStart, FVecto
 
 unordered_map<int, IndirectShootPos> BotGoal::FindBossBrainShootPositions() {
 	// boss brain is normally unreachable, but can be damaged by rockets
-	FVector3 actorPos = get_actor_pos(h_actor.get());
+	vec3 actorPos = get_actor_pos(h_actor.get());
 	const int maxPitch = 20;
 
 	unordered_map<int, IndirectShootPos> shootFromNodes;
 
 	// test impacts against nearby walls
 	for (int h = 0; h < 128; h += 8) {
-		FVector3 abovePos = actorPos + FVector3(0, 0, h << FRACBITS);
+		vec3 abovePos = actorPos + vec3(0, 0, h);
 
 		for (int p = -maxPitch; p <= maxPitch; p++) {
 			float pitchRad = p * (M_PI / 180.0f);
@@ -285,16 +283,16 @@ unordered_map<int, IndirectShootPos> BotGoal::FindBossBrainShootPositions() {
 
 			for (int i = 0; i < 360; i += 90) {
 				float rad = i * (M_PI / 180.0f);
-				FVector3 dir(cosf(rad) * pitchCos, sinf(rad) * pitchCos, pitchSin);
+				vec3 dir(cosf(rad) * pitchCos, sinf(rad) * pitchCos, pitchSin);
 				TestBossBrainShootRay(actorPos, abovePos, dir, false, shootFromNodes);
 			}
 		}
 	}
 
 	// test impacts against the ceiling
-	FVector3 ceilPos = actorPos;
-	ceilPos.Z = g_map.GetSector(h_actor.get())->getCeilZ();
-	ceilPos.Z -= FRACUNIT;
+	vec3 ceilPos = actorPos;
+	ceilPos.z = g_map.GetSector(h_actor.get())->getCeilZ();
+	ceilPos.z -= 1.0f;
 	//ceilPos.Z -= (ROCKET_RADIUS / 2) << FRACBITS;
 
 	for (int p = 1; p < maxPitch; p++) {
@@ -304,7 +302,7 @@ unordered_map<int, IndirectShootPos> BotGoal::FindBossBrainShootPositions() {
 
 		for (int i = 0; i < 360; i += 90) {
 			float rad = i * (M_PI / 180.0f);
-			FVector3 dir(cosf(rad) * pitchCos, sinf(rad) * pitchCos, pitchSin);
+			vec3 dir(cosf(rad) * pitchCos, sinf(rad) * pitchCos, pitchSin);
 			TestBossBrainShootRay(actorPos, ceilPos, dir, true, shootFromNodes);
 		}
 	}

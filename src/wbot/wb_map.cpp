@@ -1,24 +1,26 @@
 #include "wb_map.h"
 #include "wb_util.h"
 #include "wb_nav.h"
+
 #include <algorithm>
 #include <float.h>
+#include <cstring>
 
 using namespace std;
 using namespace wbot;
 
 BotMapInfo wbot::g_map;
 
-fixed_t MapSector::getHeight() {
-	return get_sector_ceil_z(id) - get_sector_floor_z(id);
+float MapSector::getHeight() {
+	return (get_sector_ceil_z(id) - get_sector_floor_z(id)) / (float)FRACUNIT;
 }
 
-fixed_t MapSector::getFloorZ() {
-	return get_sector_floor_z(id);
+float MapSector::getFloorZ() {
+	return get_sector_floor_z(id) / (float)FRACUNIT;
 }
 
-fixed_t MapSector::getCeilZ() {
-	return get_sector_ceil_z(id);
+float MapSector::getCeilZ() {
+	return get_sector_ceil_z(id) / (float)FRACUNIT;
 }
 
 bool MapSector::isMoving() {
@@ -37,18 +39,18 @@ int MapSector::special() {
 	return get_sector_special(id);
 }
 
-FVector2 MapLine::center() {
-	return (start() + end()) * 0.5f;
+vec2 MapLine::center() {
+	return (v1 + v2) * 0.5f;
 }
 
-FVector2 MapLine::normal() {
-	FVector2 dir = (v2 - v1).Unit();
-	return FVector2(dir.Y, -dir.X);
+vec2 MapLine::normal() {
+	vec2 dir = (v2 - v1).normalize();
+	return vec2(dir.y, -dir.x);
 }
 
 
 int MapLine::length() {
-	return (v2 - v1).Length();
+	return (v2 - v1).length();
 }
 
 int MapLine::activation() {
@@ -83,22 +85,22 @@ bool MapLine::canPlayerActivate() {
 	return can_player_activate_line(id);
 }
 
-FVector2 MapLine::getTeleportDest() {
+vec2 MapLine::getTeleportDest() {
 	return get_tele_dest(id);
 }
 
 
-FVector2 MapSeg::center() {
-	return (start() + end()) * 0.5f;
+vec2 MapSeg::center() {
+	return (v1 + v2) * 0.5f;
 }
 
-FVector2 MapSeg::normal() {
-	FVector2 dir = (end() - start()).Unit();
-	return FVector2(dir.Y, -dir.X);
+vec2 MapSeg::normal() {
+	vec2 dir = (v2 - v1).normalize();
+	return vec2(dir.y, -dir.x);
 }
 
 float MapSeg::length() {
-	return (v2 - v1).Length();
+	return (v2 - v1).length();
 }
 
 void BotMapInfo::init() {
@@ -170,8 +172,8 @@ void BotMapInfo::load_lumps() {
 				continue;
 
 			dst.id = i;
-			dst.v1 = FVector2(lumps.verts[src.v1].x, lumps.verts[src.v1].y);
-			dst.v2 = FVector2(lumps.verts[src.v2].x, lumps.verts[src.v2].y);
+			dst.v1 = vec2(lumps.verts[src.v1].x, lumps.verts[src.v1].y);
+			dst.v2 = vec2(lumps.verts[src.v2].x, lumps.verts[src.v2].y);
 			dst.tag = src.tag;
 			dst.flags = src.flags;
 			dst.frontsector = frontside >= 0 ? &sectors[lumps.sides[frontside].sector] : NULL;
@@ -236,7 +238,7 @@ void BotMapInfo::build_subsectors_recurse(int nodeid, std::vector<BspClip>& clip
 	MapNode& node = nodes[nodeid];
 
 	for (int i = 0; i < 2; i++) {
-		clips.push_back({ FVector2(node.x, node.y), FVector2(node.dx, node.dy), i == 1});
+		clips.push_back({ vec2(node.x, node.y), vec2(node.dx, node.dy), i == 1});
 
 		uint16_t child = node.children[i];
 
@@ -256,11 +258,11 @@ void BotMapInfo::build_subsector(int subid, std::vector<BspClip>& clips,
 	MapSubsector& sub = subsectors[subid];
 	LumpSubSector& lumpSub = lumps.subsectors[subid];
 
-	std::vector<FVector2> poly = {
-		FVector2(INT16_MAX, INT16_MAX),
-		FVector2(INT16_MAX, INT16_MIN),
-		FVector2(INT16_MIN, INT16_MIN),
-		FVector2(INT16_MIN, INT16_MAX),		
+	std::vector<vec2> poly = {
+		vec2(INT16_MAX, INT16_MAX),
+		vec2(INT16_MAX, INT16_MIN),
+		vec2(INT16_MIN, INT16_MIN),
+		vec2(INT16_MIN, INT16_MAX),
 	};
 
 	for (const BspClip& clip : clips) {
@@ -271,25 +273,25 @@ void BotMapInfo::build_subsector(int subid, std::vector<BspClip>& clips,
 		LumpSeg& seg = lumps.segs[lumpSub.firstseg + i];
 		LumpVert v1 = lumps.verts[seg.v1];
 		LumpVert v2 = lumps.verts[seg.v2];
-		FVector2 fv1(v1.x, v1.y);
-		FVector2 fv2(v2.x, v2.y);
+		vec2 fv1(v1.x, v1.y);
+		vec2 fv2(v2.x, v2.y);
 		ClipPoly(poly, fv1, fv2 - fv1, false);
 	}
 
 	sub.firstseg = totalSegs.size();
 	sub.numsegs = poly.size();
-	sub.mins = FVector2(FLT_MAX, FLT_MAX);
-	sub.maxs = FVector2(-FLT_MAX, -FLT_MAX);
+	sub.mins = vec2(FLT_MAX, FLT_MAX);
+	sub.maxs = vec2(-FLT_MAX, -FLT_MAX);
 
 	for (int i = 0; i < poly.size(); i++) {
-		FVector2& start = poly[i];
-		FVector2& end = poly[(i + 1) % poly.size()];
+		vec2& start = poly[i];
+		vec2& end = poly[(i + 1) % poly.size()];
 		
-		if (start.X > sub.maxs.X) sub.maxs.X = start.X;
-		if (start.Y > sub.maxs.Y) sub.maxs.Y = start.Y;
+		if (start.x > sub.maxs.x) sub.maxs.x = start.x;
+		if (start.y > sub.maxs.y) sub.maxs.y = start.y;
 		
-		if (start.X < sub.mins.X) sub.mins.X = start.X;
-		if (start.Y < sub.mins.Y) sub.mins.Y = start.Y;
+		if (start.x < sub.mins.x) sub.mins.x = start.x;
+		if (start.y < sub.mins.y) sub.mins.y = start.y;
 
 		MapSeg seg;
 		seg.v1 = start;
@@ -310,10 +312,10 @@ void BotMapInfo::build_subsector(int subid, std::vector<BspClip>& clips,
 
 	// to ensure boxes overlap
 	const float eps = 1.0f;
-	sub.mins.X -= eps;
-	sub.mins.Y -= eps;
-	sub.maxs.X += eps;
-	sub.maxs.Y += eps;
+	sub.mins.x -= eps;
+	sub.mins.y -= eps;
+	sub.maxs.x += eps;
+	sub.maxs.y += eps;
 }
 
 MapSubsector* BotMapInfo::GetSubsector(fixed_t x, fixed_t y) {
@@ -321,9 +323,6 @@ MapSubsector* BotMapInfo::GetSubsector(fixed_t x, fixed_t y) {
 		return subsectors;
 
 	uint16_t nodenum = numnodes - 1;
-
-	x >>= FRACBITS;
-	y >>= FRACBITS;
 
 	while (true) {
 		MapNode* node = &nodes[nodenum];
@@ -339,13 +338,13 @@ MapSubsector* BotMapInfo::GetSubsector(fixed_t x, fixed_t y) {
 	}
 }
 
-MapSector* BotMapInfo::GetSector(fixed_t x, fixed_t y) {
+MapSector* BotMapInfo::GetSector(int x, int y) {
 	return GetSubsector(x, y)->sector;
 }
 
 MapSector* BotMapInfo::GetSector(AActor* actor) {
-	FVector3 pos = get_actor_pos(actor);
-	return GetSector(pos.X, pos.Y);
+	vec3 pos = get_actor_pos(actor);
+	return GetSector(pos.x, pos.y);
 }
 
 std::vector<int> BotMapInfo::GetTouchedSubsectors(AActor* actor) {
@@ -354,11 +353,11 @@ std::vector<int> BotMapInfo::GetTouchedSubsectors(AActor* actor) {
 	
 	unordered_set<int> subs;
 
-	fixed_t r = get_actor_radius(actor);
+	int r = get_actor_radius(actor) / FRACUNIT;
 	fixed_t d = (r * 46341) >> FRACBITS; // diagonal radius
-	FVector3 pos = get_actor_pos(actor);
-	fixed_t x = pos.X;
-	fixed_t y = pos.Y;
+	vec3 pos = get_actor_pos(actor);
+	int x = pos.x;
+	int y = pos.y;
 
 	subs.insert(GetSubsector(x, y) - subsectors);
 
@@ -392,11 +391,11 @@ bool BotMapInfo::is_sector_border_potentially_crossable(MapSector* from, MapSect
 	int frontMovement = from->moveFlags;
 	int backMovement = to->moveFlags;
 
-	fixed_t frontFloor = from->getFloorZ();
-	fixed_t backFloor = to->getFloorZ();
+	float frontFloor = from->getFloorZ();
+	float backFloor = to->getFloorZ();
 
 	const bool canJump = true;
-	int jumpHeight = (canJump ? JUMP_HEIGHT : STEP_HEIGHT) << FRACBITS;
+	int jumpHeight = (canJump ? JUMP_HEIGHT : STEP_HEIGHT);
 
 	if (backFloor - frontFloor > jumpHeight) {
 		// too high to jump
@@ -404,9 +403,9 @@ bool BotMapInfo::is_sector_border_potentially_crossable(MapSector* from, MapSect
 			return false; // and neither of the sectors move in a way that would make the jump possible
 	}
 
-	fixed_t backCeil = to->getCeilZ();
-	fixed_t frontCeil = from->getCeilZ();
-	const fixed_t fduckHeight = DUCK_HEIGHT << FRACBITS;
+	float backCeil = to->getCeilZ();
+	float frontCeil = from->getCeilZ();
+	const float fduckHeight = DUCK_HEIGHT;
 
 	if (backCeil - backFloor < fduckHeight) {
 		// not enough space in target sector
@@ -433,22 +432,22 @@ int BotMapInfo::sector_border_walkability(MapSector* from, MapSector* to) {
 	if (from == to)
 		return LINK_BLOCK_CLEAR;
 
-	fixed_t frontFloor = from->getFloorZ();
-	fixed_t backFloor = to->getFloorZ();
+	float frontFloor = from->getFloorZ();
+	float backFloor = to->getFloorZ();
 
 	const bool canJump = true;
 	int maxHeight = canJump ? JUMP_HEIGHT : STEP_HEIGHT;
 
-	if ((backFloor - frontFloor) > (maxHeight << FRACBITS)) {
+	if ((backFloor - frontFloor) > maxHeight) {
 		return LINK_BLOCK_TOO_HIGH; // too high to step
 	}
 
-	fixed_t backCeil = to->getCeilZ();
-	fixed_t frontCeil = from->getCeilZ();
-	const fixed_t fduckHeight = DUCK_HEIGHT << FRACBITS;
+	float backCeil = to->getCeilZ();
+	float frontCeil = from->getCeilZ();
+	const float fduckHeight = DUCK_HEIGHT;
 
-	fixed_t backHeight = backCeil - backFloor;
-	fixed_t borderHeight = std::min(backCeil - frontFloor, frontCeil - backFloor);
+	float backHeight = backCeil - backFloor;
+	float borderHeight = std::min(backCeil - frontFloor, frontCeil - backFloor);
 
 	if (backHeight < fduckHeight || borderHeight < fduckHeight) {
 		return LINK_BLOCK_TOO_LOW; // not enough space in target sector or border
@@ -464,20 +463,20 @@ std::vector<LinkSeg> BotMapInfo::get_neighbor_subsectors(MapSubsector* rootSub, 
 
 	float bestLen = epsilonWidth;
 	bool foundSeg = false;
-	FVector2 borderNormal = borderSeg->normal();
+	vec2 borderNormal = borderSeg->normal();
 
-	FVector2& mins1 = rootSub->mins;
-	FVector2& maxs1 = rootSub->maxs;
+	vec2& mins1 = rootSub->mins;
+	vec2& maxs1 = rootSub->maxs;
 
 	for (MapSector* sector : checkSectors) {
 		for (MapSubsector* otherSub : sector->subsectors) {
 			if (otherSub == rootSub)
 				continue;
 
-			FVector2& mins2 = otherSub->mins;
-			FVector2& maxs2 = otherSub->maxs;
-			if ((maxs1.X < mins2.X || mins1.X > maxs2.X) ||
-				(maxs1.Y < mins2.Y || mins1.Y > maxs2.Y)) {
+			vec2& mins2 = otherSub->mins;
+			vec2& maxs2 = otherSub->maxs;
+			if ((maxs1.x < mins2.x || mins1.x > maxs2.x) ||
+				(maxs1.y < mins2.y || mins1.y > maxs2.y)) {
 				continue;
 			}
 
@@ -487,8 +486,8 @@ std::vector<LinkSeg> BotMapInfo::get_neighbor_subsectors(MapSubsector* rootSub, 
 				FSegment2 overlap = LineSegmentOverlap(tseg.v1, tseg.v2, borderSeg->v1, borderSeg->v2);
 				if (overlap.length() >= epsilonWidth) {
 					LinkSeg link;
-					link.overlap.a = overlap.a * FRACUNIT;
-					link.overlap.b = overlap.b * FRACUNIT;
+					link.overlap.a = overlap.a;
+					link.overlap.b = overlap.b;
 					link.otherSub = otherSub->id;
 
 					float bestOverlap = 0;
@@ -501,9 +500,9 @@ std::vector<LinkSeg> BotMapInfo::get_neighbor_subsectors(MapSubsector* rootSub, 
 						}
 					}
 
-					if (DotProduct(link.overlap.normal(), borderNormal) < 0) {
+					if (dotProduct(link.overlap.normal(), borderNormal) < 0) {
 						// segment normals should always point inward towards the subsector
-						FVector2 temp = link.overlap.a;
+						vec2 temp = link.overlap.a;
 						link.overlap.a = link.overlap.b;
 						link.overlap.b = temp;
 					}
@@ -535,21 +534,21 @@ void BotMapInfo::find_linedef_sectors() {
 		int lineAction = get_linedef_goal_action(&line);
 		bool doubleSidedCrossLine = is_double_sided_cross_line(i);
 
-		FVector2 center = line.center();
-		FVector2 normal = line.normal();
+		vec2 center = line.center();
+		vec2 normal = line.normal();
 
 		// route to a nearby sector if the adjacent one is too small to fit a player inside
-		fixed_t useDist = BoxRadiusForDir(normal, PLAYER_RADIUS << FRACBITS) + FRACUNIT;
+		float useDist = BoxRadiusForDir(normal, PLAYER_RADIUS) + 1;
 
 		if (lineAction == WBOT_GOAL_ACTION_CROSS || lineAction == WBOT_GOAL_ACTION_TOUCH) {
 			// need to be very close to the line
-			useDist = FRACUNIT * 2;
+			useDist = 2;
 		}
 
-		FVector2 frontPoint = center + normal * useDist;
-		FVector2 backPoint = center - normal * useDist;
-		int frontSubId = GetSubsector(frontPoint.X, frontPoint.Y)->id;
-		int backSubId = GetSubsector(backPoint.X, backPoint.Y)->id;
+		vec2 frontPoint = center + normal * useDist;
+		vec2 backPoint = center - normal * useDist;
+		int frontSubId = GetSubsector(frontPoint.x, frontPoint.y)->id;
+		int backSubId = GetSubsector(backPoint.x, backPoint.y)->id;
 		int routeToId = frontSubId;
 
 		if (line.backsector && frontSubId == backSubId)
@@ -557,8 +556,8 @@ void BotMapInfo::find_linedef_sectors() {
 
 		if (doubleSidedCrossLine) {
 			// pick the side that allows crossing so that bot doesn't try to cross lines from the bottom of a cliff
-			fixed_t frontZ = subsectors[frontSubId].sector->getFloorZ();
-			fixed_t backZ = subsectors[backSubId].sector->getFloorZ();
+			float frontZ = subsectors[frontSubId].sector->getFloorZ();
+			float backZ = subsectors[backSubId].sector->getFloorZ();
 			
 			if (backZ > frontZ) {
 				routeToId = backSubId;
