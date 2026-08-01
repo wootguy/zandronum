@@ -74,7 +74,7 @@ void kill_everything() {
 	g_engine.kill_all_shootables();
 
 	// do it again a second later to kill lost souls that spawn from pain elementals
-	g_kill_all_shootables_again_tick = g_engine.get_game_tics() + 35;
+	g_kill_all_shootables_again_tick = g_engine.tics() + 35;
 }
 
 void wbot_run_tests() {
@@ -94,7 +94,7 @@ void wbot_run_tests() {
 	g_wb_test_state = TestState();
 	g_wbot_test_mode = true;
 	g_GameSpeed = 1000.0f;
-	g_wb_test_state.startMap = g_engine.get_map_name();
+	g_wb_test_state.startMap = g_engine.map_name();
 	g_wb_test_state.startTime = getEpochMillis();
 }
 
@@ -116,7 +116,7 @@ void wbot_init() {
 }
 
 void wbot_next_test() {
-	if (g_wbot_test_mode && g_wb_test_state.startMap == string(g_engine.get_map_name())) {
+	if (g_wbot_test_mode && g_wb_test_state.startMap == string(g_engine.map_name())) {
 		g_wbot_test_mode = false;
 		g_GameSpeed = 1.0f;
 		uint32_t totalTime = getEpochMillis() - g_wb_test_state.startTime;
@@ -124,9 +124,9 @@ void wbot_next_test() {
 		uint32_t total_gen_time = 0;
 		uint32_t total_solve_time = 0;
 		int numPass = 0;
-		g_engine.gprintf("\n---------------------\nTESTS FINISHED\n---------------------\n");
+		g_engine.printf("\n---------------------\nTESTS FINISHED\n---------------------\n");
 		for (TestResult& result : g_wb_test_state.results) {
-			g_engine.gprintf("  %-8s = %4dms gen,   %4dms solve,   %4.1f ktics  %s\n", result.mapname.c_str(),
+			g_engine.printf("  %-8s = %4dms gen,   %4dms solve,   %4.1f ktics  %s\n", result.mapname.c_str(),
 				result.gen_nav_millis, result.solve_millis, result.tics / 1000.0f,
 				result.success ? "PASS" : "FAIL <--");
 			numPass += result.success;
@@ -134,16 +134,16 @@ void wbot_next_test() {
 			total_solve_time += result.solve_millis;
 		}
 
-		g_engine.gprintf("\n%d / %d tests passed\n\n", numPass, g_wb_test_state.results.size());
+		g_engine.printf("\n%d / %d tests passed\n\n", numPass, g_wb_test_state.results.size());
 
-		g_engine.gprintf("Total time:  %d ms\n", totalTime);
-		g_engine.gprintf("navmesh:     %d ms\n", total_gen_time);
-		g_engine.gprintf("solver:      %d ms\n", total_solve_time);
-		g_engine.gprintf("tics:        %d ktics\n", g_wb_test_state.totalTics / 1000);
-		g_engine.gprintf("---------------------\n");
+		g_engine.printf("Total time:  %d ms\n", totalTime);
+		g_engine.printf("navmesh:     %d ms\n", total_gen_time);
+		g_engine.printf("solver:      %d ms\n", total_solve_time);
+		g_engine.printf("tics:        %d ktics\n", g_wb_test_state.totalTics / 1000);
+		g_engine.printf("---------------------\n");
 
 		if (g_windows_console_mode) {
-			g_engine.gprintf("\nPress Enter to exit...");
+			g_engine.printf("\nPress Enter to exit...");
 			getchar(); // keep console open to see test results
 		}
 
@@ -153,7 +153,7 @@ void wbot_next_test() {
 }
 
 void wbot_map_init() {
-	g_engine.init_eiface();
+	g_engine.init();
 	g_map.init();
 
 	wbot_next_test();
@@ -182,18 +182,18 @@ void wbot_map_init() {
 void wbot_map_exit() {
 	if (g_wbot_test_mode) {
 		int sz = g_wb_test_state.results.size();
-		if (sz > 0 && g_engine.get_map_name() == g_wb_test_state.results[sz - 1].mapname)
+		if (sz > 0 && g_engine.map_name() == g_wb_test_state.results[sz - 1].mapname)
 			return; // level exits are sometimes triggered multiple times
 
-		int testTime = g_engine.get_game_tics();
+		int testTime = g_engine.tics();
 		uint32_t millis = getEpochMillis() - g_wb_test_state.levelStartTime;
-		g_wb_test_state.totalTics += g_engine.get_game_tics();
-		g_engine.gprintf("Finished level in %d tics (%d ms)\n", testTime, millis);
+		g_wb_test_state.totalTics += g_engine.tics();
+		g_engine.printf("Finished level in %d tics (%d ms)\n", testTime, millis);
 
 		TestResult result;
-		result.mapname = g_engine.get_map_name();
+		result.mapname = g_engine.map_name();
 		result.success = !g_wb_test_state.currentFailed;
-		result.tics = g_engine.get_game_tics();
+		result.tics = g_engine.tics();
 		result.solve_millis = millis;
 		result.gen_nav_millis = g_wb_test_state.levelGenMillis;
 		g_wb_test_state.results.push_back(result);
@@ -203,7 +203,7 @@ void wbot_map_exit() {
 }
 
 void wbot_abort_test() {
-	g_engine.gprintf("---------------------\nTEST FAILED\n---------------------\n");
+	g_engine.printf("---------------------\nTEST FAILED\n---------------------\n");
 
 	g_wb_test_state.currentFailed = true;
 
@@ -220,8 +220,8 @@ void wbot_abort_test() {
 			bot->m_debug = true;
 		}
 
-		g_engine.gprintf("\nFailed after %d tics\n", g_engine.get_game_tics());
-		g_engine.gprintf("\nJoin the server to see what the bot is stuck on.\n");
+		g_engine.printf("\nFailed after %d tics\n", g_engine.tics());
+		g_engine.printf("\nJoin the server to see what the bot is stuck on.\n");
 	}
 	else {
 		g_engine.exit_level();
@@ -364,7 +364,7 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 	}
 
 	if (!strcmp(msg, "restart")) {
-		g_engine.change_level(g_engine.get_map_name(), true);
+		g_engine.change_level(g_engine.map_name(), true);
 	}
 
 	if (!strcmp(msg, "kill")) {
@@ -469,12 +469,12 @@ void wbot_handle_chat_command(unsigned int ulPlayer, const char* msg) {
 void wbot_tick() {
 	g_wb_nav.relink_pending_sector();
 
-	if (g_kill_all_shootables_again_tick && g_engine.get_game_tics() > g_kill_all_shootables_again_tick) {
+	if (g_kill_all_shootables_again_tick && g_engine.tics() > g_kill_all_shootables_again_tick) {
 		kill_everything();
 		g_kill_all_shootables_again_tick = 0;
 	}
 
-	if (g_wbot_test_mode && g_engine.get_game_tics() >= MAX_TEST_TICS) {
+	if (g_wbot_test_mode && g_engine.tics() >= MAX_TEST_TICS) {
 		wbot_abort_test();
 	}
 }

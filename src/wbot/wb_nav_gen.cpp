@@ -52,12 +52,12 @@ bool SectorNavMeshGenerator::trace_jump(vec3 start, vec3 end, int fromMovement, 
 }
 
 bool SectorNavMeshGenerator::is_potential_jump_link(NavSector& fromNav, NavSectorLink& fromLink, NavSector& toNav, NavSectorLink& toLink) {
-	float fromFloorZ = fromNav.getFloorZ();
-	float toFloorZ = toNav.getFloorZ();
+	float fromFloorZ = fromNav.sector->getFloorZ();
+	float toFloorZ = toNav.sector->getFloorZ();
 	float jumpHeight = toFloorZ - fromFloorZ;
 
-	int fromMovement = fromNav.getMoveFlags();
-	int toMovement = toNav.getMoveFlags();
+	int fromMovement = fromNav.sector->moveFlags;
+	int toMovement = toNav.sector->moveFlags;
 	bool jumpMayBeLowerLater = (toMovement & FL_SECTOR_MOVE_FLOOR_DOWN) || (fromMovement & FL_SECTOR_MOVE_FLOOR_UP);
 
 	if (jumpHeight >= JUMP_HEIGHT && !jumpMayBeLowerLater) {
@@ -130,7 +130,7 @@ bool SectorNavMeshGenerator::is_potential_jump_link(NavSector& fromNav, NavSecto
 			if (neighborLink->isJump || neighborLink->isCliff)
 				continue;
 
-			if (neighborLink->target->getMoveFlags() & FL_SECTOR_MOVE_FLOOR_DOWN)
+			if (neighborLink->target->sector->moveFlags & FL_SECTOR_MOVE_FLOOR_DOWN)
 				continue; // may not be level in the future
 
 			if (neighborLink->target->id == toNav.id && !neighborLink->isJump) {
@@ -164,7 +164,7 @@ bool SectorNavMeshGenerator::is_potential_jump_link(NavSector& fromNav, NavSecto
 		if (!(fromMovement & FL_SECTOR_MOVE_CEIL_UP)) {
 			// if the ceiling in the start sector doesn't move, then it can only be lifted so high
 			// before jumping is impossible
-			float maxFloorZ = fromNav.getCeilZ() - STAND_HEIGHT;
+			float maxFloorZ = fromNav.sector->getCeilZ() - STAND_HEIGHT;
 			canRaiseStart = maxFloorZ - fromFloorZ > movementNeeded;
 			canRaiseStartHalf = maxFloorZ - fromFloorZ > movementNeeded / 2;
 		}
@@ -226,7 +226,7 @@ bool SectorNavMeshGenerator::create_jump_link(BotMeshData& mesh, NavSector& from
 
 void SectorNavMeshGenerator::add_jump_links(BotMeshData& mesh, int nodeid) {
 	NavSector& nav = mesh.nodes[nodeid];
-	bool srcCanBeCliffsLater = nav.getMoveFlags() & FL_SECTOR_MOVE_FLOOR_UP;
+	bool srcCanBeCliffsLater = nav.sector->moveFlags & FL_SECTOR_MOVE_FLOOR_UP;
 
 	for (int k = 0; k < nav.links.size(); k++) {
 		NavSectorLink& link = *nav.links[k];
@@ -236,7 +236,7 @@ void SectorNavMeshGenerator::add_jump_links(BotMeshData& mesh, int nodeid) {
 
 		if (!link.isCliff && !srcCanBeCliffsLater) {
 			// if the neighbor can lower, then its still possible to become a cliff
-			if (!(link.target->getMoveFlags() & FL_SECTOR_MOVE_FLOOR_DOWN))
+			if (!(link.target->sector->moveFlags & FL_SECTOR_MOVE_FLOOR_DOWN))
 				continue;
 		}
 
@@ -247,7 +247,7 @@ void SectorNavMeshGenerator::add_jump_links(BotMeshData& mesh, int nodeid) {
 			if (j == nodeid)
 				continue;
 
-			bool dstCanBeCliffsLater = otherNav.getMoveFlags() & FL_SECTOR_MOVE_FLOOR_UP;
+			bool dstCanBeCliffsLater = otherNav.sector->moveFlags & FL_SECTOR_MOVE_FLOOR_UP;
 
 			for (NavSectorLink* otherLink : otherNav.links) {
 				if (!otherLink->isCliff || otherLink->isJump)
@@ -426,7 +426,7 @@ BotMeshData SectorNavMeshGenerator::generate(std::vector<AActor*> propBlockers) 
 
 	add_jump_links(mesh);
 
-	g_engine.gprintf("Generated %d nodes, %d links in %d ms\n", (int)g_map.numsubsectors, mesh.numLinks, (int)(getEpochMillis() - genStart));
+	g_engine.printf("Generated %d nodes, %d links in %d ms\n", (int)g_map.numsubsectors, mesh.numLinks, (int)(getEpochMillis() - genStart));
 
 	return mesh;
 }
@@ -448,7 +448,7 @@ int SectorNavMeshGenerator::relink_node(BotMeshData& mesh, int id, std::vector<A
 		NavSector& otherNav = mesh.nodes[i];
 
 		// don't unlink yet if the source sectors can be elevated in the future
-		bool jumpsMayBePossibleLater = otherNav.getMoveFlags() & FL_SECTOR_MOVE_FLOOR_UP;
+		bool jumpsMayBePossibleLater = otherNav.sector->moveFlags & FL_SECTOR_MOVE_FLOOR_UP;
 
 		for (int k = 0; k < otherNav.links.size(); k++) {
 			NavSectorLink& link = *otherNav.links[k];

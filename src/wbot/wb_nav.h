@@ -71,7 +71,7 @@ struct NavSector {
 	std::vector<NavSectorLink*> links;
 	wbot::MapSector* sector;
 
-	int routeNumIgnore; // ignore this sector for the next route if set to the current route call num
+	int routeNumIgnore; // ignore this node for the next route if set to the current route call num
 
 	vec2 pos();
 	vec3 pos3D();
@@ -80,17 +80,6 @@ struct NavSector {
 	NavSectorLink* getLink(int subSectorId);
 
 	bool touches(AActor* actor);
-
-	int getMoveFlags();
-	bool isMoving();
-	bool isFloorMoving();
-	bool isCeilMoving();
-	std::vector<BotGoal>& getTriggers();
-
-	// get vertical space between the floor and ceiling at the center point of the subsector
-	float getHeight();
-	float getFloorZ();
-	float getCeilZ();
 };
 
 struct BotMeshData {
@@ -155,8 +144,6 @@ public:
 
 	void init(); // generate mesh
 
-	void draw_nodes(AActor* actor);
-
 	// set timeSensitive=true if the most direct route should be preferred, even if the bot has
 	// to walk through lava or jump somewhere
 	BotRoute get_astar_route(const RouteOpts& opts);
@@ -171,8 +158,8 @@ public:
 	std::vector<BotGoal> get_ammo_goals(const char* ammoname, const char* ammoname2=NULL);
 
 	int get_nav_id(vec2 pos);
-	int get_nav_id(AActor* actor);
-	int get_nav_id(player_t* plr);
+	int get_nav_id(AActor* actor); // gets the node directly below the actor center
+	int get_nav_id(player_t* plr); // gets the node the player is standing on, which may be uncentered
 
 	// call to create or remove links on nodes that no longer move
 	void relink_sector(wbot::MapSector* sec);

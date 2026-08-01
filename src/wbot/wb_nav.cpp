@@ -28,7 +28,7 @@ vec2 NavSectorLink::pos() {
 }
 
 vec3 NavSectorLink::pos3D() {
-	return vec3(movePos.x, movePos.y, parent->getFloorZ());
+	return vec3(movePos.x, movePos.y, parent->sector->getFloorZ());
 }
 
 int NavSectorLink::blocked(AActor* actor, bool recurse) {
@@ -56,7 +56,7 @@ int NavSectorLink::blocked(AActor* actor, bool recurse) {
 	}
 
 	const float pradius = PLAYER_RADIUS;
-	float parentFloorZ = parent->getFloorZ();
+	float parentFloorZ = parent->sector->getFloorZ();
 	vec3 jumpOverPos = vec3(movePos, parentFloorZ + JUMP_HEIGHT);
 	vec3 duckUnderPos = vec3(movePos, parentFloorZ + DUCK_HEIGHT);
 	if (IsBoxClipped(jumpOverPos, pradius, 0) && IsBoxClipped(duckUnderPos, pradius, 0)) {
@@ -72,7 +72,7 @@ int NavSectorLink::blocked(AActor* actor, bool recurse) {
 }
 
 std::vector<MapSector*> NavSectorLink::getClippedSectors(AActor* actor) {
-	float bottomZ = parent->getFloorZ() + JUMP_HEIGHT;
+	float bottomZ = parent->sector->getFloorZ() + JUMP_HEIGHT;
 	return GetBoxClipSectors(vec3(movePos, bottomZ), PLAYER_RADIUS, 0);
 }
 
@@ -92,7 +92,7 @@ bool NavSectorLink::jumpable() {
 	vec3 end = target->pos3D() + vec3(0, 0, 56);
 
 	const float pradius = PLAYER_RADIUS;
-	float targetFloorZ = target->getFloorZ();
+	float targetFloorZ = target->sector->getFloorZ();
 	vec3 jumpOverPos = vec3(end, targetFloorZ + JUMP_HEIGHT);
 	vec3 duckUnderPos = vec3(end, targetFloorZ + DUCK_HEIGHT);
 	if (IsBoxClipped(jumpOverPos, pradius, 0) && IsBoxClipped(duckUnderPos, pradius, 0)) {
@@ -107,15 +107,15 @@ bool NavSectorLink::jumpable() {
 }
 
 bool NavSectorLink::isJumpValid() {
-	float floorZ = parent->getFloorZ();
-	float jumpHeight = target->getFloorZ() - floorZ;
+	float floorZ = parent->sector->getFloorZ();
+	float jumpHeight = target->sector->getFloorZ() - floorZ;
 	if (jumpHeight >= JUMP_HEIGHT)
 		return false;
 
 	if (jumpDist > JUMP_DIST - jumpHeight)
 		return false; // too far to make it
 
-	if (jumpNeighbor->getFloorZ() - floorZ == 0)
+	if (jumpNeighbor->sector->getFloorZ() - floorZ == 0)
 		return false; // not currently an edge that can help with jumping
 
 	return true;
@@ -123,7 +123,7 @@ bool NavSectorLink::isJumpValid() {
 
 void NavSectorLink::updateFlags() {
 	bool oldCliff = isCliff;
-	isCliff = parent->getFloorZ() - target->getFloorZ() > JUMP_HEIGHT;
+	isCliff = parent->sector->getFloorZ() - target->sector->getFloorZ() > JUMP_HEIGHT;
 
 	if (isCliff && !oldCliff) {
 		parent->hasCliffs = true;
@@ -182,7 +182,7 @@ NavSector* NavSectorLink::GetJumpBackupBlocker(vec2 targetPos) {
 	float maxBackupDist = 256;
 	vec2 backupStartPos = startPos - jumpDir; // avoid clipping against the backoff line
 	vec2 backupPos = startPos - jumpDir * maxBackupDist;
-	float startZ = parent->getFloorZ();
+	float startZ = parent->sector->getFloorZ();
 	int isects = 0;
 
 	vec2 edge;
@@ -191,7 +191,7 @@ NavSector* NavSectorLink::GetJumpBackupBlocker(vec2 targetPos) {
 		MapSubsector& sub = g_map.subsectors[parent->id];
 		for (NavSectorLink* link : parent->links) {
 			if (link->linedef == line) {
-				bool canMoveAway = link->target->getMoveFlags() & (FL_SECTOR_MOVE_FLOOR_DOWN | FL_SECTOR_MOVE_CEIL_UP);
+				bool canMoveAway = link->target->sector->moveFlags & (FL_SECTOR_MOVE_FLOOR_DOWN | FL_SECTOR_MOVE_CEIL_UP);
 				return canMoveAway ? link->target : NULL;
 			}
 		}
@@ -214,8 +214,8 @@ float NavSectorLink::GetJumpBackupSpaceNeeded(vec3 start, vec3 end) {
 vec2 NavSectorLink::GetJumpBackupPos(vec2 targetPos, AActor* jumper) {
 	vec2 startPos = GetJumpStartPos(targetPos);
 	vec2 endPos = GetJumpEndPos(targetPos);
-	vec3 startPos3D(startPos, parent->getFloorZ());
-	vec3 endPos3D(endPos, target->getFloorZ());
+	vec3 startPos3D(startPos, parent->sector->getFloorZ());
+	vec3 endPos3D(endPos, target->sector->getFloorZ());
 
 	// back up the starting position to get a running start for the jump
 	vec2 jumpDir = (endPos - startPos).normalize();
@@ -223,7 +223,7 @@ vec2 NavSectorLink::GetJumpBackupPos(vec2 targetPos, AActor* jumper) {
 	float maxBackupDist = GetJumpBackupSpaceNeeded(startPos3D, endPos3D);
 	vec2 backupStartPos = startPos - jumpDir; // avoid clipping against the backoff line
 	vec2 backupPos = startPos - jumpDir * maxBackupDist;
-	float startZ = parent->getFloorZ();
+	float startZ = parent->sector->getFloorZ();
 	int isects = 0;
 
 	for (TraceIsect& isect : g_engine.TraceIntersections(backupStartPos, backupPos)) {
@@ -255,8 +255,9 @@ vec2 NavSectorLink::GetJumpBackupPos(vec2 targetPos, AActor* jumper) {
 	return backupPos;
 }
 
+
 vec3 NavSector::pos3D() {
-	return vec3(center, getFloorZ());
+	return vec3(center, sector->getFloorZ());
 }
 
 vec2 NavSector::pos() {
@@ -300,37 +301,6 @@ bool NavSector::touches(AActor* actor) {
 	return false;
 }
 
-int NavSector::getMoveFlags() {
-	return sector->moveFlags;
-}
-
-bool NavSector::isMoving() {
-	return sector->isMoving() ;
-}
-
-bool NavSector::isFloorMoving() {
-	return sector->isFloorMoving();
-}
-
-bool NavSector::isCeilMoving() {
-	return sector->isCeilMoving();
-}
-
-std::vector<BotGoal>& NavSector::getTriggers() {
-	return sector->triggers;
-}
-
-float NavSector::getHeight() {
-	return sector->getHeight();
-}
-
-float NavSector::getFloorZ() {
-	return sector->getFloorZ();
-}
-
-float NavSector::getCeilZ() {
-	return sector->getCeilZ();
-}
 
 void SectorNavMesh::init() {
 	pending_sector_relinks.clear();
@@ -339,109 +309,6 @@ void SectorNavMesh::init() {
 	mesh = SectorNavMeshGenerator::generate(propBlockers);
 	astarNodes = new AstarNode[g_map.numsubsectors];
 	memset(astarNodes, 0, sizeof(AstarNode) * g_map.numsubsectors);
-}
-
-void SectorNavMesh::draw_nodes(AActor* actor) {
-	static int lastDraw;
-
-	if (g_engine.get_game_tics() - lastDraw < 10 && lastDraw < g_engine.get_game_tics()) {
-		return;
-	}
-
-	lastDraw = g_engine.get_game_tics();
-
-	player_t* player = getAnyPlayer();
-	if (!player)
-		return;
-
-	AActor* playerActor = (AActor*)g_engine.get_player(player);
-
-	vec3 playerPos = g_engine.get_actor_state(playerActor).origin;
-	MapSubsector* sub = g_map.GetSubsector(playerPos.x, playerPos.y);
-
-	if (sub && sub->id < g_map.numsubsectors) {
-		NavSector& nav = mesh.nodes[sub->id];
-		int spritesDrawn = 0;
-		const int maxSprites = 1000;
-
-		for (int k = 0; k < nav.links.size() && spritesDrawn < maxSprites; k++) {
-			NavSectorLink& link = *nav.links[k];
-			
-			if (!link.blocked(playerActor)) {
-				vec3 linkPos = link.pos3D();
-				vec2 targetPos = link.target->pos();
-
-				if (link.isJump) {
-					vec3 jumpStart = vec3(link.GetJumpStartPos(targetPos), 0);
-					vec3 jumpStartFloor = jumpStart;
-					vec3 jumpEnd = vec3(link.GetJumpEndPos(targetPos), 0);
-					vec3 jumpEndFloor = jumpEnd;
-					jumpEndFloor.z = link.target->getFloorZ();
-					jumpStartFloor.z = link.parent->getFloorZ();
-					jumpStart.z = link.parent->getFloorZ() + 56;
-					jumpEnd.z = link.target->getFloorZ() + 56;
-					
-					vec2 backupPos = link.GetJumpBackupPos(targetPos, playerActor);
-					vec3 backupEnd = vec3(backupPos, jumpStart.z);
-
-					spritesDrawn += draw_debug_line(nav.pos3D(), jumpStartFloor, actor);
-					spritesDrawn += draw_debug_line(jumpStartFloor, jumpStart, actor);
-					spritesDrawn += draw_debug_line(jumpStart, jumpEnd, actor);
-					spritesDrawn += draw_debug_line(jumpEnd, jumpEndFloor, actor);
-					spritesDrawn += draw_debug_line(jumpEndFloor, link.target->pos3D(), actor);
-
-					if (link.jumpDist > PLAYER_WIDTH)
-						spritesDrawn += draw_debug_line(jumpStart, backupEnd, actor);
-				}
-				else {
-					spritesDrawn += draw_debug_line(nav.pos3D(), linkPos, actor);
-					spritesDrawn += draw_debug_line(linkPos, link.target->pos3D(), actor);
-				}
-			}
-		}
-
-		float borderZ = nav.getFloorZ();
-		for (int k = 0; k < sub->numsegs && spritesDrawn < maxSprites; k++) {
-			MapSeg& seg = g_map.segs[sub->firstseg + k];
-			vec3 start(seg.v1, borderZ);
-			vec3 end(seg.v2, borderZ);
-			spritesDrawn += draw_debug_line(start, end, actor);
-		}
-
-		int closestSeg = -1;
-		float bestDist = FLT_MAX;
-		for (int i = 0; i < sub->numsegs; i++) {
-			MapSeg& seg = g_map.segs[sub->firstseg + i];
-			float dist = fabs(DistanceToLine(playerPos, seg.v1, seg.v2));
-			if (dist < bestDist) {
-				bestDist = dist;
-				closestSeg = sub->firstseg + i;
-			}
-		}
-		if (closestSeg != -1) {
-			MapSeg& seg = g_map.segs[closestSeg];
-			float z = borderZ * 16;
-			vec3 normStart(seg.center(), z);
-			vec3 normEnd(seg.center() + seg.normal() * 32, z);
-			spritesDrawn += draw_debug_line(normStart, normEnd, actor);
-		}
-
-		if (spritesDrawn >= maxSprites) {
-			g_engine.gprintf("Overflow sprites!\n");
-		}
-	}
-
-	for (int i = 0; i < g_map.numsubsectors; i++) {
-		NavSector& node = mesh.nodes[i];
-		vec3 pos = node.pos3D();
-
-		vec2 delta = (vec2)pos - playerPos;
-		if (delta.length() > 1000) {
-			continue;
-		}
-
-		g_engine.SpawnBlood(pos + vec3(0, 0, 16), 100, actor);
-	}
 }
 
 int SectorNavMesh::get_nav_id(vec2 pos) {
@@ -483,7 +350,6 @@ float SectorNavMesh::path_dist(NavSectorLink& link) {
 
 	return (parent.pos() - target.pos()).length();
 }
-
 
 float SectorNavMesh::path_cost(NavSectorLink& link, float dist, const RouteOpts& opts) {
 	NavSector& parent = *link.parent;
@@ -549,11 +415,11 @@ BotRoute SectorNavMesh::get_astar_route(const RouteOpts& opts)
 	BotRoute emptyRoute;
 
 	if (verbose) {
-		g_engine.gprintf("START route from %d to %d\n", opts.start, opts.end);
+		g_engine.printf("START route from %d to %d\n", opts.start, opts.end);
 	}
 
 	if (opts.start < 0 || opts.end < 0 || opts.start >= g_map.numsubsectors || opts.end >= g_map.numsubsectors) {
-		g_engine.gprintf("AStarRoute: invalid start/end nodes\n");
+		g_engine.printf("AStarRoute: invalid start/end nodes\n");
 		g_route_ignore_num++;
 		return emptyRoute;
 	}
@@ -579,7 +445,7 @@ BotRoute SectorNavMesh::get_astar_route(const RouteOpts& opts)
 	while (!openQueue.empty()) {
 
 		if (++curIter > maxIter) {
-			g_engine.gprintf("AStarRoute exceeded max iterations searching path (%d)", maxIter);
+			g_engine.printf("AStarRoute exceeded max iterations searching path (%d)", maxIter);
 			break;
 		}
 
@@ -610,7 +476,7 @@ BotRoute SectorNavMesh::get_astar_route(const RouteOpts& opts)
 			reverse(route.route.begin(), route.route.end());
 
 			if (verbose) {
-				g_engine.gprintf("FINISH route calculation from %d to %d. Size is %d.\n",
+				g_engine.printf("FINISH route calculation from %d to %d. Size is %d.\n",
 					opts.start, opts.end, route.route.size());
 			}
 
@@ -731,20 +597,20 @@ bool SectorNavMesh::get_key_goals_for_line(AActor* actor, MapLine* line, vector<
 
 		if (!bestKey) {
 			// no key satisfies the group requirement
-			g_engine.gprintf("Impossible key requirements for line %d:\n", line->id);
+			g_engine.printf("Impossible key requirements for line %d:\n", line->id);
 
 			for (int i = 0; i < keyGroups.size(); i++) {
 				vector<PClass*>& group = keyGroups[i];
 				for (int k = 0; k < group.size(); k++) {
-					g_engine.gprintf("  %s", g_engine.get_class_type_name(group[k]));
+					g_engine.printf("  %s", g_engine.get_class_type_name(group[k]));
 				}
-				g_engine.gprintf("\n");
+				g_engine.printf("\n");
 			}
-			g_engine.gprintf("Map keys:\n");
+			g_engine.printf("Map keys:\n");
 			for (auto item : mapKeys) {
-				g_engine.gprintf("   %s", g_engine.get_actor_state(item.second.key).name);
+				g_engine.printf("   %s", g_engine.get_actor_state(item.second.key).name);
 			}
-			g_engine.gprintf("\n");
+			g_engine.printf("\n");
 
 			return false;
 		}
@@ -815,7 +681,7 @@ void SectorNavMesh::relink_pending_sector() {
 	}
 	
 	if (!g_wbot_test_mode)
-		g_engine.gprintf("Relinked sector %d (%+d links)\n", secid, linksAdded);
+		g_engine.printf("Relinked sector %d (%+d links)\n", secid, linksAdded);
 
 	pending_sector_relinks.erase(pending_sector_relinks.begin() + idx);
 }

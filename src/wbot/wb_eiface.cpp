@@ -47,7 +47,7 @@ AActor* AHandle::get() const {
 	return serial >= 0 && serial < g_actor_handles.size() ? g_actor_handles[serial] : NULL;
 }
 
-void WBotEngineInterface::init_eiface() {
+void WBotEngineInterface::init() {
 	g_actor_handles.clear();
 }
 
@@ -634,7 +634,7 @@ bool WBotEngineInterface::intermission_active() {
 	return gamestate == GS_INTERMISSION;
 }
 
-void WBotEngineInterface::gprintf(const char* fmt, ...) {
+void WBotEngineInterface::printf(const char* fmt, ...) {
 	static char buffer[4096];
 
 	va_list args;
@@ -645,15 +645,15 @@ void WBotEngineInterface::gprintf(const char* fmt, ...) {
 	Printf("%s", buffer);
 }
 
-void WBotEngineInterface::print_hud_test(const char* msg, float x, float y, uint32_t id) {
+void WBotEngineInterface::print_hud_text(const char* msg, float x, float y, uint32_t id) {
 	SERVERCOMMANDS_PrintHUDMessage(msg, x, y, 0, 0, 0, CR_RED, 1.0f, 0, 0, "SmallFont", id);
 }
 
-int WBotEngineInterface::get_game_tics() {
+int WBotEngineInterface::tics() {
 	return level.time;
 }
 
-const char* WBotEngineInterface::get_map_name() {
+const char* WBotEngineInterface::map_name() {
 	return level.mapname;
 }
 
@@ -876,7 +876,7 @@ LineState WBotEngineInterface::get_line_state(int id) {
 			state.goalAction = WBOT_GOAL_ACTION_TOUCH;
 		}
 		else {
-			gprintf("Don't know how to activate line %d\n", id);
+			g_engine.printf("Don't know how to activate line %d\n", id);
 		}
 	}
 	else {

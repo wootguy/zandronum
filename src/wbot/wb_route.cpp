@@ -169,7 +169,7 @@ bool CBotRouteController::BeCareful() {
 		NavSector& targetNav = g_wb_nav.mesh.nodes[route[1]];
 		NavSectorLink* link = idealNav.getLink(route[1]);
 		headingTowardsCliff = targetNav.hasCliffs && link->linkWidth < 32
-			&& targetNav.getFloorZ() < (pBot->m_astate.origin.z + STEP_HEIGHT);
+			&& targetNav.sector->getFloorZ() < (pBot->m_astate.origin.z + STEP_HEIGHT);
 	}
 
 	if (pBot->m_cliffDist < SAFE_CLIFF_DIST * 0.5f || headingTowardsCliff) {
@@ -245,7 +245,7 @@ void CBotRouteController::JumpThink() {
 		if (pBot->stateFlags & (FL_WBOT_OVERHANG | FL_WBOT_FLYING)) {
 			// bot is over a ledge now, start the jump
 			bool bigJump = m_navLink->jumpDist > 100;
-			if (m_navTarget->getFloorZ() > m_navIdeal->getFloorZ() + STEP_HEIGHT)
+			if (m_navTarget->sector->getFloorZ() > m_navIdeal->sector->getFloorZ() + STEP_HEIGHT)
 				bigJump = true;
 
 			if (bigJump)
@@ -275,7 +275,7 @@ void CBotRouteController::JumpThink() {
 		}
 		else {
 			// try to land in the right spot
-			vec3 landPos = vec3(jumpEndPos, m_navTarget->getFloorZ());
+			vec3 landPos = vec3(jumpEndPos, m_navTarget->sector->getFloorZ());
 
 			// TODO: this is totally wrong but for some reason passes the tests
 			vec3 typoPos(pBot->m_astate.origin.z, pBot->m_astate.origin.y, pBot->m_astate.origin.z);
@@ -295,7 +295,7 @@ void CBotRouteController::JumpThink() {
 			}
 		}
 
-		if (m_navTarget->getFloorZ() > pBot->m_astate.origin.z + JUMP_HEIGHT) {
+		if (m_navTarget->sector->getFloorZ() > pBot->m_astate.origin.z + JUMP_HEIGHT) {
 			JumpFail();
 			return;
 		}
@@ -317,7 +317,7 @@ void CBotRouteController::JumpFail() {
 		// The running-start position was blocked by something that can be moved.
 		// Try moving it before considering this jump to be impossible
 		int movementNeeded = FL_SECTOR_MOVE_FLOOR_DOWN | FL_SECTOR_MOVE_CEIL_UP;
-		if (pBot->SelectGoal(backupBlocker->getTriggers(), m_navLink, movementNeeded)) {
+		if (pBot->SelectGoal(backupBlocker->sector->triggers, m_navLink, movementNeeded)) {
 			return;
 		}
 		else {
@@ -340,7 +340,7 @@ void CBotRouteController::JumpFail() {
 
 bool CBotRouteController::HandleBlockedPaths() {
 	std::vector<int>& route = m_route.route;
-	int nextSecFlags = m_navLink->target->getMoveFlags();
+	int nextSecFlags = m_navLink->target->sector->moveFlags;
 	bool nextOnElevator = nextSecFlags & (FL_SECTOR_MOVE_FLOOR_UP | FL_SECTOR_MOVE_FLOOR_DOWN);
 	int linkBlockReason = m_navLink->blocked((AActor*)pActor);
 
@@ -410,8 +410,8 @@ bool CBotRouteController::ElevatorThink(bool linkBlocked) {
 				pBot->MoveTo(navPos, 0, RUN_SPEED / 4);
 
 			if (linkBlocked) {
-				float backFloor = m_navTarget->getFloorZ();
-				float frontCeil = m_navIdeal->getCeilZ();
+				float backFloor = m_navTarget->sector->getFloorZ();
+				float frontCeil = m_navIdeal->sector->getCeilZ();
 
 				if (frontCeil - backFloor < DUCK_HEIGHT) {
 					// too low of a ceil in the start sector to duck thru to the target floor
@@ -434,8 +434,8 @@ bool CBotRouteController::ElevatorThink(bool linkBlocked) {
 
 void CBotRouteController::MoveThruLink() {
 	// duck if unable to fit while standing
-	int targetHeight = m_navTarget->getHeight();
-	int borderHeight = m_navTarget->getCeilZ() - m_navIdeal->getFloorZ();
+	int targetHeight = m_navTarget->sector->getHeight();
+	int borderHeight = m_navTarget->sector->getCeilZ() - m_navIdeal->sector->getFloorZ();
 	if (std::min(targetHeight, borderHeight) < STAND_HEIGHT) {
 		pBot->m_lButtons |= IN_DUCK;
 	}
@@ -508,9 +508,9 @@ void CBotRouteController::RouteSlipThink() {
 
 void CBotRouteController::BlockedPathThink(NavSectorLink* link, int blockReason) {
 	// wait for doors to open
-	bool isBlockerMoving = link->target->isMoving();
+	bool isBlockerMoving = link->target->sector->isMoving();
 	if (!isBlockerMoving && blockReason == LINK_BLOCK_CLIPPED) {
-		float linkZ = link->parent->getFloorZ() + JUMP_HEIGHT;
+		float linkZ = link->parent->sector->getFloorZ() + JUMP_HEIGHT;
 		for (MapSector* sec : link->getClippedSectors((AActor*)pActor)) {
 			float blockerZ = sec->getFloorZ();
 			if (sec->isFloorMoving() && linkZ < blockerZ) {
@@ -526,7 +526,7 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link, int blockReason)
 
 	if (isBlockerMoving) {
 		// door is raising or elevator is lowering in the next sector
-		if (link->isJump && !link->target->isFloorMoving() && !link->isJumpValid()) {
+		if (link->isJump && !link->target->sector->isFloorMoving() && !link->isJumpValid()) {
 			// a door opening isn't going to make the jump doable if the floor is too high
 		}
 		else {
@@ -545,8 +545,8 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link, int blockReason)
 
 	curGoal->blockers.insert(link->id);
 
-	int targetMovement = link->target->getMoveFlags();
-	int parentMovement = link->parent->getMoveFlags();
+	int targetMovement = link->target->sector->moveFlags;
+	int parentMovement = link->parent->sector->moveFlags;
 	bool tryTargetTrigger = targetMovement != 0;
 	bool tryParentTrigger = parentMovement != 0;
 
@@ -591,12 +591,12 @@ void CBotRouteController::BlockedPathThink(NavSectorLink* link, int blockReason)
 	}
 
 	// nothing is moving, try unblocking it ourselves.
-	if (tryTargetTrigger && pBot->SelectGoal(link->target->getTriggers(), link, targetMovementNeeded)) {
+	if (tryTargetTrigger && pBot->SelectGoal(link->target->sector->triggers, link, targetMovementNeeded)) {
 		return;
 	}
 
 	// if we're on an elevator, try triggering it.
-	if (tryParentTrigger && pBot->SelectGoal(link->parent->getTriggers(), link, parentMovementNeeded)) {
+	if (tryParentTrigger && pBot->SelectGoal(link->parent->sector->triggers, link, parentMovementNeeded)) {
 		return;
 	}
 

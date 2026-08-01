@@ -74,13 +74,13 @@ void CBotCombatController::Think() {
 
 	if (!hasLineOfSight) {
 		// forget about the target if not seen for a while
-		if (g_engine.get_game_tics() - m_targetLastSeenTic < 35) {
+		if (g_engine.tics() - m_targetLastSeenTic < 35) {
 			pBot->target = NULL;
 			return;
 		}
 	}
 
-	m_targetLastSeenTic = g_engine.get_game_tics();
+	m_targetLastSeenTic = g_engine.tics();
 
 	// aim at enemy
 	pBot->AimAtPos(tstate.origin + vec3(0, 0, tstate.height / 2));

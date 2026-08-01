@@ -37,7 +37,7 @@ void CWootBot::Think() {
 		wbot_debug(this);
 	}
 
-	if (g_engine.get_game_tics() < m_nextThink || m_pstate.isFrozen) {
+	if (g_engine.tics() < m_nextThink || m_pstate.isFrozen) {
 		return;
 	}
 
@@ -102,7 +102,7 @@ void CWootBot::Reset() {
 void CWootBot::DebugPrint(const char* msg) {
 	if (m_debug) {
 		g_engine.PrintNotification(msg);
-		g_engine.gprintf(msg);
+		g_engine.printf(msg);
 	}
 }
 
@@ -381,7 +381,7 @@ vec2 CWootBot::AvoidCornersVector(vec2 wantDir) {
 	g_engine.TraceLine(leftPos, leftPos + testDir, false, (AActor*)pActor, &trLeft);
 
 	bool hitProp = trRight.actor || trLeft.actor;
-	bool canChangeDir = !hitProp || g_engine.get_game_tics() - m_lastAvoidPropDirChange > 70;
+	bool canChangeDir = !hitProp || g_engine.tics() - m_lastAvoidPropDirChange > 70;
 	if (!canChangeDir) {
 		if (trLeft.frac < 1.0f || trRight.frac < 1.0f) {
 			return rightDir * m_lastAvoidPropDir;
@@ -405,7 +405,7 @@ vec2 CWootBot::AvoidCornersVector(vec2 wantDir) {
 				draw_debug_line(leftPos, leftPos + testDir * 32, pActor);
 			}
 			*/
-			m_lastAvoidPropDirChange = g_engine.get_game_tics();
+			m_lastAvoidPropDirChange = g_engine.tics();
 			m_lastAvoidPropDir = trRight.frac < trLeft.frac ? -1 : 1;
 			return rightDir * m_lastAvoidPropDir;
 		}
@@ -460,7 +460,7 @@ vec2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
 	int worstLink = -1;
 
 	for (NavSector* testSec : sectors) {
-		if (testSec->getFloorZ() > ignoreZ) {
+		if (testSec->sector->getFloorZ() > ignoreZ) {
 			continue;
 		}
 
@@ -522,7 +522,7 @@ void CWootBot::UpdatePositionFlags() {
 	stateFlags &= ~(FL_WBOT_FLYING | FL_WBOT_ON_ELEV | FL_WBOT_OVERHANG);
 	if (m_routeController.m_navCur) {
 		NavSector& nav = g_wb_nav.mesh.nodes[m_routeController.m_navid];
-		if (m_astate.origin.z > nav.getFloorZ())
+		if (m_astate.origin.z > nav.sector->getFloorZ())
 			stateFlags |= m_pstate.onGround ? FL_WBOT_OVERHANG : FL_WBOT_FLYING;
 		if (nav.sector->isFloorMoving())
 			stateFlags |= FL_WBOT_ON_ELEV;
@@ -706,7 +706,7 @@ void CWootBot::CompleteGoal() {
 
 	int purposeLinkId = goal.purposeLink ? goal.purposeLink->id : -1;
 	NavSector* purposeNav = goal.purposeLink ? goal.purposeLink->target : NULL;
-	if (purposeNav && (purposeNav->getMoveFlags() & FL_SECTOR_MOVE_TIMED)) {
+	if (purposeNav && (purposeNav->sector->moveFlags & FL_SECTOR_MOVE_TIMED)) {
 		// the purpose of this goal was to move a timed sector. Better hurry before that sector resets!
 		stateFlags |= FL_WBOT_RUSHING;
 		rushNav = goal.purposeLink->target->id;
@@ -729,7 +729,7 @@ void CWootBot::CompleteGoal() {
 }
 
 void CWootBot::FailGoal() {
-	m_nextThink = g_engine.get_game_tics() + 7; // failing lots of goals at once could cause lag
+	m_nextThink = g_engine.tics() + 7; // failing lots of goals at once could cause lag
 
 	if (m_goals.empty()) {
 		return;
@@ -769,17 +769,17 @@ void CWootBot::FailGoal() {
 }
 
 void CWootBot::Use(int ticsBetweenUses) {
-	if (g_engine.get_game_tics() - m_lastUse < ticsBetweenUses) {
+	if (g_engine.tics() - m_lastUse < ticsBetweenUses) {
 		return;
 	}
 
 	m_lButtons |= IN_USE;
-	m_lastUse = g_engine.get_game_tics();
+	m_lastUse = g_engine.tics();
 }
 
 void CWootBot::Attack() {
 	m_lButtons |= IN_ATTACK;
-	m_combatController.m_lastAttack = g_engine.get_game_tics();
+	m_combatController.m_lastAttack = g_engine.tics();
 }
 
 void CWootBot::HandleLineActivation(MapLine* line, AActor* activator) {

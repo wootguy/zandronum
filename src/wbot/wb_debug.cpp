@@ -32,7 +32,7 @@ void wbot_debug_player_nav() {
 	//AvoidLedges(player, temp);
 
 	navInfo += "\n   Triggers:";
-	vector<BotGoal>& triggers = nav.getTriggers();
+	vector<BotGoal>& triggers = nav.sector->triggers;
 	for (int i = 0; i < triggers.size(); i++) {
 		navInfo += "\n      " + triggers[i].desc();
 	}
@@ -54,7 +54,7 @@ void wbot_debug_player_nav() {
 		NavSector& targ = *link.target;
 		string arrow = link.blocked(pActor) ? " -X> " : " --> ";
 		navInfo += "\n      " + to_string(link.id) + arrow + to_string(link.target->id);
-		vector<BotGoal>& targtriggers = targ.getTriggers();
+		vector<BotGoal>& targtriggers = targ.sector->triggers;
 		if (targtriggers.size())
 			navInfo += " (" + to_string(targtriggers.size()) + " T)";
 		if (link.isCliff) { navInfo += " C"; }
@@ -126,7 +126,7 @@ void wbot_debug_player_nav() {
 	bool isClipped = IsBoxClipped(playerPos, g_engine.get_actor_state(pActor).radius, DUCK_HEIGHT);
 	//navInfo += string("\nClipped: ") + (isClipped ? "Yes" : "No");
 
-	g_engine.print_hud_test(navInfo.c_str(), 0.94f, 0.5f, 1234);
+	g_engine.print_hud_text(navInfo.c_str(), 0.94f, 0.5f, 1234);
 }
 
 void wbot_debug(CWootBot* pBot) {
@@ -135,7 +135,7 @@ void wbot_debug(CWootBot* pBot) {
 	player_t* pPlayer = pBot->m_pPlayer;
 	AActor* pActor = (AActor*)pBot->pActor;
 	vec3 playerPos = g_engine.get_actor_state(pActor).origin;
-	g_wb_nav.draw_nodes(pActor);
+	wbot_draw_nodes(&g_wb_nav, pActor);
 
 	int thisSubId = g_wb_nav.get_nav_id(pPlayer);
 
@@ -222,5 +222,108 @@ void wbot_debug(CWootBot* pBot) {
 	string botInfo = enemyStr + "\n" + weaponStr + "\n" + routeStr + "\n"
 		+ stateStr + "\n" + btnStr + "\n" + stuckStr + "\n" + goalStr;
 
-	g_engine.print_hud_test(botInfo.c_str(), 0, 0.5f, 1235);
+	g_engine.print_hud_text(botInfo.c_str(), 0, 0.5f, 1235);
+}
+
+void wbot_draw_nodes(SectorNavMesh* mesh, AActor* actor) {
+	static int lastDraw;
+
+	if (g_engine.tics() - lastDraw < 10 && lastDraw < g_engine.tics()) {
+		return;
+	}
+
+	lastDraw = g_engine.tics();
+
+	player_t* player = getAnyPlayer();
+	if (!player)
+		return;
+
+	AActor* playerActor = (AActor*)g_engine.get_player(player);
+
+	vec3 playerPos = g_engine.get_actor_state(playerActor).origin;
+	MapSubsector* sub = g_map.GetSubsector(playerPos.x, playerPos.y);
+
+	if (sub && sub->id < g_map.numsubsectors) {
+		NavSector& nav = mesh->mesh.nodes[sub->id];
+		int spritesDrawn = 0;
+		const int maxSprites = 1000;
+
+		for (int k = 0; k < nav.links.size() && spritesDrawn < maxSprites; k++) {
+			NavSectorLink& link = *nav.links[k];
+
+			if (!link.blocked(playerActor)) {
+				vec3 linkPos = link.pos3D();
+				vec2 targetPos = link.target->pos();
+
+				if (link.isJump) {
+					vec3 jumpStart = vec3(link.GetJumpStartPos(targetPos), 0);
+					vec3 jumpStartFloor = jumpStart;
+					vec3 jumpEnd = vec3(link.GetJumpEndPos(targetPos), 0);
+					vec3 jumpEndFloor = jumpEnd;
+					jumpEndFloor.z = link.target->sector->getFloorZ();
+					jumpStartFloor.z = link.parent->sector->getFloorZ();
+					jumpStart.z = link.parent->sector->getFloorZ() + 56;
+					jumpEnd.z = link.target->sector->getFloorZ() + 56;
+
+					vec2 backupPos = link.GetJumpBackupPos(targetPos, playerActor);
+					vec3 backupEnd = vec3(backupPos, jumpStart.z);
+
+					spritesDrawn += draw_debug_line(nav.pos3D(), jumpStartFloor, actor);
+					spritesDrawn += draw_debug_line(jumpStartFloor, jumpStart, actor);
+					spritesDrawn += draw_debug_line(jumpStart, jumpEnd, actor);
+					spritesDrawn += draw_debug_line(jumpEnd, jumpEndFloor, actor);
+					spritesDrawn += draw_debug_line(jumpEndFloor, link.target->pos3D(), actor);
+
+					if (link.jumpDist > PLAYER_WIDTH)
+						spritesDrawn += draw_debug_line(jumpStart, backupEnd, actor);
+				}
+				else {
+					spritesDrawn += draw_debug_line(nav.pos3D(), linkPos, actor);
+					spritesDrawn += draw_debug_line(linkPos, link.target->pos3D(), actor);
+				}
+			}
+		}
+
+		float borderZ = nav.sector->getFloorZ();
+		for (int k = 0; k < sub->numsegs && spritesDrawn < maxSprites; k++) {
+			MapSeg& seg = g_map.segs[sub->firstseg + k];
+			vec3 start(seg.v1, borderZ);
+			vec3 end(seg.v2, borderZ);
+			spritesDrawn += draw_debug_line(start, end, actor);
+		}
+
+		int closestSeg = -1;
+		float bestDist = FLT_MAX;
+		for (int i = 0; i < sub->numsegs; i++) {
+			MapSeg& seg = g_map.segs[sub->firstseg + i];
+			float dist = fabs(DistanceToLine(playerPos, seg.v1, seg.v2));
+			if (dist < bestDist) {
+				bestDist = dist;
+				closestSeg = sub->firstseg + i;
+			}
+		}
+		if (closestSeg != -1) {
+			MapSeg& seg = g_map.segs[closestSeg];
+			float z = borderZ * 16;
+			vec3 normStart(seg.center(), z);
+			vec3 normEnd(seg.center() + seg.normal() * 32, z);
+			spritesDrawn += draw_debug_line(normStart, normEnd, actor);
+		}
+
+		if (spritesDrawn >= maxSprites) {
+			g_engine.printf("Overflow sprites!\n");
+		}
+	}
+
+	for (int i = 0; i < g_map.numsubsectors; i++) {
+		NavSector& node = mesh->mesh.nodes[i];
+		vec3 pos = node.pos3D();
+
+		vec2 delta = (vec2)pos - playerPos;
+		if (delta.length() > 1000) {
+			continue;
+		}
+
+		g_engine.SpawnBlood(pos + vec3(0, 0, 16), 100, actor);
+	}
 }

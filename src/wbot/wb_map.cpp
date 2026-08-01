@@ -133,13 +133,13 @@ void BotMapInfo::load_lumps() {
 	MapLumps lumps = g_engine.load_wad_lump_data();
 
 	if (!lumps.numsubsectors) {
-		g_engine.gprintf("[wbot] failed to load map data\n");
+		g_engine.printf("[wbot] failed to load map data\n");
 		return;
 	}
 
 	for (int i = 0; i < lumps.numsides; i++) {
 		if (lumps.sides[i].sector >= lumps.numsectors) {
-			g_engine.gprintf("[wbot] Bad lump side %d\n", i);
+			g_engine.printf("[wbot] Bad lump side %d\n", i);
 			return;
 		}
 	}
@@ -552,7 +552,7 @@ void BotMapInfo::find_linedef_sectors() {
 		int routeToId = frontSubId;
 
 		if (line.backsector && frontSubId == backSubId)
-			g_engine.gprintf("Front/back subsectors of line %d are the same!\n", i);
+			g_engine.printf("Front/back subsectors of line %d are the same!\n", i);
 
 		if (doubleSidedCrossLine) {
 			// pick the side that allows crossing so that bot doesn't try to cross lines from the bottom of a cliff

@@ -88,7 +88,7 @@ int BotGoal::getNavId() const {
 		int ret = g_map.line_subsectors[lineid];
 
 		if (ret == -1)
-			g_engine.gprintf("Failed to find subsector for line %d\n", lineid);
+			g_engine.printf("Failed to find subsector for line %d\n", lineid);
 		else {
 			NavSector& node = g_wb_nav.mesh.nodes[ret];
 			if (node.links.empty() && (action == WBOT_GOAL_ACTION_USE || action == WBOT_GOAL_ACTION_SHOOT)) {
@@ -115,7 +115,7 @@ int BotGoal::getNavId() const {
 		return ret;
 	}
 	else {
-		g_engine.gprintf("Routing not implemented for this type of goal\n");
+		g_engine.printf("Routing not implemented for this type of goal\n");
 	}
 
 	return -1;
@@ -132,7 +132,7 @@ vec3 BotGoal::pos() {
 		return vec3(line.center(), z);
 	}
 
-	g_engine.gprintf("Goal has no actor nor lineid\n");
+	g_engine.printf("Goal has no actor nor lineid\n");
 	return vec3(0, 0, 0);
 }
 
