@@ -316,9 +316,9 @@ namespace wbot {
 		pBot->m_health = actor->health;
 		pBot->m_origin = vec3(actor->x, actor->y, actor->z) / (float)FRACUNIT;
 		pBot->m_velocity = vec3(actor->velx, actor->vely, actor->velz) / (float)FRACUNIT;
-		pBot->m_viewHeight = plr->viewheight;
+		pBot->m_viewHeight = plr->viewheight >> FRACBITS;
 		pBot->m_useDistance = actor->UseRange >> FRACBITS;
-		pBot->m_radius = actor->radius;
+		pBot->m_radius = actor->radius >> FRACBITS;
 		pBot->m_isFrozen = plr->cheats & CF_FROZEN;
 		pBot->m_onGround = plr->onground;
 		pBot->m_pitch = actor->pitch;
@@ -355,7 +355,7 @@ namespace wbot {
 	}
 
 	int get_actor_height(AActor* actor) {
-		return actor->height;
+		return actor->height >> FRACBITS;
 	}
 
 	MapSector* get_actor_sector(AActor* actor) {
@@ -367,7 +367,7 @@ namespace wbot {
 	}
 
 	int get_actor_radius(AActor* actor) {
-		return actor->radius;
+		return actor->radius >> FRACBITS;
 	}
 
 	uint32_t get_actor_angle(AActor* actor) {
@@ -379,7 +379,7 @@ namespace wbot {
 	}
 
 	int get_player_viewheight(player_t* actor) {
-		return actor->viewheight;
+		return actor->viewheight >> 16;
 	}
 
 	bool player_on_ground(player_t* plr) {
@@ -438,8 +438,8 @@ namespace wbot {
 		return P_CheckSight(looker, target, SF_SEEPASTSHOOTABLELINES);
 	}
 
-	int PointToAngle2(int x1, int y1, int x2, int y2) {
-		return R_PointToAngle2(x1, y1, x2, y2);
+	int PointToAngle2(float x1, float y1, float x2, float y2) {
+		return R_PointToAngle2(x1 * FRACUNIT, y1 * FRACUNIT, x2 * FRACUNIT, y2 * FRACUNIT);
 	}
 
 	AActor* find_followable_player(int subid) {
@@ -1126,14 +1126,14 @@ namespace wbot {
 		}
 	}
 
-	int get_sector_floor_z(int id) {
+	float get_sector_floor_z(int id) {
 		sector_t& sec = ::sectors[id];
-		return sec.floorplane.Zat0();
+		return sec.floorplane.Zat0() / (float)FRACUNIT;
 	}
 
-	int get_sector_ceil_z(int id) {
+	float get_sector_ceil_z(int id) {
 		sector_t& sec = ::sectors[id];
-		return sec.ceilingplane.Zat0();
+		return sec.ceilingplane.Zat0() / (float)FRACUNIT;
 	}
 
 	bool is_sector_floor_moving(int id) {

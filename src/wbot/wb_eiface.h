@@ -202,7 +202,7 @@ namespace wbot {
 	bool check_line_of_sight(AActor* looker, AActor* target);
 
 	// todo: convert vector angles to yaw/pitch
-	int PointToAngle2(int x1, int y1, int x2, int y2);
+	int PointToAngle2(float x1, float y1, float x2, float y2);
 
 	AActor* find_followable_player(int subid);
 
@@ -268,9 +268,9 @@ namespace wbot {
 
 	void add_stair_sector_info();
 
-	int get_sector_floor_z(int id);
+	float get_sector_floor_z(int id);
 
-	int get_sector_ceil_z(int id);
+	float get_sector_ceil_z(int id);
 
 	bool is_sector_floor_moving(int id);
 

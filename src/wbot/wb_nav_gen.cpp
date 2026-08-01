@@ -9,7 +9,7 @@ using namespace std;
 using namespace wbot;
 
 bool SectorNavMeshGenerator::trace_jump(vec3 start, vec3 end, int fromMovement, int toMovement) {
-	const fixed_t rightStep = (PLAYER_WIDTH / 2) / 2;
+	const float rightStep = (PLAYER_WIDTH / 2) / 2;
 	vec2 start2d = vec2(start.x, start.y);
 	vec2 end2d = vec2(end.x, end.y);
 	vec2 jumpDir = (end2d - start2d).normalize();
@@ -382,7 +382,7 @@ void SectorNavMeshGenerator::add_walkable_links(BotMeshData& mesh, int nodeid, s
 			for (int i = 0; i < propBlockers.size(); i++) {
 				AActor* actor = propBlockers[i];
 				vec2 propPos = get_actor_pos(actor);
-				if ((propPos - linkPos).length() < (get_actor_radius(actor) / FRACUNIT) + playerRadius) {
+				if ((propPos - linkPos).length() < get_actor_radius(actor) + playerRadius) {
 					propBlocked = true;
 					break;
 				}

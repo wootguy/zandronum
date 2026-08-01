@@ -1,5 +1,4 @@
 #include "wb_vec.h"
-#include "vectors.h"
 #include <cmath>
 
 #define EPSILON	(0.03125f) // 1/32 (to keep floating point happy -Carmack)
@@ -168,14 +167,6 @@ float dotProduct( vec3 v1, vec3 v2 )
 
 float dotProduct(vec2 v1, vec2 v2) {
 	return v1.x*v2.x + v1.y*v2.y;
-}
-
-FVector3 to_fvec(const vec3& v) {
-	return FVector3(v.x, v.y, v.z) * (1 << 16);
-}
-
-FVector2 to_fvec(const vec2& v) {
-	return FVector2(v.x, v.y) * (1 << 16);
 }
 
 vec3 vec3::normalize( float length ) const

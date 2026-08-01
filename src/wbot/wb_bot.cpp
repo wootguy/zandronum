@@ -13,7 +13,7 @@
 using namespace std;
 using namespace wbot;
 
-CWootBot::CWootBot(const char* pszName, const char* pszTeamName, ULONG ulPlayerNum)
+CWootBot::CWootBot(const char* pszName, const char* pszTeamName, uint32_t ulPlayerNum)
 	: m_pPlayer(init_bot(this, ulPlayerNum, "", "", "", pszTeamName)), m_routeController(this), m_combatController(this) {
 
 	m_fov = 180;
@@ -73,8 +73,8 @@ void CWootBot::Think() {
 		m_sideMove *= m_speedMult;
 	}
 
-	m_lForwardMove = static_cast<LONG>(0x32 * (m_forwardMove / 100.0f));
-	m_lSideMove = static_cast<LONG>(0x32 * (m_sideMove / 100.0f));
+	m_lForwardMove = static_cast<int>(0x32 * (m_forwardMove / 100.0f));
+	m_lSideMove = static_cast<int>(0x32 * (m_sideMove / 100.0f));
 }
 
 void CWootBot::Reset() {
@@ -204,7 +204,7 @@ void CWootBot::GoalActionThink() {
 		MoveTo(goal.pos(), 100);
 
 		TraceResult tr;
-		TraceAhead(shootRange, vec3(0, 0, m_viewHeight / FRACUNIT), false, &tr);
+		TraceAhead(shootRange, vec3(0, 0, m_viewHeight), false, &tr);
 		if (tr.line && (tr.line - g_map.lines) == goal.lineid) {
 			Attack();
 		}
@@ -267,10 +267,10 @@ bool CWootBot::StuckThink(int maxStuck) {
 }
 
 void CWootBot::AimAtPos(vec3 pos) {
-	float viewZ = m_origin.z + m_viewHeight / (float)FRACUNIT;
+	float viewZ = m_origin.z + m_viewHeight;
 	float dist = (vec2(pos.x, pos.y) - m_origin).length();
-	m_pitch = -(SDWORD)PointToAngle2(0, viewZ * FRACUNIT, dist * FRACUNIT, pos.z * FRACUNIT);
-	m_yaw = PointToAngle2(m_origin.x * FRACUNIT, m_origin.y * FRACUNIT, pos.x * FRACUNIT, pos.y * FRACUNIT);
+	m_pitch = -(int32_t)PointToAngle2(0, viewZ, dist, pos.z);
+	m_yaw = PointToAngle2(m_origin.x, m_origin.y, pos.x, pos.y);
 }
 
 bool CWootBot::TraceAhead(int dist, vec3 offset, bool ignoreMonsters, TraceResult* tr) {
@@ -283,7 +283,7 @@ bool CWootBot::TraceAhead(int dist, vec3 offset, bool ignoreMonsters, TraceResul
 }
 
 bool CWootBot::MoveTo(vec2 pos, int radius, int speed) {
-	float z = (float)(m_origin.z + m_viewHeight / (float)FRACUNIT);
+	float z = m_origin.z + m_viewHeight;
 	AimAtPos(vec3(pos.x, pos.y, z));
 
 	vec2 wantDir = (pos - m_origin).normalize();
@@ -484,7 +484,7 @@ vec2 CWootBot::AvoidLedges(AActor* actor, int& cliffDist) {
 			if (dist < 0 && testSec != nav)
 				continue; // can't have fallen off a cliff in a neighbor sector
 
-			ExtendSegment(v1, v2, m_radius >> FRACBITS);
+			ExtendSegment(v1, v2, m_radius);
 
 			if (!PointAlignedSegment(plrPos, v1, v2))
 				continue; // off to the side of this segment
@@ -530,7 +530,7 @@ void CWootBot::UpdatePositionFlags() {
 }
 
 vec3 CWootBot::GetViewPos() {
-	return m_origin + vec3(0, 0, m_viewHeight / FRACUNIT);
+	return m_origin + vec3(0, 0, m_viewHeight);
 }
 
 float CWootBot::GetDistance(vec2 p) {

@@ -138,10 +138,10 @@ vec3 BotGoal::pos() {
 
 int BotGoal::touchDistance(AActor* toucher) {
 	if (h_actor.get()) {
-		return ((get_actor_radius(h_actor.get()) + get_actor_radius(toucher)) >> FRACBITS) - 1; // subtracted 1 unit just in case
+		return (get_actor_radius(h_actor.get()) + get_actor_radius(toucher)) - 1; // subtracted 1 unit just in case
 	}
 	else if (lineid >= 0) {
-		return (get_actor_radius(toucher) >> FRACBITS) + 1; // added 1 in case wall is solid and you can't go inside it
+		return get_actor_radius(toucher) + 1; // added 1 in case wall is solid and you can't go inside it
 	}
 
 	return 0;
@@ -170,7 +170,7 @@ void BotGoal::TestBossBrainShootRay(vec3 brainPos, vec3 rayStart, vec3 rayDir,
 		}
 	}
 
-	float maxDist = (ROCKET_EXPLODE_RADIUS + ROCKET_RADIUS) + (get_actor_radius(h_actor.get()) / (float)FRACUNIT);
+	float maxDist = (ROCKET_EXPLODE_RADIUS + ROCKET_RADIUS) + get_actor_radius(h_actor.get());
 
 	if ((impactPos - brainPos).length() > maxDist) {
 		return; // impact point not close enough to the target to do damage

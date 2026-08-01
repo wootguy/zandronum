@@ -102,7 +102,7 @@ bool LineIntersectsZRange(const vec3& a, const vec3& b, float zMin, float zMax, 
 	float dz = b.z - a.z;
 
 	// Horizontal line
-	const fixed_t eps = 0.001f;
+	const float eps = 0.01f;
 	if (dz < eps) {
 		if (a.z >= zMin && a.z <= zMax) {
 			enter = a;
@@ -422,7 +422,7 @@ int draw_debug_line(vec3 start, vec3 end, AActor* actor) {
 bool TraceRadius(vec3 start, vec3 end, float radius, bool ignoreMonsters, AActor* ignoreEnt, TraceResult* tr) {
 	vec2 dir = (end - start).normalize();
 	vec3 rightDir(dir.y, -dir.x, 0);
-	fixed_t minFrac = 1.0f;
+	float minFrac = 1.0f;
 	int rightStep = radius / 2;
 
 	static TraceResult dummy;

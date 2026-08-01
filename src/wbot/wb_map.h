@@ -1,5 +1,4 @@
 #pragma once
-#include "basictypes.h"
 #include "wb_goal.h"
 #include <unordered_set>
 #include <vector>

@@ -162,7 +162,7 @@ vec2 NavSectorLink::GetJumpEndPos(vec2 targetPos) {
 		vec2 a = line->v1;
 		vec2 b = line->v2;
 		vec2 dir = (b - a).normalize();
-		fixed_t nudgeDist = std::min((b - a).length() / 2, 32.0f);
+		float nudgeDist = std::min((b - a).length() / 2, 32.0f);
 		a += dir * nudgeDist;
 		b -= dir * nudgeDist;
 
@@ -219,7 +219,7 @@ vec2 NavSectorLink::GetJumpBackupPos(vec2 targetPos, AActor* jumper) {
 	// back up the starting position to get a running start for the jump
 	vec2 jumpDir = (endPos - startPos).normalize();
 
-	fixed_t maxBackupDist = GetJumpBackupSpaceNeeded(startPos3D, endPos3D);
+	float maxBackupDist = GetJumpBackupSpaceNeeded(startPos3D, endPos3D);
 	vec2 backupStartPos = startPos - jumpDir; // avoid clipping against the backoff line
 	vec2 backupPos = startPos - jumpDir * maxBackupDist;
 	float startZ = parent->getFloorZ();
@@ -290,7 +290,7 @@ bool NavSector::touches(AActor* actor) {
 	for (int i = 0; i < sub.numsegs; i++) {
 		MapSeg& seg = g_map.segs[sub.firstseg + i];
 
-		if (CircleIntersectsSegment(actorPos, get_actor_radius(actor) / (float)FRACUNIT, seg.v1, seg.v2)) {
+		if (CircleIntersectsSegment(actorPos, get_actor_radius(actor), seg.v1, seg.v2)) {
 			return true;
 		}
 	}
@@ -458,7 +458,7 @@ int SectorNavMesh::get_nav_id(player_t* plr) {
 	
 	if (centeredSub->sector->getFloorZ() + STEP_HEIGHT < pos.z && player_on_ground(plr)) {
 		// above the centered subsector because of hanging over a ledge
-		vec2 floorPoint = GetFloorPosition(pos, get_actor_radius(pActor) / (float)FRACUNIT);
+		vec2 floorPoint = GetFloorPosition(pos, get_actor_radius(pActor));
 		return g_map.GetSubsector(floorPoint.x, floorPoint.y)->id;
 	}
 
@@ -602,7 +602,7 @@ BotRoute SectorNavMesh::get_astar_route(const RouteOpts& opts)
 				const AstarNode& from = astarNodes[current];
 				current = from.cameFromNode;
 				route.cost += from.cameFromCost;
-				route.dist += ((int)from.cameFromDist) >> FRACBITS;
+				route.dist += from.cameFromDist;
 				route.route.push_back(current);
 			}
 			reverse(route.route.begin(), route.route.end());

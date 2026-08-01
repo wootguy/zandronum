@@ -92,7 +92,7 @@ void wbot_debug_player_nav() {
 
 	vec3 forward, right;
 	MakeVectors(get_actor_angle(pActor), forward, right);
-	vec3 start = playerPos + vec3(0, 0, get_player_viewheight(player) / FRACUNIT);
+	vec3 start = playerPos + vec3(0, 0, get_player_viewheight(player));
 	MapSector* sector = g_map.GetSector(start.x, start.y);
 	TraceResult tr;
 	if (TraceLine(start, start + forward * 64, false, pActor, &tr))
@@ -111,7 +111,7 @@ void wbot_debug_player_nav() {
 		}
 		if (tr.actor) {
 			navInfo += string("\nActor ") + get_actor_type_name(tr.actor) + ":";
-			navInfo += "\n   radius: " + to_string(get_actor_radius(tr.actor) >> 16);
+			navInfo += "\n   radius: " + to_string(get_actor_radius(tr.actor));
 		}
 	}
 
@@ -123,7 +123,7 @@ void wbot_debug_player_nav() {
 	int pitch = (int)((uint64_t)get_actor_pitch(pActor) * 360 / 0x100000000ULL);
 	navInfo += "\nAngles: " + to_string(yaw) + " " + to_string(pitch);
 
-	bool isClipped = IsBoxClipped(playerPos, get_actor_radius(pActor) / (float)FRACUNIT, DUCK_HEIGHT);
+	bool isClipped = IsBoxClipped(playerPos, get_actor_radius(pActor), DUCK_HEIGHT);
 	//navInfo += string("\nClipped: ") + (isClipped ? "Yes" : "No");
 
 	print_hud_test(navInfo.c_str(), 0.94f, 0.5f, 1234);

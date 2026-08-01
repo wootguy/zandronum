@@ -3,6 +3,7 @@
 #include "wb_combat.h"
 #include "wb_goal.h"
 #include <unordered_set>
+#include <stdint.h>
 
 struct FTraceResults;
 struct NavSectorLink;
@@ -64,7 +65,7 @@ public:
 	CBotRouteController m_routeController;
 	CBotCombatController m_combatController;
 
-	CWootBot(const char* pszName, const char* pszTeamName, ULONG ulPlayerNum);
+	CWootBot(const char* pszName, const char* pszTeamName, uint32_t ulPlayerNum);
 	~CWootBot() {}
 
 	void Reset(); // clear all memory and restart the bot

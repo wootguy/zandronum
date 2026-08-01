@@ -12,15 +12,15 @@ using namespace wbot;
 BotMapInfo wbot::g_map;
 
 float MapSector::getHeight() {
-	return (get_sector_ceil_z(id) - get_sector_floor_z(id)) / (float)FRACUNIT;
+	return get_sector_ceil_z(id) - get_sector_floor_z(id);
 }
 
 float MapSector::getFloorZ() {
-	return get_sector_floor_z(id) / (float)FRACUNIT;
+	return get_sector_floor_z(id);
 }
 
 float MapSector::getCeilZ() {
-	return get_sector_ceil_z(id) / (float)FRACUNIT;
+	return get_sector_ceil_z(id);
 }
 
 bool MapSector::isMoving() {
@@ -318,7 +318,7 @@ void BotMapInfo::build_subsector(int subid, std::vector<BspClip>& clips,
 	sub.maxs.y += eps;
 }
 
-MapSubsector* BotMapInfo::GetSubsector(fixed_t x, fixed_t y) {
+MapSubsector* BotMapInfo::GetSubsector(int x, int y) {
 	if (numnodes == 0)
 		return subsectors;
 
@@ -353,8 +353,8 @@ std::vector<int> BotMapInfo::GetTouchedSubsectors(AActor* actor) {
 	
 	unordered_set<int> subs;
 
-	int r = get_actor_radius(actor) / FRACUNIT;
-	fixed_t d = (r * 46341) >> FRACBITS; // diagonal radius
+	int r = get_actor_radius(actor);
+	float d = (r * 0.7071f);
 	vec3 pos = get_actor_pos(actor);
 	int x = pos.x;
 	int y = pos.y;
@@ -457,7 +457,7 @@ int BotMapInfo::sector_border_walkability(MapSector* from, MapSector* to) {
 }
 
 std::vector<LinkSeg> BotMapInfo::get_neighbor_subsectors(MapSubsector* rootSub, MapSeg* borderSeg, std::unordered_set<MapSector*>& checkSectors) {
-	const fixed_t epsilonWidth = 2;
+	const float epsilonWidth = 2;
 
 	std::vector<LinkSeg> links;
 

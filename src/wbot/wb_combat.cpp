@@ -82,7 +82,7 @@ void CBotCombatController::Think() {
 	m_targetLastSeenTic = get_game_tics();
 
 	// aim at enemy
-	pBot->AimAtPos(get_actor_pos(targ) + vec3(0, 0, get_actor_height(targ) / 2 * FRACUNIT));
+	pBot->AimAtPos(get_actor_pos(targ) + vec3(0, 0, get_actor_height(targ) / 2));
 
 	pBot->m_forwardMove = 0;
 	pBot->m_sideMove = 0;
